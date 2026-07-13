@@ -49,12 +49,12 @@ The application will run entirely inside Ubuntu under WSL:
 
 ```text
 Ink TUI (TypeScript / Node)
-  owns terminal input, rendering, approvals, and keyboard cancellation
+  owns terminal input, rendering, approval presentation, and keyboard cancellation
             |
             | versioned NDJSON: commands on stdin, events on stdout
             v
 Python harness runtime
-  owns session state, the agent loop, context, policy, tools, and transcripts
+  owns session state, the agent loop, context, policy, approval authority, tools, and transcripts
             |
             +-- provider adapter (OpenAI first)
             +-- workspace reads, staged edits, and approved subprocesses
@@ -65,6 +65,7 @@ Python stderr is reserved for human-readable diagnostics.
 Important boundaries:
 
 - The TUI is a projection of harness events, not the orchestrator or policy authority.
+- The TUI presents approval requests; Python binds decisions to actions and authorizes them.
 - OpenAI SDK objects stay inside the OpenAI provider adapter.
 - Process and model-boundary data is validated with Pydantic v2 in Python and Zod in TypeScript.
 - Native reads may run automatically, while edits and every subprocess require informed approval.
