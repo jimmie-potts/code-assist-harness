@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-020
+- **Lesson:** [One model turn](../docs/lessons/cah-021-one-model-turn.md)
 
 ## User story
 

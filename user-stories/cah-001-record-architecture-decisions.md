@@ -3,6 +3,7 @@
 - **Status:** In progress
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** None
+- **Lesson:** [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md)
 
 ## User story
 

@@ -3,6 +3,7 @@
 - **Status:** In progress
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-001
+- **Lesson:** [Documentation standards](../docs/lessons/cah-008-documentation-standards.md)
 
 ## User story
 
@@ -17,6 +18,7 @@
 - Enable Ruff public-docstring checks for production Python without forcing mechanical test or
   private-helper documentation.
 - Establish the initial conceptual-documentation set and its maintenance rule.
+- Establish one structured learning companion for every implementation-ready user story.
 - Define the required educational metadata for future tools, protocol messages, reducers, and
   non-obvious tests.
 
@@ -42,6 +44,14 @@
 13. The repository documents required sections for every future tool definition: name, purpose,
     input, output, capability, approval, filesystem behavior, subprocess/network behavior, timeout,
     output limit, cancellation, failures, and security considerations.
+14. Every implementation-ready story links to a lesson containing status metadata, a quick summary,
+    learning objectives, why the unit matters, concepts, architecture and design, a practical
+    walkthrough, failure scenarios, production expansion, local-versus-production comparison,
+    trade-offs and graduation signals, practical exercises, key takeaways, a lesson-local glossary,
+    and further reading.
+15. Each production expansion includes a realistic enterprise scenario and three to five
+    representative tools linked to official references, with capabilities and operational costs
+    described without treating those tools as project dependencies.
 
 ## Validation
 
@@ -51,11 +61,14 @@
 - Introduce a temporary local public API without a docstring to verify the configured Ruff rule
   reports it, then discard that temporary change before completing the story.
 - Review documentation examples for fake values and bounded, non-sensitive content.
+- Verify that every implementation-ready story and lesson link has a one-to-one match.
+- Verify each lesson's status follows the documented story-to-lesson status mapping.
 
 ## Documentation impact
 
-Establishes the documentation standard in `AGENTS.md` and the conceptual documents under `docs/`.
-It also defines the documentation-related clauses applied to every later story's definition of done.
+Establishes the documentation standard in `AGENTS.md`, the conceptual documents under `docs/`, and
+the unit lesson library under `docs/lessons/`. It also defines the documentation-related clauses
+applied to every later story's definition of done.
 
 ## Out of scope
 

@@ -23,7 +23,8 @@ The planned TypeScript application belongs in `tui/`, with source in `tui/src/` 
 `tui/test/`. Shared cross-language fixtures belong in `protocol/fixtures/`; do not make either
 language's generated output the unreviewed source of truth during the first implementation.
 Evaluation scenarios belong in `evals/`. Architecture guidance belongs in `docs/`, accepted
-decisions in `docs/adr/`, and dependency-ordered delivery work in `user-stories/`.
+decisions in `docs/adr/`, unit learning companions in `docs/lessons/`, and dependency-ordered
+delivery work in `user-stories/`.
 
 Do not add empty planned directories. Introduce a path with the story that first uses it. Project
 metadata, Python dependencies, and tool settings are defined in `pyproject.toml`; commit `uv.lock`
@@ -113,6 +114,10 @@ Use pytest for Python and the TUI's chosen test runner for TypeScript. Name Pyth
 including at least one meaningful failure path. Unit tests replace model and network interactions
 with deterministic fakes.
 
+Every implementation-ready story, including documentation-only work, must keep its linked lesson
+consistent with the story status and delivered evidence. The additional behavioral checks below
+apply when the story changes executable behavior.
+
 A behavioral story is complete only when:
 
 1. Its happy path and a meaningful failure path are tested.
@@ -123,13 +128,34 @@ A behavioral story is complete only when:
 6. Python linting, formatting, docstring checks, and tests pass.
 7. TypeScript type checking, linting, and tests pass when the TUI is in scope.
 8. Visible TUI changes include a reducer or rendering test.
-9. Relevant conceptual documentation and user-story notes are updated.
+9. The unit lesson is updated with the implemented path, observed trade-offs, and test evidence.
+10. Relevant conceptual documentation and user-story notes are updated.
+
+## Unit Lesson Conventions
+
+Every implementation-ready user story has one learning companion under `docs/lessons/`. The story
+defines what must be delivered; the lesson explains what the unit teaches, why its architecture
+exists, how to study its failure paths, and how a production organization might expand the design.
+
+Follow `docs/lessons/lesson-template.md`. Each lesson includes status metadata, a quick summary,
+learning objectives, why the unit matters, key concepts, architecture and invariants, a practical
+walkthrough, failure scenarios, a production expansion, a direct local-versus-production
+comparison, trade-offs and graduation signals, exercises, key takeaways, a local glossary, and
+further reading.
+
+Production-tool examples are illustrative rather than approved dependencies. Include three to five
+representative tools with official references, describe the capability being compared, and discuss
+operational cost as well as benefit. Keep lesson status honest: planned stories use `Planned`, work
+in progress uses `Implementation companion`, blocked work states its blocker, and completed stories
+use `Verified against implementation`. After a story ships, replace hypothetical paths with
+concrete modules, events, tests, and observations.
 
 ## User Stories and Planning Notes
 
 Use the story identifiers and dependency order in `user-stories/`. A story states its outcome,
-dependencies, scope, acceptance criteria, validation, documentation impact, and exclusions. Keep
-status accurate: documentation of a future capability is not evidence that the capability works.
+dependencies, scope, acceptance criteria, validation, documentation impact, and exclusions, and
+links to its lesson. Keep status accurate: documentation of a future capability is not evidence
+that the capability works.
 
 Record durable implementation discoveries under `user-stories/notes/`. Capture decisions,
 unexpected constraints, failure causes, validation evidence, and follow-up work without turning the

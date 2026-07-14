@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-010, CAH-011
+- **Lesson:** [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md)
 
 ## User story
 

@@ -228,6 +228,12 @@ Google-style docstrings; exported TypeScript contracts use TSDoc. State machines
 semantics, tools, cancellation, and safety boundaries document their invariants and expected
 failures. Comments explain rationale rather than paraphrasing code.
 
+Each implementation-ready story also has a lesson under `docs/lessons/`. Lessons connect the small
+repository design to practical exercises and production alternatives, including the extra
+reliability, security, observability, governance, and operating cost those alternatives introduce.
+Before implementation, a lesson describes planned behavior; story completion replaces that plan
+with concrete implementation and validation evidence.
+
 Tests mirror source responsibilities and use fake providers, temporary workspaces, shared protocol
 fixtures, and fake approval decisions. Behavioral work includes a happy path and a meaningful
 failure path. Python checks include pytest, Ruff linting, formatting, and public-docstring rules.

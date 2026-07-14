@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-001, CAH-008
+- **Lesson:** [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md)
 
 ## User story
 

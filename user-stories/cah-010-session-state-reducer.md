@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M1 - Conversational core / E1 - Session, state, and event model
 - **Dependencies:** CAH-004, CAH-006, CAH-007
+- **Lesson:** [Session state reducer](../docs/lessons/cah-010-session-state-reducer.md)
 
 ## User story
 

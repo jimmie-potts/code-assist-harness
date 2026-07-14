@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-005
+- **Lesson:** [Session cancellation](../docs/lessons/cah-006-session-cancellation.md)
 
 ## User story
 
