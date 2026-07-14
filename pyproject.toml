@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "code-assist-harness"
 version = "0.1.0"
-description = "An agentic coding harness built with Python, LangChain, and OpenAI."
+description = "A learning-first local coding agent with an explicit Python harness core."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

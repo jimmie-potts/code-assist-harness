@@ -1,0 +1,57 @@
+# User stories
+
+This directory is the implementation backlog for Code Assist Harness. The backlog keeps the
+learning-first delivery sequence explicit while preserving the long-term goal of a reusable Python
+harness library.
+
+## How to use this backlog
+
+- Start with the dependency-ordered story list below; do not select a story whose dependencies are
+  incomplete.
+- Treat acceptance criteria as the behavioral contract and the validation section as the minimum
+  evidence required for completion.
+- Update a story's documentation-impact section whenever its behavior changes.
+- Keep provider-backed smoke tests outside default validation. Unit and contract tests must not use
+  the network or a live model.
+- Record newly locked decisions, material implementation discoveries, and unresolved issues in
+  `notes/` so later stories can distinguish accepted constraints from assumptions.
+
+## Status vocabulary
+
+| Status | Meaning |
+| --- | --- |
+| Planned | Scoped but not started. |
+| In progress | Work is underway, but the story has not passed all acceptance criteria and review. |
+| Blocked | Work cannot continue until a named dependency or external decision is resolved. |
+| Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
+
+The current documentation pass advances CAH-001 and CAH-008, but they remain **In progress**:
+removing the rejected LangChain dependencies and enabling Ruff's Google-style public-docstring
+checks are still outstanding. No runtime, protocol, TUI, provider, tool, or agent behavior is
+implemented by this pass.
+
+## Dependency-ordered implementation sequence
+
+| Order | Story | Milestone | Status | Depends on |
+| ---: | --- | --- | --- | --- |
+| 1 | [CAH-001: Record the architecture decisions](cah-001-record-architecture-decisions.md) | M0 | In progress | None |
+| 2 | [CAH-008: Establish educational documentation standards](cah-008-establish-documentation-standards.md) | M0 | In progress | CAH-001 |
+| 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | M0 | Planned | CAH-001, CAH-008 |
+| 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | M0 | Planned | CAH-002 |
+| 5 | [CAH-004: Define protocol version 1](cah-004-define-protocol-v1.md) | M0 | Planned | CAH-003 |
+| 6 | [CAH-005: Stream a mocked session end to end](cah-005-stream-mocked-session.md) | M0 | Planned | CAH-002, CAH-003, CAH-004 |
+| 7 | [CAH-006: Cancel an active session](cah-006-cancel-active-session.md) | M0 | Planned | CAH-005 |
+| 8 | [CAH-009: Document the first end-to-end execution](cah-009-document-walking-skeleton.md) | M0 | Planned | CAH-006 |
+| 9 | [CAH-007: Establish repository-wide checks](cah-007-establish-repository-checks.md) | M0 | Planned | CAH-009 |
+| 10 | [CAH-010: Implement session state as a reducer](cah-010-session-state-reducer.md) | M1 | Planned | CAH-004, CAH-006, CAH-007 |
+| 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | M1 | Planned | CAH-010 |
+| 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | M1 | Planned | CAH-010, CAH-011 |
+| 13 | [CAH-021: Complete one model turn](cah-021-complete-one-model-turn.md) | M1 | Planned | CAH-020 |
+| 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | M1 | Planned | CAH-021 |
+
+See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
+
+## Planning notes
+
+- [2026-07-13 documentation baseline](notes/2026-07-13-documentation-baseline.md) records the
+  decisions locked before implementation and the gaps observed in the initial scaffold.
