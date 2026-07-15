@@ -116,13 +116,17 @@ boundary; durable delivery, flow control, tenancy, retention, and observability 
 These references illustrate capabilities, not vendor endorsements or project dependencies:
 
 - [Apache Kafka](https://kafka.apache.org/documentation/) illustrates durable, partitioned event
-  streaming for high throughput and replay.
+  streaming for high throughput and replay, at the cost of broker capacity, partition and retention
+  planning, schema governance, and on-call ownership.
 - [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream) illustrates persistence, consumer
-  acknowledgements, retention, and replay with a messaging system.
+  acknowledgements, retention, and replay with a messaging system, while cluster sizing, stream
+  configuration, storage, and failure recovery require operations.
 - [AsyncAPI](https://www.asyncapi.com/docs) illustrates machine-readable asynchronous message
-  contracts and generated documentation.
+  contracts and generated documentation, but specifications, generators, and published references
+  must be versioned and kept aligned with implementations.
 - [OpenTelemetry](https://opentelemetry.io/docs/) illustrates traces, metrics, and logs correlated
-  across process or service boundaries.
+  across process or service boundaries, while instrumentation, collector and backend capacity,
+  cardinality control, and privacy review add operational cost.
 
 ### Local design versus production design
 
@@ -176,3 +180,7 @@ See the shared [project glossary](../glossary.md) for session, event, sequence, 
 - [Evaluation strategy](../evaluation.md)
 - [Ink and Python process boundary](../adr/0002-ink-python-process-boundary.md)
 - [Versioned NDJSON decision](../adr/0003-ndjson-protocol.md)
+- [Apache Kafka documentation](https://kafka.apache.org/documentation/)
+- [NATS JetStream documentation](https://docs.nats.io/nats-concepts/jetstream)
+- [AsyncAPI documentation](https://www.asyncapi.com/docs)
+- [OpenTelemetry documentation](https://opentelemetry.io/docs/)

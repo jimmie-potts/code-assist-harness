@@ -2,15 +2,16 @@
 
 - **Unit:** CAH-008
 - **Milestone:** M0 - Walking skeleton
-- **Lesson status:** Implementation companion
-- **Implementation status:** In progress; standards are documented, but Ruff docstring enforcement
-  is not yet configured
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; standards and Ruff docstring enforcement are verified
 - **Story:** [CAH-008](../../user-stories/cah-008-establish-documentation-standards.md)
-- **Related architecture:** [Architecture overview](../architecture.md),
-  [project glossary](../glossary.md), and [agent-loop design](../agent-loop.md)
+- **Related architecture:**
+  [Architecture documentation and testing](../architecture.md#documentation-and-testing),
+  [ADR 0001](../adr/0001-own-the-agent-loop.md), and [repository guidance](../../AGENTS.md)
 
-> This lesson describes an accepted documentation standard and the remaining work to enforce it.
-> It does not claim that future Python APIs, TypeScript exports, tools, or protocol models exist.
+> This lesson is verified against the checked-in Ruff policy, current Python scaffold, and
+> completion evidence. It does not claim that future TypeScript exports, tools, or protocol models
+> exist.
 
 ## Quick summary
 
@@ -84,14 +85,16 @@ The standard's invariants are:
 
 ## Practical walkthrough
 
-1. **Audit the current rule set.** `pyproject.toml` currently selects Ruff `E`, `F`, `I`, and `UP`;
-   it does not yet enforce `D` rules. That is why CAH-008 remains in progress.
-2. **Select public-docstring rules.** Add the applicable `D` family and set the pydocstyle convention
-   to Google. Review each ignored rule; do not begin with a blanket production exemption.
-3. **Exempt tests narrowly.** Use a per-file rule for `tests/**` rather than disabling documentation
-   checks for the package.
-4. **Probe enforcement.** Temporarily add one undocumented public production API, verify Ruff reports
-   it, and remove the probe before completing the story.
+1. **Inspect the implemented rule set.** [`pyproject.toml`](../../pyproject.toml) selects Ruff `D`,
+   `E`, `F`, `I`, and `UP`, then applies the Google pydocstyle convention.
+2. **Observe the enforcement boundary.** The only `D` per-file ignore is `tests/**/*.py`. Production
+   modules have no broad documentation exemption, while Ruff naturally treats underscore-prefixed
+   helpers as private.
+3. **Prove the positive baseline.** The package module docstring passes. The existing undocumented
+   test function also passes because it is under `tests/`, and a temporary trivial private-helper
+   probe passed in production code.
+4. **Probe the failure boundary.** A temporary undocumented public function in the package produced
+   `D103 Missing docstring in public function`; removing it restored a clean lint result.
 5. **Write TSDoc at ownership seams.** A wire event parser should say that input is untrusted and
    validation precedes UI-state reduction. Obvious JSX needs no ceremonial comment.
 6. **Update concepts with behavior.** When a story changes a protocol or safety rule, update the
@@ -100,7 +103,8 @@ The standard's invariants are:
    payloads, home paths, and unbounded outputs.
 
 Keep enforcement proportional. The goal is to make missing contracts visible, not to maximize the
-number of comments.
+number of comments. The exact probe and final command results are recorded in the
+[completion note](../../user-stories/notes/2026-07-15-cah-008-documentation-enforcement.md).
 
 ## Failure scenarios to study
 
@@ -108,7 +112,8 @@ number of comments.
 
 **Symptom:** a new public package API has no docstring. **Boundary:** lint configuration. **Safe
 outcome:** narrow per-file ignores to tests and rerun the temporary negative probe. **Evidence:** the
-probe fails in `src/` and an equivalent helper in `tests/` remains allowed.
+CAH-008 probe failed in `src/` with `D103`, while the existing undocumented test and a temporary
+private helper remained allowed.
 
 ### A conceptual page describes planned code as present
 
@@ -132,12 +137,14 @@ checked for terminology, generated from API contracts, and owned by the same tea
 
 ### Typical production capabilities and tools
 
-- [Ruff pydocstyle rules](https://docs.astral.sh/ruff/rules/#pydocstyle-d) represent fast,
-  mechanically enforced Python docstring coverage.
-- [TSDoc](https://tsdoc.org/) represents a portable syntax contract for TypeScript API comments.
-- [Sphinx](https://www.sphinx-doc.org/en/master/) represents generated, cross-referenced Python API
-  and conceptual documentation.
-- [Vale](https://vale.sh/docs) represents repository-enforced prose terminology and style rules.
+- [Ruff pydocstyle rules](https://docs.astral.sh/ruff/rules/#pydocstyle-d) provide fast, mechanical
+  Python docstring coverage at the cost of maintaining rule selection, exemptions, and upgrades.
+- [TSDoc](https://tsdoc.org/) provides a portable syntax contract for TypeScript API comments, but
+  teams still pay for review or tooling that detects stale and incomplete semantics.
+- [Sphinx](https://www.sphinx-doc.org/en/master/) generates cross-referenced Python API and
+  conceptual documentation while adding build configuration, themes, hosting, and version upkeep.
+- [Vale](https://vale.sh/docs) enforces prose terminology and style rules while requiring a curated
+  rule set, suppression policy, and ongoing false-positive tuning.
 
 These are capability examples, not a recommendation to add a documentation platform to the MVP.
 
@@ -151,6 +158,12 @@ These are capability examples, not a recommendation to add a documentation platf
 | Cost | Low tooling and direct source access | Build pipelines, hosting, taxonomy, and maintenance |
 
 ### Trade-offs and graduation signals
+
+The implemented policy deliberately checks all Google-compatible `D` rules in production rather
+than only missing-docstring rules. That makes formatting and section consistency enforceable, but it
+also makes Ruff upgrades and exception choices part of maintenance. Exempting only tests avoids
+ceremonial test docstrings; review still has to recognize private code whose invariants deserve an
+explanation because lint cannot infer semantic risk.
 
 Generated portals improve discovery and versioning but add build failures, theme upgrades, search
 infrastructure, and publishing ownership. Graduate when repeated support questions, multiple public
@@ -185,6 +198,11 @@ See the shared [project glossary](../glossary.md) for protocol and agent-domain 
 ## Further reading
 
 - [CAH-008 delivery contract](../../user-stories/cah-008-establish-documentation-standards.md)
+- [CAH-008 completion evidence](../../user-stories/notes/2026-07-15-cah-008-documentation-enforcement.md)
+- [Repository documentation rules](../../AGENTS.md#python-style-and-documentation)
+- [Unit lesson maintenance rules](README.md)
 - [Architecture documentation and testing](../architecture.md#documentation-and-testing)
 - [Ruff rule reference](https://docs.astral.sh/ruff/rules/#pydocstyle-d)
 - [TSDoc overview](https://tsdoc.org/)
+- [Sphinx documentation](https://www.sphinx-doc.org/en/master/)
+- [Vale documentation](https://vale.sh/docs)

@@ -125,15 +125,20 @@ testing, partition ownership, and observability around poison events and replay 
 These references illustrate optional capabilities, not recommendations for this MVP:
 
 - [Redux Toolkit](https://redux.js.org/redux-toolkit/overview/) illustrates standardized reducer and
-  immutable-update patterns for complex UI state.
+  immutable-update patterns for complex UI state, while introducing framework conventions,
+  dependency upgrades, integration code, and migration work when state contracts change.
 - [XState](https://stately.ai/docs/xstate) illustrates executable statecharts, guards, visualization,
-  and model-based state-machine structure.
+  and model-based state-machine structure, but teams must absorb its modeling vocabulary, maintain
+  generated or visual artifacts, and govern version and machine migrations.
 - [Temporal](https://docs.temporal.io/workflow-execution) illustrates durable workflow event history
-  and replay across worker failures.
+  and replay across worker failures while adding persistent services, deterministic workflow rules,
+  worker operations, retention, and compatibility management.
 - [Hypothesis stateful testing](https://hypothesis.readthedocs.io/en/latest/stateful.html) illustrates
-  generation of action sequences to discover unexpected state-machine paths.
+  generation of action sequences to discover unexpected state-machine paths, at the cost of strategy
+  design, runtime, shrinking diagnosis, and maintenance of a faithful behavioral model.
 - [OpenTelemetry](https://opentelemetry.io/docs/) illustrates observing transition latency and
-  failures without putting telemetry side effects inside reducers.
+  failures without putting telemetry side effects inside reducers, but requires instrumentation,
+  cardinality controls, storage, dashboards, privacy policy, and an owning operations path.
 
 ### Local design versus production design
 
@@ -187,3 +192,8 @@ See the shared [project glossary](../glossary.md) for reducer, event, session, t
 - [Process protocol](../protocol.md)
 - [Evaluation assertion layers](../evaluation.md)
 - [Project glossary](../glossary.md)
+- [Redux Toolkit](https://redux.js.org/redux-toolkit/overview/)
+- [XState](https://stately.ai/docs/xstate)
+- [Temporal workflow execution](https://docs.temporal.io/workflow-execution)
+- [Hypothesis stateful testing](https://hypothesis.readthedocs.io/en/latest/stateful.html)
+- [OpenTelemetry](https://opentelemetry.io/docs/)

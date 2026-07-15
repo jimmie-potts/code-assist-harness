@@ -120,14 +120,20 @@ These official references illustrate capabilities rather than required or endors
   first adapter's concrete streaming, usage, and tool-call surface. OpenAI's
   [background-mode limits](https://developers.openai.com/api/docs/guides/background#limits)
   distinguish foreground cancellation by terminating the active connection from cancellation of a
-  durable background response; the adapter must map the mode it actually uses.
+  durable background response; the adapter must map the mode it actually uses. Its operational
+  burden includes credential rotation, quota and spend monitoring, API compatibility, and
+  mode-specific cleanup and retention procedures.
 - [Pact](https://docs.pact.io/) illustrates consumer-driven contract tests between independently
-  deployed clients and provider-facing services.
+  deployed clients and provider-facing services. Its operational burden includes running a broker,
+  versioning contracts, verifying providers, and coordinating release gates across teams.
 - [WireMock stubbing](https://wiremock.org/docs/stubbing/) illustrates controlled HTTP behavior for
-  adapter tests that need transport-level responses without a live model service.
+  adapter tests that need transport-level responses without a live model service. Its operational
+  burden includes maintaining representative stubs, preventing fixture drift, and supporting the
+  test service in CI.
 - [OpenTelemetry generative AI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
   illustrate interoperable telemetry fields for model operations while requiring deliberate
-  content and privacy controls.
+  content and privacy controls. Their operational burden includes collector pipelines, convention
+  upgrades, cardinality control, storage cost, and privacy review.
 
 ### Local design versus production design
 

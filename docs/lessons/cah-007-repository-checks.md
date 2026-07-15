@@ -124,15 +124,20 @@ managed software-delivery platform.
 The following illustrate capabilities rather than mandatory choices or endorsements:
 
 - [GitHub Actions](https://docs.github.com/en/actions) illustrates hosted workflow execution,
-  matrices, protected check results, logs, and reusable workflows.
+  matrices, protected check results, logs, and reusable workflows, while requiring runner security,
+  workflow maintenance, cache management, and control of usage and retention costs.
 - [pre-commit](https://pre-commit.com/) illustrates fast developer-side hooks that run selected
-  checks before a commit, complementing rather than replacing CI.
+  checks before a commit, complementing rather than replacing CI; teams must maintain hook versions,
+  local environments, installation guidance, and a policy for bypasses.
 - [Renovate](https://docs.renovatebot.com/) illustrates automated dependency and lockfile update
-  proposals with configurable policy.
+  proposals with configurable policy, at the cost of bot credentials, policy tuning, pull-request
+  noise, and sustained review capacity.
 - [CodeQL](https://docs.github.com/en/code-security/concepts/code-scanning/codeql/codeql-code-scanning)
-  illustrates semantic security analysis and pull-request findings.
+  illustrates semantic security analysis and pull-request findings while adding database builds,
+  analysis time, query maintenance, and specialist triage for findings and false positives.
 - [OpenSSF Scorecard](https://github.com/ossf/scorecard) illustrates automated assessment of
-  repository supply-chain practices.
+  repository supply-chain practices, but its checks require permissions, finding review, exception
+  handling, and policy ownership as repository practices evolve.
 
 ### Local design versus production design
 
@@ -185,3 +190,8 @@ See the shared [project glossary](../glossary.md) for validation command, provid
 - [Evaluation tiers](../evaluation.md)
 - [Architecture testing guidance](../architecture.md)
 - [Repository guidelines](../../AGENTS.md)
+- [GitHub Actions](https://docs.github.com/en/actions)
+- [pre-commit](https://pre-commit.com/)
+- [Renovate](https://docs.renovatebot.com/)
+- [CodeQL](https://docs.github.com/en/code-security/concepts/code-scanning/codeql/codeql-code-scanning)
+- [OpenSSF Scorecard](https://github.com/ossf/scorecard)

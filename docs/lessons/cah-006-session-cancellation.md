@@ -116,15 +116,21 @@ durable intent, compensation policy, and telemetry showing which components actu
 These are representative capabilities, not required dependencies or endorsements:
 
 - [Python asyncio task cancellation](https://docs.python.org/3/library/asyncio-task.html#task-cancellation)
-  documents the local cooperative cancellation primitive used by the planned runtime.
+  documents the local cooperative cancellation primitive used by the planned runtime, but requires
+  disciplined checkpoints, cleanup, and propagation of cancellation rather than accidental
+  suppression.
 - [gRPC cancellation](https://grpc.io/docs/guides/cancellation/) illustrates propagating cancellation
-  across RPC boundaries while handlers still perform cleanup.
+  across RPC boundaries while handlers still perform cleanup; teams must maintain deadline policy,
+  idempotent cleanup, and propagation across every participating service.
 - [Temporal documentation](https://docs.temporal.io/) illustrates durable workflow state, cancellation,
-  retries, and compensation across workers.
+  retries, and compensation across workers while adding a service, persistent history, deterministic
+  workflow constraints, worker operations, and upgrade ownership.
 - [Kubernetes pod termination](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination)
-  illustrates grace periods followed by forced process termination.
+  illustrates grace periods followed by forced process termination, with operational burden in
+  lifecycle hooks, grace-period tuning, process-tree cleanup, and cluster troubleshooting.
 - [OpenTelemetry traces](https://opentelemetry.io/docs/concepts/signals/traces/) illustrate correlating
-  cancellation latency and cleanup across services.
+  cancellation latency and cleanup across services, but require instrumentation, a telemetry backend,
+  retention and cardinality controls, and privacy review.
 
 ### Local design versus production design
 
@@ -177,3 +183,8 @@ See the shared [project glossary](../glossary.md) for cancellation, session, ter
 - [Protocol lifecycle](../protocol.md)
 - [Process-boundary decision](../adr/0002-ink-python-process-boundary.md)
 - [Evaluation scenarios](../evaluation.md)
+- [Python asyncio task cancellation](https://docs.python.org/3/library/asyncio-task.html#task-cancellation)
+- [gRPC cancellation](https://grpc.io/docs/guides/cancellation/)
+- [Temporal documentation](https://docs.temporal.io/)
+- [Kubernetes pod termination](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination)
+- [OpenTelemetry traces](https://opentelemetry.io/docs/concepts/signals/traces/)

@@ -122,12 +122,16 @@ durability and governance guarantees.
 These links illustrate capabilities, not endorsed dependencies:
 
 - [OpenTelemetry Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/)
-  represents a common structured event model for central collection and correlation.
+  represents a common structured event model for central collection and correlation. Its operational
+  burden includes schema governance, collector pipelines, indexing spend, and retention controls.
 - [Amazon S3 Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html)
-  illustrates write-once retention and legal-hold capabilities for immutable archives.
+  illustrates write-once retention and legal-hold capabilities for immutable archives. Its
+  operational burden includes retention-policy administration, extra stored versions, recovery
+  testing, and carefully governed deletion exceptions.
 - [Vault Transit secrets engine](https://developer.hashicorp.com/vault/docs/secrets/transit)
   illustrates centrally governed encryption, signing, and key rotation without storing plaintext
-  application data in the key service.
+  application data in the key service. Its operational burden includes highly available key-service
+  operation, authentication policy, rotation procedures, and latency monitoring.
 
 ### Local design versus production design
 

@@ -27,17 +27,17 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001 is **Done**: the architecture records, active documentation, package metadata, and lockfile
-now agree that the project owns its agent loop. CAH-008 remains **In progress** because Ruff's
-Google-style public-docstring checks are not yet enabled. No runtime, protocol, TUI, provider,
-tool, or agent behavior has been implemented.
+CAH-001 and CAH-008 are **Done**: the architecture baseline, educational documentation standard,
+package metadata, lockfile, and enforced Google-style public-docstring policy now agree. CAH-002 is
+the next dependency-ready unit. No runtime, protocol, TUI, provider, tool, or agent behavior has
+been implemented.
 
 ## Dependency-ordered implementation sequence
 
 | Order | Story | Lesson | Milestone | Status | Depends on |
 | ---: | --- | --- | --- | --- | --- |
 | 1 | [CAH-001: Record the architecture decisions](cah-001-record-architecture-decisions.md) | [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md) | M0 | Done | None |
-| 2 | [CAH-008: Establish educational documentation standards](cah-008-establish-documentation-standards.md) | [Documentation standards](../docs/lessons/cah-008-documentation-standards.md) | M0 | In progress | CAH-001 |
+| 2 | [CAH-008: Establish educational documentation standards](cah-008-establish-documentation-standards.md) | [Documentation standards](../docs/lessons/cah-008-documentation-standards.md) | M0 | Done | CAH-001 |
 | 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md) | M0 | Planned | CAH-001, CAH-008 |
 | 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md) | M0 | Planned | CAH-002 |
 | 5 | [CAH-004: Define protocol version 1](cah-004-define-protocol-v1.md) | [Protocol version 1](../docs/lessons/cah-004-protocol-v1.md) | M0 | Planned | CAH-003 |
@@ -62,3 +62,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-14 CAH-001 dependency cleanup](notes/2026-07-14-cah-001-dependency-cleanup.md) records
   the final dependency decision, validation evidence, and environment issues encountered while
   completing the architecture story.
+- [2026-07-15 CAH-008 documentation enforcement](notes/2026-07-15-cah-008-documentation-enforcement.md)
+  records the Ruff policy, exemption boundary, negative probe, documentation audit, and validation
+  evidence that completed the educational-documentation unit.
