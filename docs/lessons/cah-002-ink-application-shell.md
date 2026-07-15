@@ -8,9 +8,17 @@
 - **Story:** [CAH-002](../../user-stories/cah-002-bootstrap-ink-application.md)
 - **Related architecture:** [ADR 0002](../adr/0002-ink-python-process-boundary.md) and
   [architecture overview](../architecture.md#process-boundary)
+- **Visual companion:** [CAH-002 lesson deck](assets/cah-002-ink-application-shell.pptx)
 
-> This lesson is verified against the implemented TypeScript shell and terminal evidence. It does
-> not claim that a Python child, NDJSON protocol, session, model, workspace, tool, or policy exists.
+> [!IMPORTANT]
+> This lesson is verified against the implemented TypeScript shell, automated tests, and terminal
+> evidence. It does not claim that a Python child, NDJSON protocol, session, model, workspace, tool,
+> or policy exists.
+
+![Concept illustration of the implemented terminal application shell](assets/cah-002-terminal-shell-concept.png)
+
+*Concept illustration—not a screenshot. The layered shell represents the implemented terminal
+frame remaining deliberately disconnected from Python and protocol behavior.*
 
 ## Quick summary
 
@@ -20,6 +28,14 @@ and unsupported versions before npm; a pure TypeScript gate repeats Node validat
 imported. Ink then renders the title, empty conversation, task input, and idle status. Ctrl+C
 unmounts the application and restores the terminal. The shell deliberately performs no task
 submission or harness work.
+
+### The unit in one view
+
+| Established | Made observable | Deferred deliberately |
+| --- | --- | --- |
+| Node 22.22.1 pin and npm lockfile | Actionable WSL startup failures | Python child and NDJSON |
+| TypeScript bootstrap before Ink import | Title, empty conversation, task input, status | Provider and agent loop |
+| Awaited Ink exit lifecycle | Clean `Ctrl+C` terminal restoration | Tools, approvals, and policy |
 
 ## Learning objectives
 
@@ -47,10 +63,10 @@ building both boundaries at once.
 ### Runtime validation precedes renderer loading
 
 [`node-version.ts`](../../tui/src/node-version.ts) contains a pure compatibility check for the
-supported `>=22.13.0 <23` range and the pinned 22.22.1 release. [`bootstrap.ts`](../../tui/src/bootstrap.ts)
-runs that check before invoking an injected dynamic loader. [`cli.ts`](../../tui/src/cli.ts) therefore
-imports `run-application.tsx` only after the runtime is accepted, so an unsupported runtime cannot
-enter Ink's render path.
+supported `>=22.13.0 <23` range and the pinned 22.22.1 release.
+[`bootstrap.ts`](../../tui/src/bootstrap.ts) runs that check before invoking an injected dynamic
+loader. [`cli.ts`](../../tui/src/cli.ts) therefore imports `run-application.tsx` only after the
+runtime is accepted, so an unsupported runtime cannot enter Ink's render path.
 
 ### The launcher owns pre-Node WSL failures
 
@@ -82,17 +98,23 @@ do not hide the contract being tested.
 
 ## Architecture and design
 
-```text
-./scripts/run-tui
-  -> verify Linux Node and npm exist and resolve to Linux executables
-  -> verify Node is >=22.13.0 <23
-  -> npm start with TMPDIR=/tmp
-  -> cli.ts
-  -> bootstrapApplication(process.versions.node)
-       -> pure Node version check
-       -> dynamic import of run-application.tsx
-  -> Ink render(<App />, {exitOnCtrlC: true})
-  -> waitUntilExit()
+```mermaid
+flowchart LR
+    launcher["scripts/run-tui"] --> runtime["Linux Node + npm checks"]
+    runtime --> npm["npm start · TMPDIR=/tmp"]
+    npm --> cli["cli.ts"]
+    cli --> gate["bootstrapApplication"]
+    gate --> version["assertSupportedNodeVersion"]
+    version --> load["dynamic import"]
+    load --> ink["Ink render(App)"]
+    ink --> exit["waitUntilExit"]
+
+    ink -. "not connected in CAH-002" .-> python["Python + NDJSON"]
+
+    classDef implemented fill:#dff3ff,stroke:#3d8dff,color:#111;
+    classDef deferred fill:#f2f2f2,stroke:#8b8b8b,color:#555,stroke-dasharray:5 5;
+    class launcher,runtime,npm,cli,gate,version,load,ink,exit implemented;
+    class python deferred;
 ```
 
 | Concern | Implemented owner | Evidence |
@@ -103,6 +125,29 @@ do not hide the contract being tested.
 | Initial visible frame | `app.tsx` | `app.test.tsx` |
 | Ctrl+C and awaited teardown | `run-application.tsx` | `run-application.test.tsx`, manual PTY check |
 | npm scripts and dependency resolution | `package.json`, `.npmrc`, `package-lock.json` | `npm ci`, `npm run check` |
+
+### Verified terminal composition
+
+The exact borders and spacing remain Ink rendering details. The labels and their semantic order are
+implemented in `app.tsx` and asserted in `app.test.tsx`.
+
+```text
+╭──────────────────────────────────────────────────────────────────────╮
+│ Code Assist Harness                                                  │
+│                                                                      │
+│ Conversation                                                         │
+│ ╭──────────────────────────────────────────────────────────────────╮ │
+│ │ No messages yet.                                                 │ │
+│ ╰──────────────────────────────────────────────────────────────────╯ │
+│                                                                      │
+│ Task input                                                           │
+│ ╭──────────────────────────────────────────────────────────────────╮ │
+│ │ Input is not connected in this static shell.                     │ │
+│ ╰──────────────────────────────────────────────────────────────────╯ │
+│                                                                      │
+│ Status: idle · runtime not connected · Ctrl+C to exit                │
+╰──────────────────────────────────────────────────────────────────────╯
+```
 
 The implemented invariants are:
 
@@ -119,6 +164,15 @@ The implemented invariants are:
   present.
 
 ## Practical walkthrough
+
+```mermaid
+flowchart LR
+    inspect["1. Inspect runtime metadata"] --> launch["2. Trace the WSL launcher"]
+    launch --> gate["3. Follow the bootstrap gate"]
+    gate --> frame["4. Read and test the frame"]
+    frame --> exit["5. Verify awaited exit"]
+    exit --> check["6. Run npm check"]
+```
 
 1. **Inspect the runtime contract.** `.node-version` contains 22.22.1. `package.json` accepts
    `>=22.13.0 <23`, requires npm 9 or newer, and `tui/.npmrc` makes engine mismatches fatal.
@@ -147,40 +201,17 @@ The exact command results and terminal observation are preserved in the
 
 ## Failure scenarios to study
 
-### Node or npm is missing, unsupported, or resolves to Windows
+| Failure | Responsible boundary | Safe outcome | Evidence |
+| --- | --- | --- | --- |
+| Node or npm is missing, unsupported, Windows-hosted, or hidden behind a symlink | `scripts/run-tui` | Exit before npm or Ink with the detected path or version and WSL setup commands | `launcher.test.ts` |
+| A direct CLI caller uses an unsupported runtime | `node-version.ts`, `bootstrap.ts` | Reject the value without importing Ink | Version cases and rejected-loader assertion |
+| Runtime metadata drifts | `.node-version`, package metadata, constants | Fail before publishing an inconsistent setup path | `runtime-metadata.test.ts` |
+| Ctrl+C leaves a damaged prompt | `run-application.tsx` | Let Ink unmount and await `waitUntilExit` | Lifecycle test and manual PTY check |
+| WSL inherits a nonexistent Windows temporary directory | npm start and test scripts | Set `TMPDIR=/tmp` narrowly | Reproduced failure and passing scripts |
 
-**Symptom:** the application cannot reach a reliable Linux runtime, or a Linux-looking symlink hides
-a Windows executable. **Boundary:** `scripts/run-tui`. **Safe outcome:** resolve both Node and npm,
-then exit 1 before npm or Ink with the detected path or version and setup commands. **Evidence:**
-launcher tests cover a missing executable, a fake Node 20 whose fake npm remains uncalled, a Windows
-npm target, and a symlink-hidden Windows Node target.
-
-### The runtime is outside the supported range
-
-**Symptom:** a caller bypasses the repository launcher with a too-old, too-new, or malformed runtime.
-**Boundary:** `node-version.ts` and `bootstrap.ts`. **Safe outcome:** print the detected value,
-supported range, pinned version, and WSL setup action without importing Ink. **Evidence:**
-table-driven version cases and the rejected-loader assertion.
-
-### Runtime metadata drifts
-
-**Symptom:** `.node-version`, `package.json`, and the TypeScript guard disagree. **Boundary:** package
-metadata. **Safe outcome:** the metadata test fails before a contributor publishes an inconsistent
-setup path. **Evidence:** `runtime-metadata.test.ts` reads all three representations.
-
-### Ctrl+C leaves a damaged prompt
-
-**Symptom:** the next shell prompt appears inside a stale Ink frame or the cursor remains hidden.
-**Boundary:** `run-application.tsx`. **Safe outcome:** Ink handles Ctrl+C, unmounts, and resolves
-`waitUntilExit`. **Evidence:** the lifecycle unit test plus a manual pseudo-terminal launch in which
-Ctrl+C returned status 0 and restored the cursor.
-
-### WSL inherits a nonexistent Windows temporary directory
-
-**Symptom:** Vitest or the application fails while creating a temporary file even though the code is
-correct. **Boundary:** npm start and test environment. **Safe outcome:** set `TMPDIR=/tmp` for those
-scripts while leaving unrelated environment data untouched. **Evidence:** the original failure was
-reproduced, and both scripts passed with the Linux path.
+The launcher tests cover a missing executable, a fake Node 20 whose fake npm remains uncalled, a
+Windows npm target, and a Linux-looking Node symlink that hides a Windows executable target. The
+TypeScript tests separately prove malformed, older, and newer runtimes cannot enter the renderer.
 
 ## Production expansion
 
@@ -253,6 +284,8 @@ additional platform and support cost.
 - **Bootstrap gate:** Validation that must succeed before the renderer-owning module is loaded.
 - **Dynamic import seam:** An injectable deferred import that makes module-loading order testable.
 - **Frame:** The current terminal output produced by Ink.
+- **Projection:** UI state derived from behavior owned elsewhere; the TUI displays it but does not
+  become its source of authority.
 - **Render test:** A test that inspects user-visible terminal content without a physical TTY.
 - **Runtime pin:** The exact Node release selected in `.node-version` for reproducible development.
 - **Terminal lifecycle:** Rendering, Ctrl+C handling, unmounting, and restoration before process exit.
@@ -263,6 +296,7 @@ See the shared [project glossary](../glossary.md) for TUI, runtime, event, and p
 
 - [CAH-002 delivery contract](../../user-stories/cah-002-bootstrap-ink-application.md)
 - [CAH-002 completion evidence](../../user-stories/notes/2026-07-15-cah-002-ink-shell.md)
+- [CAH-002 visual lesson deck](assets/cah-002-ink-application-shell.pptx)
 - [ADR 0002: Ink and Python process boundary](../adr/0002-ink-python-process-boundary.md)
 - [Architecture process boundary](../architecture.md#process-boundary)
 - [Ink documentation](https://github.com/vadimdemedes/ink)
