@@ -1,8 +1,16 @@
 import {spawn} from 'node:child_process';
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
-import {existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync} from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {basename, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {describe, expect, it} from 'vitest';
@@ -45,6 +53,7 @@ describe('real Node to uv to Python boundary', () => {
 
       pythonPid = await findRuntimeProcess(uvPid);
       expect(readCommandLine(pythonPid)).toContain('code_assist_harness.runtime');
+      expect(readExecutableName(pythonPid)).toMatch(/^python(?:\d+(?:\.\d+)*)?$/u);
 
       await withTimeout(supervisor.stop(), 5000, 'runtime cleanup did not finish');
 
@@ -63,28 +72,69 @@ describe('real Node to uv to Python boundary', () => {
 
 async function findRuntimeProcess(uvPid: number): Promise<number> {
   const deadline = Date.now() + 5000;
+  let lastObservedProcesses: string[] = [];
   while (Date.now() < deadline) {
-    if (readCommandLine(uvPid).includes('code_assist_harness.runtime')) {
-      return uvPid;
-    }
-
-    const childrenPath = `/proc/${uvPid}/task/${uvPid}/children`;
-    if (existsSync(childrenPath)) {
-      const childPids = readFileSync(childrenPath, 'utf8')
-        .trim()
-        .split(/\s+/u)
-        .filter((value) => value.length > 0)
-        .map(Number);
-      for (const childPid of childPids) {
-        if (readCommandLine(childPid).includes('code_assist_harness.runtime')) {
-          return childPid;
-        }
+    const pending = [uvPid];
+    const visited = new Set<number>();
+    lastObservedProcesses = [];
+    while (pending.length > 0) {
+      const candidatePid = pending.shift();
+      if (candidatePid === undefined || visited.has(candidatePid)) {
+        continue;
       }
-    }
+      visited.add(candidatePid);
+      lastObservedProcesses.push(
+        `${candidatePid}:${readExecutableName(candidatePid)}:${readCommandLine(candidatePid)}`,
+      );
 
+      if (isPythonRuntime(candidatePid)) {
+        return candidatePid;
+      }
+      pending.push(...readChildProcessIds(candidatePid));
+    }
     await delay(10);
   }
-  throw new Error('The uv process never launched the Python runtime module.');
+  throw new Error(
+    `The uv process never launched the Python runtime module. Last observed: ${lastObservedProcesses.join(' | ')}`,
+  );
+}
+
+function isPythonRuntime(pid: number): boolean {
+  return (
+    /^python(?:\d+(?:\.\d+)*)?$/u.test(readExecutableName(pid)) &&
+    readCommandLine(pid).includes('code_assist_harness.runtime')
+  );
+}
+
+function readChildProcessIds(pid: number): number[] {
+  try {
+    const childProcessIds = new Set<number>();
+    for (const threadId of readdirSync(`/proc/${pid}/task`)) {
+      try {
+        const values = readFileSync(`/proc/${pid}/task/${threadId}/children`, 'utf8')
+          .trim()
+          .split(/\s+/u)
+          .filter((value) => value.length > 0)
+          .map(Number);
+        for (const value of values) {
+          childProcessIds.add(value);
+        }
+      } catch {
+        // Threads may exit while their child list is read; the next poll observes current state.
+      }
+    }
+    return [...childProcessIds];
+  } catch {
+    return [];
+  }
+}
+
+function readExecutableName(pid: number): string {
+  try {
+    return basename(readlinkSync(`/proc/${pid}/exe`));
+  } catch {
+    return '';
+  }
 }
 
 function readCommandLine(pid: number): string {

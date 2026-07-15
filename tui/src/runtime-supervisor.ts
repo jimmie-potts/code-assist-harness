@@ -85,6 +85,7 @@ export function buildRuntimeLaunchRequest(
       'run',
       '--project',
       repositoryRoot,
+      '--frozen',
       '--no-cache',
       '--no-sync',
       '--offline',

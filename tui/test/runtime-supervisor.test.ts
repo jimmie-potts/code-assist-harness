@@ -73,6 +73,7 @@ describe('PythonRuntimeSupervisor', () => {
         'run',
         '--project',
         '/repo',
+        '--frozen',
         '--no-cache',
         '--no-sync',
         '--offline',

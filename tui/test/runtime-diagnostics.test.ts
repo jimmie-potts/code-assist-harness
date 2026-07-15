@@ -42,6 +42,17 @@ describe('RuntimeDiagnostics', () => {
     expect(summary).not.toContain('sensitive-value');
   });
 
+  it('redacts a known secret when stderr ends inside its value', () => {
+    const exactEnding = new RuntimeDiagnostics({SERVICE_TOKEN: 'prefix-sensitive-value'});
+    exactEnding.append('failure prefix-sensit');
+
+    const lineEnding = new RuntimeDiagnostics({SERVICE_TOKEN: 'prefix-sensitive-value'});
+    lineEnding.append('failure prefix-sensit\n');
+
+    expect(exactEnding.summary()).toBe('failure [REDACTED]');
+    expect(lineEnding.summary()).toBe('failure [REDACTED]');
+  });
+
   it('redacts distinctive inherited values and complete quoted assignments', () => {
     const diagnostics = new RuntimeDiagnostics({
       CONNECTION_STRING: 'postgres://user:password@database/private',

@@ -67,9 +67,12 @@ export async function runApplication(
     await supervisor.start();
     await application.waitUntilExit();
   } finally {
-    unsubscribeFromTermination();
     unsubscribe();
-    await supervisor.stop();
+    try {
+      await supervisor.stop();
+    } finally {
+      unsubscribeFromTermination();
+    }
   }
 }
 
@@ -88,8 +91,8 @@ function subscribeToProcessTermination(
   const handleHangup = (): void => handle('SIGHUP');
   const handleTermination = (): void => handle('SIGTERM');
 
-  process.once('SIGHUP', handleHangup);
-  process.once('SIGTERM', handleTermination);
+  process.on('SIGHUP', handleHangup);
+  process.on('SIGTERM', handleTermination);
   return () => {
     process.removeListener('SIGHUP', handleHangup);
     process.removeListener('SIGTERM', handleTermination);

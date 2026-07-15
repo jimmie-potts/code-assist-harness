@@ -22,7 +22,7 @@ channels represent the planned parent-child lifetime and stdin, stdout, and stde
 
 This unit makes the Ink parent and Python child behave as one local application. The implementation
 uses a shell-free `uv` argument array, canonical single-workspace selection, typed supervisor
-states, bounded redacted diagnostics, and detached process-group cleanup. Eight Python tests and 41
+states, bounded redacted diagnostics, and detached process-group cleanup. Eight Python tests and 43
 TUI tests verify the boundary without involving a model, network request, or workspace mutation.
 
 ## Learning objectives
@@ -94,7 +94,7 @@ The implemented invariants are:
 `tui/src/runtime-supervisor.ts` builds this exact logical request:
 
 ```text
-uv run --project REPOSITORY_ROOT
+uv run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
 ```
@@ -102,8 +102,8 @@ uv run --project REPOSITORY_ROOT
 Node passes each token separately with `shell: false`, uses the harness repository as `uv`'s
 project and working directory, configures all three streams as pipes, and starts a detached process
 group. The separately resolved workspace may contain spaces because it is one argument rather than
-shell text. The no-sync and offline flags keep launch non-mutating and network-free, which means the
-developer must run `uv sync --dev` before starting the TUI.
+shell text. The frozen, no-sync, and offline flags prevent lockfile updates, environment changes,
+and network access, which means the developer must run `uv sync --dev` before starting the TUI.
 
 The supervisor's local UI state machine is
 `starting -> running -> stopping -> stopped` for requested cleanup. A spawn error instead reaches
@@ -134,19 +134,23 @@ not assert that Python is ready for commands; CAH-004 owns that proof.
    transition.
 6. **Sanitize diagnostics before UI state.** `tui/src/runtime-diagnostics.ts` retains only the last
    4,096 stderr bytes, redacts all sufficiently distinctive inherited environment values plus
-   common and quoted credential assignments, strips terminal controls, normalizes whitespace, and
-   limits the displayed summary to 1,200 characters. Stdout is never an input to that summary.
+   common and quoted credential assignments, including known-secret fragments cut at either tail
+   boundary. It strips terminal controls, normalizes whitespace, and limits the displayed summary
+   to 1,200 characters. Stdout is never an input to that summary.
 7. **Clean up from one `finally` path.** After Ink exits and restores the terminal, or if rendering
    fails before spawn, `runApplication` calls `stop()`. The supervisor closes stdin first, waits for
    normal EOF exit, then sends `SIGTERM` and `SIGKILL` to the detached process group only after
    successive grace periods. Parent `SIGHUP` and `SIGTERM` request an Ink unmount and enter the same
-   path. Repeated stops share one promise, and completion waits for the child `close` event.
+   path. Those signal handlers stay installed until child shutdown settles, while a first-signal
+   guard absorbs repeats. Repeated stops share one promise, and completion waits for `close`.
 8. **Verify both seams.** Controlled `FakeChild` tests force spawn error, unexpected exit, secret
    output, and signal escalation deterministically. `tui/test/runtime-boundary.test.ts` performs the
-   real Node-to-uv-to-Python launch, finds the Python runtime under `/proc`, stops the supervisor,
-   proves both observed PIDs are gone, and confirms the temporary workspace stayed empty.
+   real Node-to-uv-to-Python launch, walks every uv task's descendants under `/proc`, and verifies
+   the match is a Python executable rather than the uv command line echoing its child arguments. It
+   then stops the supervisor, proves both observed PIDs are gone, and confirms the temporary
+   workspace stayed empty.
 
-The completed validation evidence is eight Python tests, including seven runtime tests, and 41 TUI
+The completed validation evidence is eight Python tests, including seven runtime tests, and 43 TUI
 tests across ten files. `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, and
 the TUI type-check, lint, and test scripts pass without a model or live network access.
 
@@ -175,8 +179,9 @@ relative paths with spaces, invalid arguments, files, and missing paths;
 **Safe outcome:** move the UI to visible failure and never treat EOF, or even an unrequested exit
 code zero, as successful completion. **Evidence:** `tui/test/runtime-supervisor.test.ts` injects
 stdout that resembles a future protocol line plus stderr containing a configured secret. The
-failure includes safe stderr context, redacts the secret, excludes stdout, and classifies exit zero
-as unexpected. `tui/test/app.test.tsx` verifies both startup and runtime failures are visible.
+failure includes safe stderr context, redacts full and boundary-truncated secrets, excludes stdout,
+and classifies exit zero as unexpected. `tui/test/app.test.tsx` verifies both startup and runtime
+failures are visible.
 
 ### The TUI exits but Python remains
 
@@ -187,7 +192,8 @@ and proves repeated `stop()` calls share a promise. A regression also sets the u
 before inherited descendant pipes close and proves the process group still receives `SIGTERM`; the
 `close` event, not the leader's exit-code field, is the cleanup guard. The real boundary test
 observes that `uv` may be a wrapper with a separate Python descendant, then proves neither PID
-remains under `/proc` after cleanup.
+remains under `/proc` after cleanup. A lifecycle regression sends a second termination request
+while `stop()` is pending and proves the persistent handler absorbs it until cleanup completes.
 
 ## Production expansion
 
@@ -233,11 +239,12 @@ These references describe capabilities, not required deployment choices for the 
 A scheduler can improve recovery and utilization but adds distributed state, queues, identity,
 network failure, and operational ownership. CAH-003 also exposed three local trade-offs: `uv` can
 remain a wrapper around a separate Python process, so signaling only its PID is insufficient;
-`--no-sync` makes launch deterministic but requires explicit setup; and the spawn event is useful
-for lifecycle state but too weak for protocol readiness. A detached process group, documented
-`uv sync --dev` prerequisite, and deferred CAH-004 handshake address those constraints without
-introducing a daemon or scheduler. Graduate when concurrent demand, remote execution,
-client-disconnect survival, or measured orphan/recovery incidents require those capabilities.
+`--frozen` and `--no-sync` keep the lock and environment unchanged but require explicit setup; and
+the spawn event is useful for lifecycle state but too weak for protocol readiness. A detached
+process group, documented `uv sync --dev` prerequisite, and deferred CAH-004 handshake address
+those constraints without introducing a daemon or scheduler. Graduate when concurrent demand,
+remote execution, client-disconnect survival, or measured orphan/recovery incidents require those
+capabilities.
 
 ## Practical exercises
 

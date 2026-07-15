@@ -1,6 +1,7 @@
 const DEFAULT_BYTE_LIMIT = 4096;
 const DEFAULT_DISPLAY_LIMIT = 1200;
 const REDACTION = '[REDACTED]';
+const MINIMUM_SECRET_FRAGMENT_LENGTH = 4;
 const SECRET_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|AUTH|DSN|DATABASE_URL)/iu;
 const ENVIRONMENT_ASSIGNMENT =
   /\b([A-Z][A-Z0-9_]*)\s*[:=]\s*(?:Bearer\s+[^\s,;]+|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/giu;
@@ -26,7 +27,8 @@ export class RuntimeDiagnostics {
   /**
    * Create a diagnostic collector.
    *
-   * @param environment - Environment whose distinctive or secret-named values must be redacted.
+   * @param environment - Environment whose values of at least eight characters, plus secret-named
+   * values of at least four characters, must be redacted.
    * @param byteLimit - Maximum raw stderr tail retained in memory.
    * @param displayLimit - Maximum sanitized characters returned to the UI.
    */
@@ -70,15 +72,14 @@ export class RuntimeDiagnostics {
    * @returns Safe single-line context, or undefined when stderr contained no useful text.
    */
   public summary(): string | undefined {
-    let text = this.#tail.toString('utf8');
+    let text = this.#tail.toString('utf8').replace(ANSI_SEQUENCE, '').trimEnd();
     text = redactKnownValues(text, this.#secretValues);
     text = text
       .replace(ENVIRONMENT_ASSIGNMENT, (match, name: string) =>
         SECRET_NAME.test(name) ? `${name}=${REDACTION}` : match,
       )
       .replace(BEARER_TOKEN, `Bearer ${REDACTION}`)
-      .replace(OPENAI_STYLE_TOKEN, REDACTION)
-      .replace(ANSI_SEQUENCE, '');
+      .replace(OPENAI_STYLE_TOKEN, REDACTION);
     text = removeControlCharacters(text).replace(/\s+/gu, ' ').trim();
 
     if (text.length === 0) {
@@ -99,10 +100,23 @@ function redactKnownValues(text: string, secretValues: readonly string[]): strin
     redacted = redacted.split(value).join(REDACTION);
 
     // A tail buffer can begin in the middle of a secret. Redact that matching suffix as well.
-    for (let offset = 1; offset <= value.length - 4; offset += 1) {
+    for (let offset = 1; offset <= value.length - MINIMUM_SECRET_FRAGMENT_LENGTH; offset += 1) {
       const suffix = value.slice(offset);
       if (redacted.startsWith(suffix)) {
         redacted = `${REDACTION}${redacted.slice(suffix.length)}`;
+        break;
+      }
+    }
+
+    // stderr can end before a secret is fully written. Redact that leading fragment too.
+    for (
+      let length = value.length - 1;
+      length >= MINIMUM_SECRET_FRAGMENT_LENGTH;
+      length -= 1
+    ) {
+      const prefix = value.slice(0, length);
+      if (redacted.endsWith(prefix)) {
+        redacted = `${redacted.slice(0, -prefix.length)}${REDACTION}`;
         break;
       }
     }

@@ -71,7 +71,7 @@ selects a different single workspace for the process. Multi-root workspaces are 
 CAH-003 implements that launch as one shell-free argument array:
 
 ```text
-uv run --project REPOSITORY_ROOT
+uv run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
 ```
@@ -79,8 +79,8 @@ uv run --project REPOSITORY_ROOT
 The line breaks above are explanatory only; Node passes each token as a separate argument with
 `shell: false`. The harness repository is `uv`'s project and child working directory, while the
 target repository is a distinct, canonical `--workspace` value. Launch therefore cannot resolve
-dependencies, read a project `.env`, download Python, or silently change the selected workspace.
-Developers prepare the locked environment explicitly with `uv sync --dev`.
+dependencies, update `uv.lock`, read a project `.env`, download Python, or silently change the
+selected workspace. Developers prepare the locked environment explicitly with `uv sync --dev`.
 
 The supervisor treats the operating-system spawn event as `running` only for this physical
 boundary. Protocol readiness is not inferred; CAH-004 will replace that temporary boundary with a

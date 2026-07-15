@@ -116,4 +116,78 @@ describe('runApplication', () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(supervisor.stop).toHaveBeenCalledOnce();
   });
+
+  it('keeps process signal handlers installed until child cleanup settles', async () => {
+    const supervisor = createSupervisor();
+    let resolveStop = (): void => undefined;
+    let markStopStarted = (): void => undefined;
+    const stopStarted = new Promise<void>((resolve) => {
+      markStopStarted = resolve;
+    });
+    supervisor.stop.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          markStopStarted();
+          resolveStop = resolve;
+        }),
+    );
+
+    let resolveExit = (): void => undefined;
+    let didUnmount = false;
+    const waitUntilExit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          if (didUnmount) {
+            resolve();
+            return;
+          }
+          resolveExit = resolve;
+        }),
+    );
+    const unmount = vi.fn(() => {
+      didUnmount = true;
+      resolveExit();
+    });
+    const renderApplication = vi.fn<ApplicationRenderer>(() => ({
+      rerender: vi.fn(),
+      unmount,
+      waitUntilExit,
+    }));
+    const previousExitCode = process.exitCode;
+    const on = vi.spyOn(process, 'on');
+    const once = vi.spyOn(process, 'once');
+    const removeListener = vi.spyOn(process, 'removeListener');
+    let signalHandler: (() => void) | undefined;
+
+    try {
+      const running = runApplication(supervisor, renderApplication);
+      signalHandler = on.mock.calls.find(([event]) => event === 'SIGTERM')?.[1] as
+        | (() => void)
+        | undefined;
+      expect(signalHandler).toBeDefined();
+      expect(once).not.toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+
+      signalHandler?.();
+      await stopStarted;
+      expect(removeListener).not.toHaveBeenCalledWith('SIGTERM', signalHandler);
+
+      signalHandler?.();
+      expect(unmount).toHaveBeenCalledOnce();
+      expect(process.exitCode).toBe(143);
+
+      resolveStop();
+      await running;
+
+      expect(removeListener).toHaveBeenCalledWith('SIGTERM', signalHandler);
+      expect(supervisor.stop).toHaveBeenCalledOnce();
+    } finally {
+      if (signalHandler !== undefined) {
+        process.removeListener('SIGTERM', signalHandler);
+      }
+      process.exitCode = previousExitCode;
+      on.mockRestore();
+      once.mockRestore();
+      removeListener.mockRestore();
+    }
+  });
 });

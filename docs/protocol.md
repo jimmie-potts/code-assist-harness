@@ -29,7 +29,7 @@ use a single ordered event writer so concurrent tasks cannot interleave output.
 CAH-003 launches one child with this shell-free argument array:
 
 ```text
-uv run --project REPOSITORY_ROOT
+uv run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
 ```

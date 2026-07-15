@@ -110,9 +110,10 @@ physical process boundary:
 - `tui/src/workspace.ts` resolves either that directory or one `--workspace PATH` to an existing,
   symlink-free directory before spawn;
 - `tui/src/runtime-supervisor.ts` launches `uv` with `shell: false`, three pipes, and a detached
-  process group. Its exact argument array uses `run --project REPOSITORY_ROOT`, then `--no-cache`,
-  `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and `--no-python-downloads`, followed
-  by `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`;
+  process group. Its exact argument array uses `run --project REPOSITORY_ROOT`, then `--frozen`,
+  `--no-cache`, `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and
+  `--no-python-downloads`, followed by
+  `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`;
 - `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
   writes nothing to stdout, and exits cleanly when its stdin pipe reaches EOF;
 - `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, redacts distinctive inherited
