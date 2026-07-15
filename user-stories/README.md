@@ -27,10 +27,11 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001, CAH-008, and CAH-002 are **Done**: the architecture baseline, documentation standard, and
-static Ink shell are implemented and validated. CAH-003 is the next dependency-ready unit. The TUI
-does not yet start Python, and no protocol, provider, workspace, tool, policy, transcript, or agent
-behavior has been implemented.
+CAH-001, CAH-008, CAH-002, and CAH-003 are **Done**: the architecture baseline, documentation
+standard, Ink shell, and supervised Python process boundary are implemented and validated. CAH-004
+is the next dependency-ready unit. The physical stdin/stdout pipes exist, but no NDJSON messages,
+readiness handshake, provider, workspace read, tool, policy, transcript, or agent behavior has been
+implemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -39,7 +40,7 @@ behavior has been implemented.
 | 1 | [CAH-001: Record the architecture decisions](cah-001-record-architecture-decisions.md) | [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md) | M0 | Done | None |
 | 2 | [CAH-008: Establish educational documentation standards](cah-008-establish-documentation-standards.md) | [Documentation standards](../docs/lessons/cah-008-documentation-standards.md) | M0 | Done | CAH-001 |
 | 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md) | M0 | Done | CAH-001, CAH-008 |
-| 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md) | M0 | Planned | CAH-002 |
+| 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md) | M0 | Done | CAH-002 |
 | 5 | [CAH-004: Define protocol version 1](cah-004-define-protocol-v1.md) | [Protocol version 1](../docs/lessons/cah-004-protocol-v1.md) | M0 | Planned | CAH-003 |
 | 6 | [CAH-005: Stream a mocked session end to end](cah-005-stream-mocked-session.md) | [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md) | M0 | Planned | CAH-002, CAH-003, CAH-004 |
 | 7 | [CAH-006: Cancel an active session](cah-006-cancel-active-session.md) | [Session cancellation](../docs/lessons/cah-006-session-cancellation.md) | M0 | Planned | CAH-005 |
@@ -68,3 +69,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-15 CAH-002 Ink shell](notes/2026-07-15-cah-002-ink-shell.md) records the Node and npm
   contract, static shell boundaries, WSL launcher and temporary-directory discovery, test evidence,
   and manual terminal validation.
+- [2026-07-15 CAH-003 Python runtime supervision](notes/2026-07-15-cah-003-python-runtime-supervision.md)
+  records the exact `uv` launch request, workspace and stream contracts, bounded diagnostics,
+  process-group cleanup discovery, and real Node-to-Python boundary evidence.

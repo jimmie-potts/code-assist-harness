@@ -118,4 +118,43 @@ describe('run-tui launcher', () => {
       rmSync(fakePath, {recursive: true, force: true});
     }
   });
+
+  it('preserves the launch directory and forwards a workspace path as one argument', () => {
+    const fakePath = mkdtempSync(join(tmpdir(), 'code-assist-harness-forwarding-'));
+    const launchDirectory = mkdtempSync(join(tmpdir(), 'code-assist-harness-launch-directory-'));
+    const fakeNode = join(fakePath, 'node');
+    const fakeNpm = join(fakePath, 'npm');
+
+    writeFileSync(fakeNode, "#!/bin/sh\nprintf '%s\\n' 'v22.22.1'\n", {mode: 0o755});
+    writeFileSync(
+      fakeNpm,
+      [
+        '#!/bin/sh',
+        'printf \'launch=%s\\n\' "$CODE_ASSIST_LAUNCH_DIRECTORY"',
+        'for argument in "$@"; do',
+        '  printf \'argument=<%s>\\n\' "$argument"',
+        'done',
+        '',
+      ].join('\n'),
+      {mode: 0o755},
+    );
+
+    try {
+      const result = spawnSync(launcherPath, ['--workspace', 'target with spaces'], {
+        cwd: launchDirectory,
+        encoding: 'utf8',
+        env: {PATH: testPath(fakePath)},
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`launch=${launchDirectory}`);
+      expect(result.stdout).toContain('argument=<start>');
+      expect(result.stdout).toContain('argument=<-->');
+      expect(result.stdout).toContain('argument=<--workspace>');
+      expect(result.stdout).toContain('argument=<target with spaces>');
+    } finally {
+      rmSync(fakePath, {recursive: true, force: true});
+      rmSync(launchDirectory, {recursive: true, force: true});
+    }
+  });
 });

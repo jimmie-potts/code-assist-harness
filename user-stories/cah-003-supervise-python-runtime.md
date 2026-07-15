@@ -1,6 +1,6 @@
 # CAH-003 - Start and supervise the Python runtime
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-002
 - **Lesson:** [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md)
@@ -50,8 +50,18 @@ Update architecture and process-boundary documentation with launch arguments, wo
 pipe ownership, startup failure, unexpected exit, and cleanup behavior. Add the developer launch
 command and troubleshooting guidance to the README.
 
+## Completion evidence
+
+The [CAH-003 runtime-supervision note](notes/2026-07-15-cah-003-python-runtime-supervision.md)
+records the exact shell-free `uv` request, canonical workspace contract, stream reservations,
+bounded redacted diagnostics, and EOF-to-process-group cleanup path. Python validation passes all
+eight tests, including seven runtime tests. TUI validation passes 41 tests in ten files, including
+a real Node-to-uv-to-Python boundary test that observes both processes through `/proc` and proves
+both are gone after cleanup. No test invokes a model, uses the network, or mutates the selected
+workspace.
+
 ## Out of scope
 
-- Parsing versioned protocol messages beyond any minimal readiness handshake needed to test process
-  lifetime; CAH-004 owns the protocol contract.
+- Parsing versioned protocol messages or implementing a readiness handshake; CAH-004 owns the
+  protocol contract.
 - Provider calls, transcripts, tools, approvals, or autonomous child restart.

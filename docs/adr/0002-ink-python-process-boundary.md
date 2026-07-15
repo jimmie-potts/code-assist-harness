@@ -53,7 +53,8 @@ guidance rather than obscure syntax or runtime errors.
 - Unexpected child exit moves the TUI to a visible failed state.
 - TUI exit terminates an active child and does not leave terminal-rendering artifacts.
 - `Ctrl+C` has documented cancellation and exit semantics.
-- Child stdout is parsed as protocol data and never displayed as an unstructured log.
+- Child stdout is reserved for protocol data and never displayed as an unstructured log; CAH-003
+  drains it opaquely and CAH-004 owns parsing.
 - Child stderr diagnostics cannot corrupt the protocol stream.
 - A second session may start after a completed first session without restarting the application.
 
@@ -101,10 +102,28 @@ test matrix before the core architecture is proven.
 
 ## Implementation status
 
-This remains the accepted target process decision. CAH-002 now implements the static terminal side:
-`scripts/run-tui` resolves both Node and npm executable paths, rejects Windows binaries even behind
-symlinks, and rejects unsupported Node versions before npm. `tui/src/bootstrap.ts` repeats the Node
-validation before dynamically loading Ink, `tui/src/app.tsx` renders the initial shell, and
-`tui/src/run-application.tsx` enables Ink's Ctrl+C exit and awaits terminal cleanup. The repository
-pins Node 22.22.1 and enforces `>=22.13.0 <23` through npm metadata. No Python runtime entry point or
-child process exists yet; CAH-003 owns startup, supervision, failure handling, and child cleanup.
+CAH-002 implements terminal ownership and WSL runtime validation. CAH-003 now implements the
+physical process boundary:
+
+- `scripts/run-tui` preserves the canonical caller directory and forwards arguments without
+  combining them into a shell string;
+- `tui/src/workspace.ts` resolves either that directory or one `--workspace PATH` to an existing,
+  symlink-free directory before spawn;
+- `tui/src/runtime-supervisor.ts` launches `uv` with `shell: false`, three pipes, and a detached
+  process group. Its exact argument array uses `run --project REPOSITORY_ROOT`, then `--no-cache`,
+  `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and `--no-python-downloads`, followed
+  by `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`;
+- `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
+  writes nothing to stdout, and exits cleanly when its stdin pipe reaches EOF;
+- `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, redacts distinctive inherited
+  environment values plus credential-shaped assignments, strips terminal controls, and bounds the
+  visible summary again; and
+- after Ink exits and restores the terminal, `tui/src/run-application.tsx` closes stdin, escalates
+  to `SIGTERM` and `SIGKILL` for the detached uv/Python process group when necessary, and waits for
+  `close` before cleanup is complete. Parent `SIGHUP` and `SIGTERM` first request an Ink unmount so
+  they enter that same cleanup path.
+
+An operating-system spawn currently moves the display to `running`; it is not evidence that Python
+accepted a protocol command. Any unrequested close, even with exit code zero, produces a visible
+failed state, and the supervisor does not restart the child. Protocol versioning, readiness,
+command parsing, and event validation remain CAH-004 work.

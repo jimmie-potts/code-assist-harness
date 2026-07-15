@@ -1,6 +1,7 @@
 # Process Protocol
 
-> Status: proposed design. The repository does not yet implement this protocol.
+> Status: CAH-003 implements the physical pipes and process supervision. Versioned messages,
+> readiness, parsing, validation, and the catalogs below remain proposed for CAH-004.
 
 The Ink TUI and Python harness will communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -14,13 +15,46 @@ terminal, one local child process owns the harness, and messages flow over stand
 | `stdout` | Python to Ink | Events, one JSON object per line |
 | `stderr` | Python to terminal diagnostics | Human-readable diagnostics and tracebacks |
 
-Ink owns keyboard input, rendering, and child-process supervision. Python owns session
+Ink owns keyboard input, rendering, and child-process supervision. Python will own session
 orchestration, policy, provider calls, tool execution, and the authoritative event stream. The TUI
-reduces events into visible state; it must not infer permission or agent-loop decisions.
+will reduce validated events into visible state; it must not infer permission or agent-loop
+decisions.
 
 Protocol stdout is a machine interface. Debug prints, logging, progress bars, and tracebacks must
 never be written there because a single non-JSON line can desynchronize the parent. Python should
 use a single ordered event writer so concurrent tasks cannot interleave output.
+
+## Implemented physical boundary
+
+CAH-003 launches one child with this shell-free argument array:
+
+```text
+uv run --project REPOSITORY_ROOT
+  --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
+  -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
+```
+
+Node supplies each displayed token separately with `shell: false` and configures stdin, stdout,
+and stderr as pipes. `REPOSITORY_ROOT` identifies the harness project for `uv`; the separately
+resolved `CANONICAL_WORKSPACE` identifies the one future target repository. The launch directory is
+the default workspace, and `--workspace PATH` selects an override relative to that launch directory
+before both Node and Python canonicalize and validate it.
+
+No line has protocol meaning yet. `src/code_assist_harness/runtime.py` drains and discards stdin
+until EOF and emits no stdout. `tui/src/runtime-supervisor.ts` drains and discards stdout rather
+than displaying or parsing it. stderr is collected separately by
+`tui/src/runtime-diagnostics.ts`, which retains a bounded byte tail, removes terminal controls,
+redacts distinctive inherited environment values and credential-shaped assignments, and imposes a
+second display bound before failure text enters TUI state.
+
+The Node spawn event is CAH-003's temporary `running` transition; it is not a readiness handshake.
+Any child close before requested shutdown, including exit code zero, is shown as an unexpected
+runtime failure. During requested shutdown the parent closes stdin, allowing the minimal runtime to
+exit on EOF, then escalates to `SIGTERM` and `SIGKILL` for the detached uv/Python process group only
+when needed. Cleanup settles after the child `close` event. CAH-004 must replace the temporary
+spawn boundary with the validated `runtime.ready` contract and add the first meaningful stdin and
+stdout lines. Parent `SIGHUP` and `SIGTERM` request Ink unmount so external terminal shutdown uses
+the same child cleanup path instead of abandoning the detached process group.
 
 ## Framing and envelope
 
@@ -117,8 +151,8 @@ state. An unknown event type must not crash the TUI.
 
 ## Lifecycle and cancellation
 
-The MVP supports one workspace per runtime process and at most one active session. A normal mocked
-session is expected to follow this order:
+The target MVP supports one workspace per runtime process and at most one active session. After
+CAH-004 and CAH-005, a normal mocked session is expected to follow this order:
 
 ```text
 Ink                      Python
@@ -137,10 +171,10 @@ Python cancels active work, and Python emits exactly one terminal session event.
 the race before cancellation was processed, the existing completion remains authoritative.
 Repeated cancellation must be harmless.
 
-On `runtime.shutdown`, Python stops accepting new work, cancels or finishes active work according
-to the shutdown contract, flushes validated events and transcripts, and exits. If the child exits
-unexpectedly, Ink enters a visible failed state instead of treating end-of-file as successful
-completion.
+When `runtime.shutdown` is implemented, Python will stop accepting new work, cancel or finish active
+work according to the shutdown contract, flush validated events and transcripts, and exit. Today,
+CAH-003 shutdown closes stdin and the minimal runtime exits on EOF. If the child exits unexpectedly,
+Ink already enters a visible failed state instead of treating end-of-file as successful completion.
 
 ## Compatibility rules
 
