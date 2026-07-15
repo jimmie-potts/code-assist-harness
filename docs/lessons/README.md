@@ -27,7 +27,7 @@ capability it represents so the lesson remains useful if the vendor changes.
 
 | Order | Unit | Lesson | Story status |
 | ---: | --- | --- | --- |
-| 1 | CAH-001 | [Architecture decisions](cah-001-architecture-decisions.md) | In progress |
+| 1 | CAH-001 | [Architecture decisions](cah-001-architecture-decisions.md) | Done |
 | 2 | CAH-008 | [Educational documentation standards](cah-008-documentation-standards.md) | In progress |
 | 3 | CAH-002 | [Ink application shell](cah-002-ink-application-shell.md) | Planned |
 | 4 | CAH-003 | [Python runtime supervision](cah-003-python-runtime-supervision.md) | Planned |

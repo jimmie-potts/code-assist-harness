@@ -8,10 +8,7 @@ version = "0.1.0"
 description = "A learning-first local coding agent with an explicit Python harness core."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "langchain",
-    "langchain-openai",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [

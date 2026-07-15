@@ -2,17 +2,17 @@
 
 - **Unit:** CAH-001
 - **Milestone:** M0 - Walking skeleton
-- **Lesson status:** Implementation companion
-- **Implementation status:** In progress; the documentation baseline exists, but dependency cleanup
-  and final validation remain
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; architecture records, dependency cleanup, and validation are
+  complete
 - **Story:** [CAH-001](../../user-stories/cah-001-record-architecture-decisions.md)
 - **Related architecture:** [Architecture overview](../architecture.md),
   [ADR 0001](../adr/0001-own-the-agent-loop.md), and
   [ADR 0002](../adr/0002-ink-python-process-boundary.md)
 
-> The ADRs are accepted design. The repository currently contains a minimal Python scaffold and
-> documentation, not the planned TUI, runtime, protocol, or agent loop. This lesson distinguishes
-> those states deliberately.
+> The ADRs are accepted design, and this lesson is verified against the current package metadata,
+> lockfile, and documentation. The repository still contains only a minimal Python scaffold rather
+> than the planned TUI, runtime, protocol, or agent loop.
 
 ## Quick summary
 
@@ -94,16 +94,19 @@ The accepted invariants are:
    and persistence, name one authoritative owner.
 4. **Record the decisions.** Read ADRs 0001 through 0005 as a set. Check that each contains context,
    consequences, alternatives, and an implementation-status caveat.
-5. **Align active surfaces.** Update README, package description, contributor guidance, and the
-   glossary. Remove unused LangChain dependencies and refresh `uv.lock`; do not add OpenAI yet.
+5. **Align active surfaces.** The README, package description, contributor guidance, and glossary
+   now agree with the ADRs. `uv remove langchain langchain-openai` removed the unused framework
+   packages and regenerated `uv.lock` without adding a provider SDK.
 6. **Prove scope discipline.** Confirm no TUI, runtime, model, protocol, tool, or subprocess behavior
    was introduced by this documentation-and-cleanup story.
 7. **Validate consistency.** Run the commands in the story, search for active contradictory claims,
    and compare every ADR with the baseline note.
 
-At the current checkpoint, the ADR and conceptual-document set exists. The LangChain packages still
-appear in `pyproject.toml`, so CAH-001 remains in progress until removal, lock refresh, and validation
-are complete.
+CAH-001 is complete. `pyproject.toml` has an empty runtime dependency list, while `uv.lock` contains
+only the local project and its development-check dependencies. The lock, test, Ruff, formatting,
+build, whitespace, and active-claim checks passed without adding runtime behavior. The detailed
+commands and environment observations are preserved in the
+[completion note](../../user-stories/notes/2026-07-14-cah-001-dependency-cleanup.md).
 
 ## Failure scenarios to study
 
