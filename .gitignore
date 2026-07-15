@@ -18,6 +18,11 @@ htmlcov/
 build/
 dist/
 
+# Node caches and build output
+node_modules/
+coverage/
+
+
 # Editors and operating systems
 .idea/
 .vscode/

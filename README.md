@@ -10,18 +10,19 @@ harness library.
 
 ## Current status
 
-The repository is at the architecture and backlog stage. It currently contains a minimal Python
-package and development checks; it does **not** yet contain the Ink TUI, Python runtime, agent loop,
-workspace tools, or an OpenAI integration. The first implementation milestone is a model-free
-walking skeleton that streams a mocked session across the real Node-Python process boundary.
+The repository now contains a minimal Python package and a launchable static Ink/TypeScript shell.
+The shell renders the conversation-first frame, validates its WSL Node runtime before loading Ink,
+and exits cleanly on Ctrl+C. It does **not** yet start Python, define the NDJSON protocol, run an
+agent loop, access a workspace, or integrate with OpenAI. The next unit, CAH-003, adds Python child
+startup and supervision without adding model behavior.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
 core domain types must not depend on it.
 
-The superseded LangChain packages have been removed from project metadata and the lockfile. The
-runtime dependency set is intentionally empty until a concrete provider or process-boundary story
-introduces a package that the implementation needs.
+The superseded LangChain packages have been removed from Python project metadata and `uv.lock`.
+Python runtime dependencies remain empty. The TUI's Ink, React, and development dependencies are
+kept separately in `tui/package.json` and its committed npm lockfile.
 
 Start with the [architecture overview](docs/architecture.md), the
 [decision records](docs/adr/), and the [dependency-ordered backlog](user-stories/README.md).
@@ -79,8 +80,8 @@ See [architecture.md](docs/architecture.md) for the complete target structure an
 - Ubuntu under WSL
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
-- Node and npm once the Ink shell is introduced by CAH-002; that story will add a repository Node
-  version pin and `package-lock.json`
+- Node 22.22.1, pinned in `.node-version`; the enforced TUI range is `>=22.13.0 <23`
+- npm 9 or newer
 
 An OpenAI API key is not needed for the walking skeleton or default tests. A future live-provider
 adapter will read `OPENAI_API_KEY` from the environment; credentials and `.env` files must never be
@@ -88,13 +89,25 @@ committed.
 
 ## Current setup and checks
 
-Install the current Python scaffold:
+Install the Python scaffold and the locked TUI dependencies:
 
 ```bash
 uv sync --dev
+npm --prefix tui ci
 ```
 
-Run its tests, lint checks, formatting check, and build:
+Launch the static shell from the repository root inside Ubuntu WSL:
+
+```bash
+./scripts/run-tui
+```
+
+The launcher reports actionable setup guidance when Node or npm is missing, rejects a Windows Node
+executable reached through WSL, and checks the supported Node range before npm or the TypeScript
+loader runs. The initial shell is intentionally not connected to Python or task submission. Press
+Ctrl+C to let Ink unmount and restore the terminal.
+
+Run the current Python checks and build:
 
 ```bash
 uv run pytest
@@ -103,25 +116,38 @@ uv run ruff format --check .
 uv build
 ```
 
+Run the TUI checks individually or together:
+
+```bash
+npm --prefix tui run typecheck
+npm --prefix tui run lint
+npm --prefix tui test
+npm --prefix tui run check
+```
+
+The TUI start and test scripts set `TMPDIR=/tmp`. This avoids a WSL environment failure observed
+when inherited `TEMP` and `TMP` values named a missing Windows directory. The checks use installed
+local packages and do not require a model, credentials, or network access.
+
 CAH-007 will add one repository-wide command covering Python, TypeScript, protocol-contract, and
 integration checks without making network requests.
 
-## Planned project layout
+## Current and planned project layout
 
 ```text
-src/code_assist_harness/  Python harness core and runtime
-tests/                    Python tests mirroring source modules
-tui/                      Ink application and TypeScript tests
-protocol/                 Shared NDJSON fixtures
-evals/                    Deterministic scenario fixtures
+src/code_assist_harness/  Current minimal Python package; future harness core and runtime
+tests/                    Current Python tests mirroring source modules
+tui/                      Current static Ink application, npm metadata, and TypeScript tests
+scripts/run-tui           Current WSL-aware TUI launcher
+protocol/                 Planned shared NDJSON fixtures
+evals/                    Planned deterministic scenario fixtures
 docs/                     Architecture and learning documentation
 docs/lessons/             Unit-by-unit learning companions
 user-stories/             Roadmap, implementation stories, and planning notes
-scripts/                  Development and validation entry points
 ```
 
-Only the Python scaffold, documentation, and backlog exist today. Planned paths are introduced by
-the user story that needs them rather than as empty placeholders.
+The Python scaffold, static TUI, documentation, and backlog exist today. Protocol, evaluation,
+provider, tool, and agent paths remain planned and are introduced only by the story that needs them.
 
 ## Documentation map
 

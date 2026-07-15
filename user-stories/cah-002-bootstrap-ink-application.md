@@ -1,6 +1,6 @@
 # CAH-002 - Bootstrap the Ink application
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-001, CAH-008
 - **Lesson:** [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md)
@@ -47,6 +47,14 @@
 Update the README prerequisites, setup, launch command, project layout, and TUI test commands.
 Document terminal ownership, static shell responsibilities, Node pinning, and the initial keyboard
 contract.
+
+## Completion evidence
+
+The [CAH-002 Ink-shell note](notes/2026-07-15-cah-002-ink-shell.md) records the runtime contract,
+implemented modules, WSL launcher, six test files with 15 passing tests, manual pseudo-terminal
+launch and Ctrl+C evidence, and the `TMPDIR=/tmp` environment discovery. The completed unit renders
+only a static shell; it introduces no Python child, protocol, provider, workspace, tool, policy, or
+approval behavior.
 
 ## Out of scope
 
