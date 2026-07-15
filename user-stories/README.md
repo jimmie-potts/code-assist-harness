@@ -27,10 +27,10 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001 and CAH-008 are **Done**: the architecture baseline, educational documentation standard,
-package metadata, lockfile, and enforced Google-style public-docstring policy now agree. CAH-002 is
-the next dependency-ready unit. No runtime, protocol, TUI, provider, tool, or agent behavior has
-been implemented.
+CAH-001, CAH-008, and CAH-002 are **Done**: the architecture baseline, documentation standard, and
+static Ink shell are implemented and validated. CAH-003 is the next dependency-ready unit. The TUI
+does not yet start Python, and no protocol, provider, workspace, tool, policy, transcript, or agent
+behavior has been implemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -38,7 +38,7 @@ been implemented.
 | ---: | --- | --- | --- | --- | --- |
 | 1 | [CAH-001: Record the architecture decisions](cah-001-record-architecture-decisions.md) | [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md) | M0 | Done | None |
 | 2 | [CAH-008: Establish educational documentation standards](cah-008-establish-documentation-standards.md) | [Documentation standards](../docs/lessons/cah-008-documentation-standards.md) | M0 | Done | CAH-001 |
-| 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md) | M0 | Planned | CAH-001, CAH-008 |
+| 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md) | M0 | Done | CAH-001, CAH-008 |
 | 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md) | M0 | Planned | CAH-002 |
 | 5 | [CAH-004: Define protocol version 1](cah-004-define-protocol-v1.md) | [Protocol version 1](../docs/lessons/cah-004-protocol-v1.md) | M0 | Planned | CAH-003 |
 | 6 | [CAH-005: Stream a mocked session end to end](cah-005-stream-mocked-session.md) | [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md) | M0 | Planned | CAH-002, CAH-003, CAH-004 |
@@ -65,3 +65,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-15 CAH-008 documentation enforcement](notes/2026-07-15-cah-008-documentation-enforcement.md)
   records the Ruff policy, exemption boundary, negative probe, documentation audit, and validation
   evidence that completed the educational-documentation unit.
+- [2026-07-15 CAH-002 Ink shell](notes/2026-07-15-cah-002-ink-shell.md) records the Node and npm
+  contract, static shell boundaries, WSL launcher and temporary-directory discovery, test evidence,
+  and manual terminal validation.
