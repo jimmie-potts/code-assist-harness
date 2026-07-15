@@ -1,0 +1,33 @@
+{
+  "name": "@code-assist-harness/tui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ink terminal interface for Code Assist Harness",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0 <23",
+    "npm": ">=9"
+  },
+  "scripts": {
+    "start": "TMPDIR=/tmp node --import=tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test --max-warnings=0",
+    "test": "TMPDIR=/tmp vitest run",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "dependencies": {
+    "ink": "7.1.0",
+    "react": "19.2.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "eslint": "10.7.0",
+    "ink-testing-library": "4.0.0",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

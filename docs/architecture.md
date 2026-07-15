@@ -16,11 +16,11 @@ The repository began as a small Python 3.12 source-layout scaffold with one pack
 pytest, Ruff, `uv`, and LangChain dependencies. It did not contain an agent, model call, TUI,
 protocol, tool, or executor implementation.
 
-The accepted architecture supersedes the scaffold's description of LangChain as the project's
-foundation. The project will own its agent loop directly. LangChain may be added later as an
-adapter, but no core domain type or orchestration decision may depend on it. Until the related
-stories are implemented, references below to the TUI, runtime, protocol, and subsystems are target
-architecture rather than shipped behavior.
+CAH-001 superseded the scaffold's description of LangChain as the project's foundation. CAH-002 has
+since added the npm-managed static Ink shell under `tui/`, the WSL-aware `scripts/run-tui` launcher,
+the Node 22.22.1 pin, and TypeScript checks. The shell does not start Python or implement protocol,
+provider, tool, workspace, policy, transcript, or agent behavior. References below to those later
+subsystems remain target architecture rather than shipped behavior.
 
 ## Product boundary
 
@@ -68,9 +68,9 @@ Both processes run inside Ubuntu under WSL and use Linux paths. The Ink process 
 and starts Python through `uv`. The current directory is the default workspace; `--workspace PATH`
 selects a different single workspace for the process. Multi-root workspaces are out of scope.
 
-The Node project uses npm, commits `package-lock.json`, and pins a Node version compatible with
-Ink. Python remains at version 3.12 and is managed with `uv`; dependency-resolution changes commit
-`uv.lock`.
+The implemented Node project uses npm, commits `package-lock.json`, pins Node 22.22.1, and enforces
+the Ink-compatible range `>=22.13.0 <23`. Python remains at version 3.12 and is managed with `uv`;
+dependency-resolution changes commit `uv.lock`.
 
 ## Ownership
 
@@ -104,19 +104,26 @@ src/code_assist_harness/
 └── persistence/       Append-only transcripts and redaction
 ```
 
-The target TypeScript project keeps protocol validation and state reduction separate from Ink
-components:
+The implemented CAH-002 TypeScript shell is deliberately smaller than the target project:
 
 ```text
 tui/
 ├── src/
-│   ├── cli.tsx
+│   ├── cli.ts
+│   ├── bootstrap.ts
+│   ├── node-version.ts
+│   ├── run-application.tsx
 │   ├── app.tsx
-│   ├── protocol/
-│   ├── state/
-│   └── components/
-└── test/
+│   └── (protocol and state modules arrive in later stories)
+└── test/              Render, bootstrap, launcher, runtime, and lifecycle tests
 ```
+
+`scripts/run-tui` resolves and validates both the Node and npm executable paths, rejecting Windows
+paths even when a Linux-looking symlink hides them, then rejects unsupported Node versions before
+npm and its TypeScript loader run. `cli.ts` repeats the version validation through the pure
+bootstrap before dynamically importing the Ink-owning `run-application.tsx` module. These checks
+keep unsupported runtimes outside the renderer. Later TypeScript stories add protocol validation
+and state reduction separately from components; empty planned directories are not created early.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. Schema generation is deferred until contract drift

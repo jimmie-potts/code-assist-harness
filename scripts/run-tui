@@ -1,0 +1,98 @@
+#!/bin/sh
+
+set -eu
+
+if ! command -v node >/dev/null 2>&1; then
+    printf '%s\n' \
+        'Code Assist Harness cannot start because Node.js was not found inside Ubuntu WSL.' \
+        'Install Node.js 22.22.1 (the version pinned in .node-version), then run:' \
+        '  npm --prefix tui ci' \
+        '  ./scripts/run-tui' >&2
+    exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+    printf '%s\n' \
+        'Code Assist Harness cannot start because npm was not found inside Ubuntu WSL.' \
+        'Install npm for the Node.js version pinned in .node-version, then run:' \
+        '  npm --prefix tui ci' \
+        '  ./scripts/run-tui' >&2
+    exit 1
+fi
+
+validate_linux_tool() {
+    tool_name=$1
+    tool_path=$2
+    setup_guidance=$3
+
+    case "$tool_path" in
+        /mnt/* | *.exe)
+            printf '%s\n' \
+                "Code Assist Harness found a Windows $tool_name executable at $tool_path." \
+                "$setup_guidance" >&2
+            exit 1
+            ;;
+    esac
+
+    if ! resolved_tool_path=$(readlink -f -- "$tool_path" 2>/dev/null); then
+        printf '%s\n' \
+            "Code Assist Harness cannot resolve the $tool_name executable at $tool_path." \
+            "$setup_guidance" >&2
+        exit 1
+    fi
+
+    case "$resolved_tool_path" in
+        /mnt/* | *.exe)
+            printf '%s\n' \
+                "Code Assist Harness found a Windows $tool_name executable at $resolved_tool_path." \
+                "$setup_guidance" >&2
+            exit 1
+            ;;
+    esac
+}
+
+node_path=$(command -v node)
+npm_path=$(command -v npm)
+validate_linux_tool \
+    'Node.js' \
+    "$node_path" \
+    'Install and select Node.js 22.22.1 inside Ubuntu WSL, then retry.'
+validate_linux_tool \
+    'npm' \
+    "$npm_path" \
+    'Install npm for Node.js 22.22.1 inside Ubuntu WSL, then retry.'
+
+if ! node_version=$("$node_path" --version 2>/dev/null); then
+    node_version='not detected'
+fi
+
+normalized_version=${node_version#v}
+major=${normalized_version%%.*}
+minor_and_patch=${normalized_version#*.}
+minor=${minor_and_patch%%.*}
+patch=${minor_and_patch#*.}
+
+version_is_numeric=true
+if [ "$minor_and_patch" = "$normalized_version" ] || [ "$patch" = "$minor_and_patch" ]; then
+    version_is_numeric=false
+fi
+for version_part in "$major" "$minor" "$patch"; do
+    case "$version_part" in
+        '' | *[!0-9]*) version_is_numeric=false ;;
+    esac
+done
+
+if [ "$version_is_numeric" != true ] || [ "$major" -ne 22 ] || [ "$minor" -lt 13 ]; then
+    printf '%s\n' \
+        "Code Assist Harness cannot start with Node.js $node_version." \
+        'Required: Node.js >=22.13.0 <23 (pinned: 22.22.1).' \
+        'Install or select the pinned version inside Ubuntu WSL, then run:' \
+        '  npm --prefix tui ci' \
+        '  ./scripts/run-tui' >&2
+    exit 1
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+exec "$npm_path" --prefix "$repository_root/tui" start
