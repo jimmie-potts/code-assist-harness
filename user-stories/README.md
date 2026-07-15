@@ -27,16 +27,16 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-The current documentation pass advances CAH-001 and CAH-008, but they remain **In progress**:
-removing the rejected LangChain dependencies and enabling Ruff's Google-style public-docstring
-checks are still outstanding. No runtime, protocol, TUI, provider, tool, or agent behavior is
-implemented by this pass.
+CAH-001 is **Done**: the architecture records, active documentation, package metadata, and lockfile
+now agree that the project owns its agent loop. CAH-008 remains **In progress** because Ruff's
+Google-style public-docstring checks are not yet enabled. No runtime, protocol, TUI, provider,
+tool, or agent behavior has been implemented.
 
 ## Dependency-ordered implementation sequence
 
 | Order | Story | Lesson | Milestone | Status | Depends on |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | [CAH-001: Record the architecture decisions](cah-001-record-architecture-decisions.md) | [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md) | M0 | In progress | None |
+| 1 | [CAH-001: Record the architecture decisions](cah-001-record-architecture-decisions.md) | [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md) | M0 | Done | None |
 | 2 | [CAH-008: Establish educational documentation standards](cah-008-establish-documentation-standards.md) | [Documentation standards](../docs/lessons/cah-008-documentation-standards.md) | M0 | In progress | CAH-001 |
 | 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md) | M0 | Planned | CAH-001, CAH-008 |
 | 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md) | M0 | Planned | CAH-002 |
@@ -59,3 +59,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
   decisions locked before implementation and the gaps observed in the initial scaffold.
 - [2026-07-14 unit lesson standard](notes/2026-07-14-unit-lesson-standard.md) records the one-to-one
   story-to-lesson mapping, production-comparison rubric, and maintenance rule.
+- [2026-07-14 CAH-001 dependency cleanup](notes/2026-07-14-cah-001-dependency-cleanup.md) records
+  the final dependency decision, validation evidence, and environment issues encountered while
+  completing the architecture story.

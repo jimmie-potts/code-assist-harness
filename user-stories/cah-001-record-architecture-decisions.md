@@ -1,6 +1,6 @@
 # CAH-001 - Record the architecture decisions
 
-- **Status:** In progress
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** None
 - **Lesson:** [Architecture decisions](../docs/lessons/cah-001-architecture-decisions.md)
@@ -58,6 +58,12 @@
 
 Updates the README, `AGENTS.md`, architecture overview, glossary, and ADR set. These records become
 the decision source for all subsequent stories.
+
+## Completion evidence
+
+The [CAH-001 dependency-cleanup note](notes/2026-07-14-cah-001-dependency-cleanup.md) records the
+final dependency state, commands run, validation results, and environment issues encountered while
+completing this story.
 
 ## Out of scope
 

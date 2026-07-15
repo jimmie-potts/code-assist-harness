@@ -19,9 +19,9 @@ The original LangChain-based direction has been superseded. The project will own
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
 core domain types must not depend on it.
 
-The initial scaffold still declares unused LangChain packages in `pyproject.toml` and `uv.lock`.
-Their removal and the corresponding lockfile refresh are tracked by
-[CAH-001](user-stories/cah-001-record-architecture-decisions.md), not an architectural exception.
+The superseded LangChain packages have been removed from project metadata and the lockfile. The
+runtime dependency set is intentionally empty until a concrete provider or process-boundary story
+introduces a package that the implementation needs.
 
 Start with the [architecture overview](docs/architecture.md), the
 [decision records](docs/adr/), and the [dependency-ordered backlog](user-stories/README.md).
