@@ -82,9 +82,10 @@ argument shapes, not a display string. Prohibited families, Git-mutating operati
 clients, and privilege escalation remain denied even if the model asks and the user would otherwise
 approve the presented request.
 
-The child environment starts from a minimal allowlist rather than inheriting all parent variables.
-Provider credentials, tokens, and unrelated secrets are removed. Output, runtime, and process count
-are bounded, and cancellation terminates the launched process tree.
+Approved tool subprocesses, unlike the TUI-supervised Python runtime, start from a minimal
+environment allowlist rather than inheriting all parent variables. Provider credentials, tokens,
+and unrelated secrets are removed. Output, runtime, and process count are bounded, and cancellation
+terminates the launched process tree.
 
 ## Edit safety
 

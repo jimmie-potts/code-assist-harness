@@ -125,7 +125,9 @@ Startup troubleshooting:
 - If the TUI says `uv` was not found, install `uv`, run `uv sync --dev` in this repository, and
   retry.
 - If Python exits with an environment or import diagnostic, rerun `uv sync --dev`; launch never
-  updates the lockfile or environment for you.
+  updates the lockfile or virtual environment for you. The supervised child intentionally ignores
+  inherited `PYTHONPATH` and `PYTHONHOME` overrides so those two variables cannot redirect the
+  harness import.
 - If workspace selection fails before Ink renders, check that the `--workspace` value exists, is a
   directory, and is accessible from Ubuntu WSL.
 - If Python exits after spawning, the TUI shows a bounded, sanitized stderr summary and remains in

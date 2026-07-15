@@ -38,14 +38,17 @@ Node supplies each displayed token separately with `shell: false` and configures
 and stderr as pipes. `REPOSITORY_ROOT` identifies the harness project for `uv`; the separately
 resolved `CANONICAL_WORKSPACE` identifies the one future target repository. The launch directory is
 the default workspace, and `--workspace PATH` selects an override relative to that launch directory
-before both Node and Python canonicalize and validate it.
+before both Node and Python canonicalize and validate it. The child inherits the parent environment
+except for `PYTHONPATH` and `PYTHONHOME`, so those two direct overrides cannot redirect the requested
+harness module.
 
 No line has protocol meaning yet. `src/code_assist_harness/runtime.py` drains and discards stdin
 until EOF and emits no stdout. `tui/src/runtime-supervisor.ts` drains and discards stdout rather
 than displaying or parsing it. stderr is collected separately by
 `tui/src/runtime-diagnostics.ts`, which retains a bounded byte tail, removes terminal controls,
-redacts distinctive inherited environment values and credential-shaped assignments, and imposes a
-second display bound before failure text enters TUI state.
+redacts distinctive inherited environment values and complete physical-line values for
+secret-named credential headers or assignments, and imposes a second display bound before failure
+text enters TUI state.
 
 The Node spawn event is CAH-003's temporary `running` transition; it is not a readiness handshake.
 Any child close before requested shutdown, including exit code zero, is shown as an unexpected

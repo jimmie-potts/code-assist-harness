@@ -113,12 +113,13 @@ physical process boundary:
   process group. Its exact argument array uses `run --project REPOSITORY_ROOT`, then `--frozen`,
   `--no-cache`, `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and
   `--no-python-downloads`, followed by
-  `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`;
+  `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`. Its child environment
+  copies the parent except for `PYTHONPATH` and `PYTHONHOME`, which could redirect module loading;
 - `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
   writes nothing to stdout, and exits cleanly when its stdin pipe reaches EOF;
 - `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, redacts distinctive inherited
-  environment values plus credential-shaped assignments, strips terminal controls, and bounds the
-  visible summary again; and
+  environment values plus complete physical-line values for secret-named credential headers and
+  assignments, strips terminal controls, and bounds the visible summary again; and
 - after Ink exits and restores the terminal, `tui/src/run-application.tsx` closes stdin, escalates
   to `SIGTERM` and `SIGKILL` for the detached uv/Python process group when necessary, and waits for
   `close` before cleanup is complete. Parent `SIGHUP` and `SIGTERM` first request an Ink unmount so

@@ -2,12 +2,14 @@ import {spawn} from 'node:child_process';
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   readlinkSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename, join} from 'node:path';
@@ -23,8 +25,23 @@ import {
 const repositoryRoot = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
 
 describe('real Node to uv to Python boundary', () => {
-  it('starts the runtime, observes the Python descendant, and reaps the process group', async () => {
+  it('starts the genuine runtime with filtered overrides and reaps the process group', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-runtime-workspace-'));
+    const poisonPythonPath = mkdtempSync(join(tmpdir(), 'cah-poison-python-path-'));
+    const poisonPackage = join(poisonPythonPath, 'code_assist_harness');
+    const poisonMarker = join(poisonPythonPath, 'poison-runtime-imported');
+    mkdirSync(poisonPackage);
+    writeFileSync(join(poisonPackage, '__init__.py'), '');
+    writeFileSync(
+      join(poisonPackage, 'runtime.py'),
+      [
+        'from pathlib import Path',
+        'import sys',
+        `Path(${JSON.stringify(poisonMarker)}).write_text("imported")`,
+        'sys.stdin.buffer.read()',
+        '',
+      ].join('\n'),
+    );
     let uvPid: number | undefined;
     let pythonPid: number | undefined;
 
@@ -32,6 +49,7 @@ describe('real Node to uv to Python boundary', () => {
       const child = spawn(request.command, [...request.arguments], {
         cwd: request.options.cwd,
         detached: request.options.detached,
+        env: request.options.env,
         shell: request.options.shell,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -40,7 +58,16 @@ describe('real Node to uv to Python boundary', () => {
     };
     const supervisor = new PythonRuntimeSupervisor(
       {repositoryRoot, workspace},
-      {spawnProcess, gracePeriodMs: 2000, terminatePeriodMs: 2000},
+      {
+        spawnProcess,
+        gracePeriodMs: 2000,
+        terminatePeriodMs: 2000,
+        environment: {
+          ...process.env,
+          PYTHONHOME: join(workspace, 'missing-python-home'),
+          PYTHONPATH: poisonPythonPath,
+        },
+      },
     );
 
     try {
@@ -60,12 +87,14 @@ describe('real Node to uv to Python boundary', () => {
       expect(supervisor.getState().status).toBe('stopped');
       expect(existsSync(`/proc/${uvPid}`)).toBe(false);
       expect(existsSync(`/proc/${pythonPid}`)).toBe(false);
+      expect(existsSync(poisonMarker)).toBe(false);
       expect(readdirSync(workspace)).toEqual([]);
     } finally {
       if (supervisor.getState().status !== 'stopped') {
         await supervisor.stop();
       }
       rmSync(workspace, {recursive: true, force: true});
+      rmSync(poisonPythonPath, {recursive: true, force: true});
     }
   }, 10_000);
 });

@@ -67,7 +67,7 @@ function createSupervisor(
 
 describe('PythonRuntimeSupervisor', () => {
   it('builds an exact shell-free, offline uv request with separate workspace argument', () => {
-    expect(buildRuntimeLaunchRequest('/repo', '/workspace')).toEqual({
+    expect(buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {})).toEqual({
       command: 'uv',
       arguments: [
         'run',
@@ -92,7 +92,26 @@ describe('PythonRuntimeSupervisor', () => {
         shell: false,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
+        env: {},
       },
+    });
+  });
+
+  it('strips Python path overrides while preserving the remaining child environment', () => {
+    const environment = {
+      PATH: '/usr/bin',
+      PYTHONHOME: '',
+      PYTHONPATH: '/tmp/fake-python-path',
+      CUSTOM_SETTING: 'kept',
+    };
+    const request = buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', environment);
+
+    expect(request.options.env).toEqual({PATH: '/usr/bin', CUSTOM_SETTING: 'kept'});
+    expect(environment).toEqual({
+      PATH: '/usr/bin',
+      PYTHONHOME: '',
+      PYTHONPATH: '/tmp/fake-python-path',
+      CUSTOM_SETTING: 'kept',
     });
   });
 
@@ -141,7 +160,7 @@ describe('PythonRuntimeSupervisor', () => {
     await start;
 
     child.stdout.write('{"future":"protocol secret hidden-value"}\n');
-    child.stderr.write('API_TOKEN=hidden-value useful diagnostic');
+    child.stderr.write('API_TOKEN=hidden-value\nuseful diagnostic');
     child.close(0);
 
     expect(supervisor.getState()).toMatchObject({

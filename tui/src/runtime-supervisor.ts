@@ -5,6 +5,7 @@ import {RuntimeDiagnostics} from './runtime-diagnostics.js';
 
 const DEFAULT_GRACE_PERIOD_MS = 1000;
 const DEFAULT_TERMINATE_PERIOD_MS = 1000;
+const PYTHON_RUNTIME_OVERRIDE_NAMES = new Set(['PYTHONHOME', 'PYTHONPATH']);
 
 /**
  * A projection-only description of the Python child lifecycle.
@@ -24,7 +25,7 @@ export type RuntimeState =
   | {readonly status: 'stopping'; readonly workspace: string}
   | {readonly status: 'stopped'; readonly workspace: string};
 
-/** Exact shell-free request used to launch the Python runtime through uv. */
+/** Exact shell-free request and narrowly filtered environment used to launch Python through uv. */
 export interface RuntimeLaunchRequest {
   readonly command: string;
   readonly arguments: readonly string[];
@@ -33,6 +34,8 @@ export interface RuntimeLaunchRequest {
     readonly shell: false;
     readonly stdio: readonly ['pipe', 'pipe', 'pipe'];
     readonly detached: true;
+    /** Parent environment snapshot without Python module-discovery overrides. */
+    readonly env: NodeJS.ProcessEnv;
   };
 }
 
@@ -65,6 +68,7 @@ export interface PythonRuntimeSupervisorDependencies {
   readonly wait?: (milliseconds: number) => Promise<void>;
   readonly gracePeriodMs?: number;
   readonly terminatePeriodMs?: number;
+  /** Parent environment used both for child launch filtering and diagnostic redaction. */
   readonly environment?: NodeJS.ProcessEnv;
 }
 
@@ -72,12 +76,14 @@ export interface PythonRuntimeSupervisorDependencies {
  * Build the non-mutating, offline uv invocation for one Python runtime.
  *
  * The uv project root is the harness repository while the target workspace is a separate explicit
- * Python argument. stdin/stdout/stderr are all pipes; stdout remains opaque until CAH-004.
+ * Python argument. Python path overrides are removed from the inherited environment.
+ * stdin/stdout/stderr are all pipes; stdout remains opaque until CAH-004.
  */
 export function buildRuntimeLaunchRequest(
   repositoryRoot: string,
   workspace: string,
   command = 'uv',
+  environment: NodeJS.ProcessEnv = process.env,
 ): RuntimeLaunchRequest {
   return {
     command,
@@ -104,6 +110,7 @@ export function buildRuntimeLaunchRequest(
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
+      env: buildRuntimeEnvironment(environment),
     },
   };
 }
@@ -148,6 +155,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
       configuration.repositoryRoot,
       configuration.workspace,
       configuration.command,
+      dependencies.environment,
     );
     this.#spawnProcess = dependencies.spawnProcess ?? spawnRuntimeProcess;
     this.#signalProcessGroup = dependencies.signalProcessGroup ?? signalRuntimeProcessGroup;
@@ -329,7 +337,19 @@ function spawnRuntimeProcess(request: RuntimeLaunchRequest): ChildProcessWithout
     detached: request.options.detached,
     shell: request.options.shell,
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: request.options.env,
   });
+}
+
+function buildRuntimeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const runtimeEnvironment: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(environment)) {
+    // These variables can redirect `python -m` away from the harness project's installed module.
+    if (value !== undefined && !PYTHON_RUNTIME_OVERRIDE_NAMES.has(name)) {
+      runtimeEnvironment[name] = value;
+    }
+  }
+  return runtimeEnvironment;
 }
 
 function signalRuntimeProcessGroup(

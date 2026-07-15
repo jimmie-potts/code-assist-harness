@@ -22,7 +22,7 @@ channels represent the planned parent-child lifetime and stdin, stdout, and stde
 
 This unit makes the Ink parent and Python child behave as one local application. The implementation
 uses a shell-free `uv` argument array, canonical single-workspace selection, typed supervisor
-states, bounded redacted diagnostics, and detached process-group cleanup. Eight Python tests and 43
+states, bounded redacted diagnostics, and detached process-group cleanup. Eight Python tests and 46
 TUI tests verify the boundary without involving a model, network request, or workspace mutation.
 
 ## Learning objectives
@@ -85,6 +85,7 @@ The implemented invariants are:
 
 - the TUI starts Python through `uv` with an argument array and no shell interpolation;
 - one runtime process serves exactly one explicit workspace;
+- the child environment inherits parent settings except `PYTHONPATH` and `PYTHONHOME`;
 - stdin and stdout remain protocol-only pipes, while diagnostics use stderr;
 - startup and unexpected-exit errors are actionable, bounded, and secret-safe;
 - cleanup is idempotent, waits for `close`, and leaves neither the `uv` wrapper nor Python child
@@ -102,8 +103,10 @@ uv run --project REPOSITORY_ROOT --frozen
 Node passes each token separately with `shell: false`, uses the harness repository as `uv`'s
 project and working directory, configures all three streams as pipes, and starts a detached process
 group. The separately resolved workspace may contain spaces because it is one argument rather than
-shell text. The frozen, no-sync, and offline flags prevent lockfile updates, environment changes,
-and network access, which means the developer must run `uv sync --dev` before starting the TUI.
+shell text. The frozen, no-sync, and offline flags prevent lockfile updates, virtual-environment
+changes, and network access. The parent environment is copied without `PYTHONPATH` and `PYTHONHOME`
+so those two direct overrides cannot redirect `python -m` away from the installed harness. The
+developer must run `uv sync --dev` before starting the TUI.
 
 The supervisor's local UI state machine is
 `starting -> running -> stopping -> stopped` for requested cleanup. A spawn error instead reaches
@@ -122,8 +125,9 @@ not assert that Python is ready for commands; CAH-004 owns that proof.
    from the target workspace and constructs one `PythonRuntimeSupervisor`. The supervisor stores one
    workspace for its lifetime, so a later request cannot switch roots accidentally.
 3. **Launch through a typed argument array.** `buildRuntimeLaunchRequest` fixes the program, every
-   `uv` option, repository working directory, three pipes, `shell: false`, and `detached: true` in a
-   value asserted exactly by `tui/test/runtime-supervisor.test.ts`.
+   `uv` option, repository working directory, three pipes, `shell: false`, and `detached: true`. It
+   also snapshots the parent environment without the two Python path overrides. The full value is
+   asserted exactly by `tui/test/runtime-supervisor.test.ts`.
 4. **Keep transport bytes opaque.** `src/code_assist_harness/runtime.py` revalidates the canonical
    workspace, creates one `asyncio` loop, and uses an event-loop reader to discard stdin bytes until
    EOF. It writes no stdout. Node calls `resume()` on child stdout so the pipe cannot stall, but does
@@ -134,7 +138,8 @@ not assert that Python is ready for commands; CAH-004 owns that proof.
    transition.
 6. **Sanitize diagnostics before UI state.** `tui/src/runtime-diagnostics.ts` retains only the last
    4,096 stderr bytes, redacts all sufficiently distinctive inherited environment values plus
-   common and quoted credential assignments, including known-secret fragments cut at either tail
+   secret-named credential headers or assignments through the end of their physical line, including
+   multi-part authorization and cookie values, plus known-secret fragments cut at either tail
    boundary. It strips terminal controls, normalizes whitespace, and limits the displayed summary
    to 1,200 characters. Stdout is never an input to that summary.
 7. **Clean up from one `finally` path.** After Ink exits and restores the terminal, or if rendering
@@ -150,7 +155,7 @@ not assert that Python is ready for commands; CAH-004 owns that proof.
    then stops the supervisor, proves both observed PIDs are gone, and confirms the temporary
    workspace stayed empty.
 
-The completed validation evidence is eight Python tests, including seven runtime tests, and 43 TUI
+The completed validation evidence is eight Python tests, including seven runtime tests, and 46 TUI
 tests across ten files. `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, and
 the TUI type-check, lint, and test scripts pass without a model or live network access.
 
@@ -179,9 +184,17 @@ relative paths with spaces, invalid arguments, files, and missing paths;
 **Safe outcome:** move the UI to visible failure and never treat EOF, or even an unrequested exit
 code zero, as successful completion. **Evidence:** `tui/test/runtime-supervisor.test.ts` injects
 stdout that resembles a future protocol line plus stderr containing a configured secret. The
-failure includes safe stderr context, redacts full and boundary-truncated secrets, excludes stdout,
-and classifies exit zero as unexpected. `tui/test/app.test.tsx` verifies both startup and runtime
-failures are visible.
+failure includes safe stderr context, excludes stdout, redacts full, boundary-truncated, and
+complete multi-part credential values while retaining a following diagnostic, and classifies exit
+zero as unexpected. `tui/test/app.test.tsx` verifies both startup and runtime failures are visible.
+
+### Ambient Python configuration redirects startup
+
+**Symptom:** inherited `PYTHONPATH` or `PYTHONHOME` selects an external module or invalid standard
+library instead of the prepared harness environment. **Boundary:** parent-to-child environment
+construction. **Safe outcome:** preserve required parent settings but omit both redirecting
+variables without mutating the source environment. **Evidence:** the exact request test proves the
+filter, and the real boundary test supplies poisoned values yet still observes the genuine runtime.
 
 ### The TUI exits but Python remains
 
@@ -237,14 +250,15 @@ These references describe capabilities, not required deployment choices for the 
 ### Trade-offs and graduation signals
 
 A scheduler can improve recovery and utilization but adds distributed state, queues, identity,
-network failure, and operational ownership. CAH-003 also exposed three local trade-offs: `uv` can
+network failure, and operational ownership. CAH-003 also exposed four local trade-offs: `uv` can
 remain a wrapper around a separate Python process, so signaling only its PID is insufficient;
-`--frozen` and `--no-sync` keep the lock and environment unchanged but require explicit setup; and
+`--frozen` and `--no-sync` keep the lock and virtual environment unchanged but require explicit
+setup; ambient Python path customization is intentionally ignored to preserve module identity; and
 the spawn event is useful for lifecycle state but too weak for protocol readiness. A detached
-process group, documented `uv sync --dev` prerequisite, and deferred CAH-004 handshake address
-those constraints without introducing a daemon or scheduler. Graduate when concurrent demand,
-remote execution, client-disconnect survival, or measured orphan/recovery incidents require those
-capabilities.
+process group, documented `uv sync --dev` prerequisite, narrow environment filter, and deferred
+CAH-004 handshake address those constraints without introducing a daemon or scheduler. Graduate
+when concurrent demand, remote execution, client-disconnect survival, or measured orphan/recovery
+incidents require those capabilities.
 
 ## Practical exercises
 

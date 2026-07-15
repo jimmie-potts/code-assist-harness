@@ -16,14 +16,17 @@ CAH-003 without claiming that the CAH-004 NDJSON protocol or readiness handshake
   `--offline`, `--no-env-file`, `--no-progress`, and `--no-python-downloads`, then
   `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`. Preparing the
   environment with `uv sync --dev` is an explicit prerequisite.
+- Copy the parent environment for launch but remove `PYTHONPATH` and `PYTHONHOME`; either variable
+  can redirect `python -m` away from the harness project's installed module.
 - Configure stdin, stdout, and stderr as separate pipes. Until CAH-004, Python drains and discards
   stdin, Node drains and discards stdout, and no readiness line is emitted. Human diagnostics use
   stderr only.
 - Treat the operating-system spawn event as CAH-003's temporary `running` transition, not protocol
   readiness. Treat every unrequested close, including exit code zero, as visible runtime failure.
 - Retain only a 4,096-byte stderr tail, redact sufficiently distinctive inherited environment
-  values and credential-shaped or quoted assignments, remove terminal controls, and cap the UI
-  summary at 1,200 characters. Raw stderr and protocol stdout never enter visible state.
+  values and secret-named credential headers or assignments through the end of their physical line,
+  remove terminal controls, and cap the UI summary at 1,200 characters. Raw stderr and protocol
+  stdout never enter visible state.
 - Bind cleanup to the Ink lifecycle `finally` path. After Ink exits and restores the terminal,
   close child stdin, then escalate to `SIGTERM` and `SIGKILL` for the detached process group only
   when bounded grace periods expire. Resolve cleanup only after the child `close` event. Parent
@@ -34,8 +37,9 @@ CAH-003 without claiming that the CAH-004 NDJSON protocol or readiness handshake
 
 `scripts/run-tui` validates Linux Node and npm, captures `pwd -P`, and forwards the CLI arguments.
 `tui/src/workspace.ts` resolves the workspace, and `tui/src/cli.ts` creates one
-`PythonRuntimeSupervisor`. `tui/src/runtime-supervisor.ts` builds the exact launch request, owns the
-child state machine, drains stdout, gathers diagnostics, and performs idempotent shutdown.
+`PythonRuntimeSupervisor`. `tui/src/runtime-supervisor.ts` builds the exact launch request and child
+environment without the two Python overrides, owns the child state machine, drains stdout, gathers
+diagnostics, and performs idempotent shutdown.
 `tui/src/runtime-diagnostics.ts` owns bounding and redaction. `tui/src/run-application.tsx`
 subscribes the projection in `tui/src/app.tsx` and guarantees `stop()` even when rendering fails
 before spawn.
@@ -68,16 +72,18 @@ ignored signal failure.
 - Python has eight passing tests, including seven runtime tests for canonical workspace selection,
   missing and file paths, stdin EOF, empty protocol stdout, stderr-only configuration failure, and
   exactly-one-workspace enforcement.
-- The TUI has 43 passing tests in ten files. Controlled supervisor tests cover exact argument
-  construction, spawn transition, missing `uv`, unrequested exit, stdout exclusion, secret
+- The TUI has 46 passing tests in ten files. Controlled supervisor tests cover exact argument and
+  environment construction, including source preservation and removal of both Python overrides;
+  remaining cases cover spawn transition, missing `uv`, unrequested exit, stdout exclusion, secret
   redaction, idempotent escalation, the leader-exit/process-group race, and shell-free synchronous
   failure. Rendering and lifecycle tests prove failures are visible, repeated termination signals
   stay intercepted through child cleanup, and cleanup still runs when Ink exit or initial rendering
-  fails. Diagnostic tests cover distinctive non-keyword environment values, complete quoted
-  assignments, and stderr that ends inside a known secret.
+  fails. Diagnostic tests cover distinctive non-keyword environment values, complete multi-part
+  credential lines, and stderr that ends inside a known secret.
 - `tui/test/runtime-boundary.test.ts` starts the actual Node-to-uv-to-Python chain, verifies the
-  matching `/proc` entry is a Python executable rather than the `uv` wrapper, stops it, proves both
-  recorded PIDs are absent, and confirms the temporary workspace remains empty.
+  matching `/proc` entry is a Python executable rather than the `uv` wrapper even when poisoned
+  `PYTHONPATH` and `PYTHONHOME` values are supplied, stops it, proves both recorded PIDs are absent,
+  and confirms the temporary workspace remains empty.
 - `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, TUI type checking,
   linting, and tests pass without a model credential or live network request. Manual lifecycle
   validation also confirmed launch, visible running state, a missing-`uv` failure, Ctrl+C exit, and

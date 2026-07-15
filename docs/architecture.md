@@ -80,13 +80,18 @@ The line breaks above are explanatory only; Node passes each token as a separate
 `shell: false`. The harness repository is `uv`'s project and child working directory, while the
 target repository is a distinct, canonical `--workspace` value. Launch therefore cannot resolve
 dependencies, update `uv.lock`, read a project `.env`, download Python, or silently change the
-selected workspace. Developers prepare the locked environment explicitly with `uv sync --dev`.
+selected workspace. The child receives a copy of the parent environment except for `PYTHONPATH`
+and `PYTHONHOME`, which prevents those two direct overrides from redirecting the harness module
+without claiming a generally reduced environment. Developers prepare the locked environment with
+`uv sync --dev`.
 
 The supervisor treats the operating-system spawn event as `running` only for this physical
 boundary. Protocol readiness is not inferred; CAH-004 will replace that temporary boundary with a
 validated readiness event. Node drains and discards stdout without interpreting or displaying it,
 Python drains and discards stdin until EOF, and stderr alone feeds a bounded, sanitized failure
-summary. These are transport reservations, not an implemented message protocol.
+summary. Sanitization consumes complete physical-line values for secret-named credential headers
+or assignments so multi-part authorization and cookie values cannot remain visible. These are
+transport reservations, not an implemented message protocol.
 
 After Ink reports exit and restores the terminal, the application lifecycle closes stdin so the
 minimal Python loop can end normally. If the child does not close during the grace period, Node

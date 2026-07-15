@@ -2,9 +2,20 @@ const DEFAULT_BYTE_LIMIT = 4096;
 const DEFAULT_DISPLAY_LIMIT = 1200;
 const REDACTION = '[REDACTED]';
 const MINIMUM_SECRET_FRAGMENT_LENGTH = 4;
-const SECRET_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|AUTH|DSN|DATABASE_URL)/iu;
-const ENVIRONMENT_ASSIGNMENT =
-  /\b([A-Z][A-Z0-9_]*)\s*[:=]\s*(?:Bearer\s+[^\s,;]+|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/giu;
+const SECRET_NAME_TOKENS = new Set([
+  'AUTH',
+  'AUTHORIZATION',
+  'COOKIE',
+  'CREDENTIAL',
+  'CREDENTIALS',
+  'DSN',
+  'KEY',
+  'PASSWORD',
+  'SECRET',
+  'TOKEN',
+]);
+const SECRET_WHOLE_NAMES = new Set(['DATABASE_URL']);
+const CREDENTIAL_NAME = /\b([A-Z][A-Z0-9_-]*)\s*[:=]/giu;
 const BEARER_TOKEN = /\bBearer\s+[^\s,;]+/giu;
 const OPENAI_STYLE_TOKEN = /\bsk-[A-Za-z0-9_-]{8,}/gu;
 const ESCAPE = String.fromCodePoint(27);
@@ -14,8 +25,9 @@ const ANSI_SEQUENCE = new RegExp(`${ESCAPE}\\[[0-?]*[ -/]*[@-~]`, 'gu');
  * Retain a bounded stderr tail and convert it into secret-safe display text.
  *
  * Raw stderr never enters UI state. Bytes are bounded before decoding, known secret environment
- * values and common credential shapes are redacted, terminal controls are removed, and display
- * text receives a second character limit.
+ * values are redacted, and recognized secret-named headers or assignments consume the remainder
+ * of their physical line. Terminal controls are removed and display text receives a second
+ * character limit.
  */
 export class RuntimeDiagnostics {
   readonly #byteLimit: number;
@@ -43,7 +55,7 @@ export class RuntimeDiagnostics {
       .filter(
         ([name, value]) =>
           value !== undefined &&
-          (value.length >= 8 || (SECRET_NAME.test(name) && value.length >= 4)),
+          (value.length >= 8 || (isSecretName(name) && value.length >= 4)),
       )
       .map(([, value]) => value as string)
       .sort((left, right) => right.length - left.length);
@@ -73,13 +85,10 @@ export class RuntimeDiagnostics {
    */
   public summary(): string | undefined {
     let text = this.#tail.toString('utf8').replace(ANSI_SEQUENCE, '').trimEnd();
-    text = redactKnownValues(text, this.#secretValues);
-    text = text
-      .replace(ENVIRONMENT_ASSIGNMENT, (match, name: string) =>
-        SECRET_NAME.test(name) ? `${name}=${REDACTION}` : match,
-      )
+    text = redactCredentialLines(text)
       .replace(BEARER_TOKEN, `Bearer ${REDACTION}`)
       .replace(OPENAI_STYLE_TOKEN, REDACTION);
+    text = redactKnownValues(text, this.#secretValues);
     text = removeControlCharacters(text).replace(/\s+/gu, ' ').trim();
 
     if (text.length === 0) {
@@ -92,6 +101,33 @@ export class RuntimeDiagnostics {
       text.length > available ? `…${text.slice(-Math.max(0, available - 1))}` : text;
     return `${truncationMarker}${bounded}`;
   }
+}
+
+function redactCredentialLines(text: string): string {
+  const segments = text.split(/(\r\n|\r|\n)/u);
+  return segments
+    .map((segment, index) => {
+      if (index % 2 === 1) {
+        return segment;
+      }
+      for (const match of segment.matchAll(CREDENTIAL_NAME)) {
+        const name = match[1];
+        if (name !== undefined && isSecretName(name)) {
+          // Credential values can contain multiple whitespace-, comma-, or semicolon-delimited parts.
+          return `${segment.slice(0, match.index)}${name}=${REDACTION}`;
+        }
+      }
+      return segment;
+    })
+    .join('');
+}
+
+function isSecretName(name: string): boolean {
+  const normalizedName = name.toUpperCase();
+  return (
+    SECRET_WHOLE_NAMES.has(normalizedName) ||
+    normalizedName.split(/[_-]/u).some((token) => SECRET_NAME_TOKENS.has(token))
+  );
 }
 
 function redactKnownValues(text: string, secretValues: readonly string[]): string {
