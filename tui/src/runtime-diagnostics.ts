@@ -14,7 +14,18 @@ const SECRET_NAME_TOKENS = new Set([
   'SECRET',
   'TOKEN',
 ]);
-const SECRET_WHOLE_NAMES = new Set(['DATABASE_URL']);
+const SECRET_WHOLE_NAMES = new Set([
+  'ACCESSKEY',
+  'ACCESSTOKEN',
+  'APIKEY',
+  'APITOKEN',
+  'AUTHTOKEN',
+  'CLIENTSECRET',
+  'DATABASE_URL',
+  'PRIVATEKEY',
+  'REFRESHTOKEN',
+  'SECRETKEY',
+]);
 const CREDENTIAL_NAME = /\b([A-Z][A-Z0-9_-]*)\s*[:=]/giu;
 const BEARER_TOKEN = /\bBearer\s+[^\s,;]+/giu;
 const OPENAI_STYLE_TOKEN = /\bsk-[A-Za-z0-9_-]{8,}/gu;
@@ -26,7 +37,8 @@ const ANSI_SEQUENCE = new RegExp(`${ESCAPE}\\[[0-?]*[ -/]*[@-~]`, 'gu');
  *
  * Raw stderr never enters UI state. Bytes are bounded before decoding, known secret environment
  * values are redacted, and recognized secret-named headers or assignments consume the remainder
- * of their physical line. Terminal controls are removed and display text receives a second
+ * of their physical line. If retention begins inside a physical line, that unclassifiable fragment
+ * is discarded before decoding. Terminal controls are removed and display text receives a second
  * character limit.
  */
 export class RuntimeDiagnostics {
@@ -35,6 +47,7 @@ export class RuntimeDiagnostics {
   readonly #secretValues: readonly string[];
   #tail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   #truncated = false;
+  #tailStartsInsideLine = false;
 
   /**
    * Create a diagnostic collector.
@@ -65,14 +78,23 @@ export class RuntimeDiagnostics {
   public append(chunk: string | Buffer): void {
     const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
     if (bytes.length >= this.#byteLimit) {
-      this.#truncated = this.#truncated || this.#tail.length > 0 || bytes.length > this.#byteLimit;
+      const didDiscard = this.#tail.length > 0 || bytes.length > this.#byteLimit;
+      if (bytes.length > this.#byteLimit) {
+        const retainedOffset = bytes.length - this.#byteLimit;
+        this.#tailStartsInsideLine = !isLineBreakByte(bytes[retainedOffset - 1]);
+      } else if (this.#tail.length > 0) {
+        this.#tailStartsInsideLine = !isLineBreakByte(this.#tail[this.#tail.length - 1]);
+      }
+      this.#truncated = this.#truncated || didDiscard;
       this.#tail = bytes.subarray(bytes.length - this.#byteLimit);
       return;
     }
     const combined = Buffer.concat([this.#tail, bytes]);
     if (combined.length > this.#byteLimit) {
       this.#truncated = true;
-      this.#tail = combined.subarray(combined.length - this.#byteLimit);
+      const retainedOffset = combined.length - this.#byteLimit;
+      this.#tailStartsInsideLine = !isLineBreakByte(combined[retainedOffset - 1]);
+      this.#tail = combined.subarray(retainedOffset);
       return;
     }
     this.#tail = combined;
@@ -84,18 +106,21 @@ export class RuntimeDiagnostics {
    * @returns Safe single-line context, or undefined when stderr contained no useful text.
    */
   public summary(): string | undefined {
-    let text = this.#tail.toString('utf8').replace(ANSI_SEQUENCE, '').trimEnd();
+    const displayTail = this.#tailStartsInsideLine
+      ? dropLeadingPartialLine(this.#tail)
+      : this.#tail;
+    let text = displayTail.toString('utf8').replace(ANSI_SEQUENCE, '').trimEnd();
     text = redactCredentialLines(text)
       .replace(BEARER_TOKEN, `Bearer ${REDACTION}`)
       .replace(OPENAI_STYLE_TOKEN, REDACTION);
     text = redactKnownValues(text, this.#secretValues);
     text = removeControlCharacters(text).replace(/\s+/gu, ' ').trim();
 
+    const truncationMarker = this.#truncated ? '[earlier diagnostics omitted] ' : '';
     if (text.length === 0) {
-      return undefined;
+      return this.#truncated ? truncationMarker.trimEnd() : undefined;
     }
 
-    const truncationMarker = this.#truncated ? '[earlier diagnostics omitted] ' : '';
     const available = Math.max(0, this.#displayLimit - truncationMarker.length);
     const bounded =
       text.length > available ? `…${text.slice(-Math.max(0, available - 1))}` : text;
@@ -124,10 +149,33 @@ function redactCredentialLines(text: string): string {
 
 function isSecretName(name: string): boolean {
   const normalizedName = name.toUpperCase();
+  const identifierTokens = name
+    .replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/gu, '$1_$2')
+    .toUpperCase()
+    .split(/[_-]/u);
   return (
     SECRET_WHOLE_NAMES.has(normalizedName) ||
-    normalizedName.split(/[_-]/u).some((token) => SECRET_NAME_TOKENS.has(token))
+    identifierTokens.some((token) => SECRET_NAME_TOKENS.has(token))
   );
+}
+
+function dropLeadingPartialLine(bytes: Buffer<ArrayBufferLike>): Buffer<ArrayBufferLike> {
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index];
+    if (byte === 10) {
+      return bytes.subarray(index + 1);
+    }
+    if (byte === 13) {
+      const nextIndex = bytes[index + 1] === 10 ? index + 2 : index + 1;
+      return bytes.subarray(nextIndex);
+    }
+  }
+  return bytes.subarray(bytes.length);
+}
+
+function isLineBreakByte(byte: number | undefined): boolean {
+  return byte === 10 || byte === 13;
 }
 
 function redactKnownValues(text: string, secretValues: readonly string[]): string {

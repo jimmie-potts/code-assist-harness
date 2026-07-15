@@ -29,26 +29,33 @@ use a single ordered event writer so concurrent tasks cannot interleave output.
 CAH-003 launches one child with this shell-free argument array:
 
 ```text
-uv run --project REPOSITORY_ROOT --frozen
+PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
+  --python VENV_PYTHON
   -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
 ```
 
-Node supplies each displayed token separately with `shell: false` and configures stdin, stdout,
-and stderr as pipes. `REPOSITORY_ROOT` identifies the harness project for `uv`; the separately
+Node supplies each displayed token separately with `shell: false` and configures stdin, stdout, and
+stderr as pipes. Before spawn, the supervisor resolves `uv` from filtered `PATH`, realpaths it, and
+rejects a path under `/mnt` or a name ending in `.exe`. It also requires
+`REPOSITORY_ROOT/.venv/pyvenv.cfg` plus executable `VENV_PYTHON` at `.venv/bin/python`; failure stops
+before `uv` can create or change the project environment. `REPOSITORY_ROOT` identifies the harness
+project for `uv`, while `--python VENV_PYTHON` fixes its prepared interpreter. The separately
 resolved `CANONICAL_WORKSPACE` identifies the one future target repository. The launch directory is
 the default workspace, and `--workspace PATH` selects an override relative to that launch directory
-before both Node and Python canonicalize and validate it. The child inherits the parent environment
-except for `PYTHONPATH` and `PYTHONHOME`, so those two direct overrides cannot redirect the requested
-harness module.
+before both Node and Python canonicalize and validate it. The child environment removes
+`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable so ambient selectors cannot
+bypass the preflight or redirect the requested harness module.
 
 No line has protocol meaning yet. `src/code_assist_harness/runtime.py` drains and discards stdin
 until EOF and emits no stdout. `tui/src/runtime-supervisor.ts` drains and discards stdout rather
 than displaying or parsing it. stderr is collected separately by
-`tui/src/runtime-diagnostics.ts`, which retains a bounded byte tail, removes terminal controls,
-redacts distinctive inherited environment values and complete physical-line values for
-secret-named credential headers or assignments, and imposes a second display bound before failure
-text enters TUI state.
+`tui/src/runtime-diagnostics.ts`, which retains a bounded byte tail, drops a leading partial
+physical line when the byte bound cuts one, removes terminal controls, redacts distinctive inherited
+environment values and complete physical-line values for recognized separator-delimited and common
+camel-case or concatenated credential names, and imposes a second display bound before failure text
+enters TUI state. If truncation leaves no complete physical line, only the omission marker is safe
+to display.
 
 The Node spawn event is CAH-003's temporary `running` transition; it is not a readiness handshake.
 Any child close before requested shutdown, including exit code zero, is shown as an unexpected

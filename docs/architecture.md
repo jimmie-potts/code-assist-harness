@@ -65,33 +65,46 @@ use LangChain to orchestrate the agent loop.
 ```
 
 Both processes run inside Ubuntu under WSL and use Linux paths. The Ink process owns the terminal
-and starts Python through `uv`. The current directory is the default workspace; `--workspace PATH`
-selects a different single workspace for the process. Multi-root workspaces are out of scope.
+and starts Python through a resolved, prevalidated Linux `uv` executable. The current directory is
+the default workspace; `--workspace PATH` selects a different single workspace for the process.
+Multi-root workspaces are out of scope.
 
 CAH-003 implements that launch as one shell-free argument array:
 
 ```text
-uv run --project REPOSITORY_ROOT --frozen
+PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
+  --python VENV_PYTHON
   -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
 ```
 
 The line breaks above are explanatory only; Node passes each token as a separate argument with
-`shell: false`. The harness repository is `uv`'s project and child working directory, while the
-target repository is a distinct, canonical `--workspace` value. Launch therefore cannot resolve
-dependencies, update `uv.lock`, read a project `.env`, download Python, or silently change the
-selected workspace. The child receives a copy of the parent environment except for `PYTHONPATH`
-and `PYTHONHOME`, which prevents those two direct overrides from redirecting the harness module
-without claiming a generally reduced environment. Developers prepare the locked environment with
-`uv sync --dev`.
+`shell: false`. Before spawning, the supervisor resolves `uv` from a filtered `PATH`, follows its
+real path, and rejects a path under `/mnt` or a name ending in `.exe`. It also requires both
+`REPOSITORY_ROOT/.venv/pyvenv.cfg` and an executable `VENV_PYTHON` at `.venv/bin/python`. A failed
+preflight does not invoke `uv`, create `.venv`, or otherwise mutate the repository. The harness
+repository is `uv`'s project and child working directory, while the target repository is a distinct,
+canonical `--workspace` value.
+
+The explicit interpreter and launch flags keep the prepared environment fixed: `--frozen`
+prevents lockfile updates, `--no-sync` avoids synchronizing the existing environment, and the
+remaining flags prevent project `.env` loading, network access, progress output, and Python
+downloads. The child receives a filtered copy of the parent environment that removes `PYTHONPATH`,
+`PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable without claiming a generally reduced
+environment. The supported project, environment, and interpreter choices are supplied explicitly
+in the argument array instead. Developers create or refresh the locked environment with
+`uv sync --dev`; the preflight proves only that the required environment structure exists, not that
+it is current with `uv.lock`.
 
 The supervisor treats the operating-system spawn event as `running` only for this physical
 boundary. Protocol readiness is not inferred; CAH-004 will replace that temporary boundary with a
 validated readiness event. Node drains and discards stdout without interpreting or displaying it,
 Python drains and discards stdin until EOF, and stderr alone feeds a bounded, sanitized failure
-summary. Sanitization consumes complete physical-line values for secret-named credential headers
-or assignments so multi-part authorization and cookie values cannot remain visible. These are
-transport reservations, not an implemented message protocol.
+summary. If the byte-tail bound begins inside a physical line, sanitization drops that leading
+partial line before inspecting the remainder. Recognized separator-delimited and common camel-case
+or concatenated credential names consume their complete physical-line values, so multi-part
+authorization, cookie, and common API-key values cannot remain visible. These are transport
+reservations, not an implemented message protocol.
 
 After Ink reports exit and restores the terminal, the application lifecycle closes stdin so the
 minimal Python loop can end normally. If the child does not close during the grace period, Node
@@ -110,7 +123,7 @@ dependency-resolution changes commit `uv.lock`.
 | Concern | Owner | Notes |
 | --- | --- | --- |
 | Terminal input, layout, and keybindings | Ink TUI | The TUI renders state; it does not make policy decisions. |
-| Child-process startup and display of child failures | Ink TUI | Python is started through `uv` and terminated when the TUI exits. |
+| Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
 | Context selection | Python context subsystem | Context items retain their source path, line range, and inclusion reason. |

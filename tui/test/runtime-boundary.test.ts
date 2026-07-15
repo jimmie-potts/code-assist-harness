@@ -66,6 +66,9 @@ describe('real Node to uv to Python boundary', () => {
           ...process.env,
           PYTHONHOME: join(workspace, 'missing-python-home'),
           PYTHONPATH: poisonPythonPath,
+          UV_ISOLATED: '1',
+          UV_PROJECT_ENVIRONMENT: join(workspace, 'poison-uv-project-environment'),
+          VIRTUAL_ENV: join(workspace, 'poison-active-environment'),
         },
       },
     );

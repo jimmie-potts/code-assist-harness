@@ -53,6 +53,31 @@ describe('RuntimeDiagnostics', () => {
     expect(summary).not.toContain('ZmFrZS1wcmVmaXhlZA==');
   });
 
+  it('redacts recognized camel-case and concatenated credential names', () => {
+    const diagnostics = new RuntimeDiagnostics({});
+    diagnostics.append('apiKey=fake-api-key\n');
+    diagnostics.append('APIKey=fake-acronym-key\n');
+    diagnostics.append('authToken=fake-auth-token\n');
+    diagnostics.append('accesskey=fake-access-key\n');
+    diagnostics.append('githubAccessToken=fake-prefixed-token\n');
+    diagnostics.append('monkey=banana\ndonkey=carrot\napiKeyboard=available');
+
+    const summary = diagnostics.summary();
+    expect(summary).toContain('apiKey=[REDACTED]');
+    expect(summary).toContain('APIKey=[REDACTED]');
+    expect(summary).toContain('authToken=[REDACTED]');
+    expect(summary).toContain('accesskey=[REDACTED]');
+    expect(summary).toContain('githubAccessToken=[REDACTED]');
+    expect(summary).toContain('monkey=banana');
+    expect(summary).toContain('donkey=carrot');
+    expect(summary).toContain('apiKeyboard=available');
+    expect(summary).not.toContain('fake-api-key');
+    expect(summary).not.toContain('fake-acronym-key');
+    expect(summary).not.toContain('fake-auth-token');
+    expect(summary).not.toContain('fake-access-key');
+    expect(summary).not.toContain('fake-prefixed-token');
+  });
+
   it('recognizes credential lines before inherited-value redaction can erase the header', () => {
     const diagnostics = new RuntimeDiagnostics({DISPLAY_MODE: 'Authorization'});
     diagnostics.append('Authorization: Basic ZmFrZS1vcmRlcmluZy1wYXNzd29yZA==');
@@ -63,9 +88,9 @@ describe('RuntimeDiagnostics', () => {
   });
 
   it('bounds retained bytes before decoding and marks omitted context', () => {
-    const diagnostics = new RuntimeDiagnostics({}, 24, 48);
-    diagnostics.append('an earlier diagnostic that must disappear ');
-    diagnostics.append('useful ending');
+    const retainedLine = 'useful ending';
+    const diagnostics = new RuntimeDiagnostics({}, Buffer.byteLength(retainedLine), 48);
+    diagnostics.append(`an earlier diagnostic that must disappear\n${retainedLine}`);
 
     const summary = diagnostics.summary();
     expect(summary).toContain('[earlier diagnostics omitted]');
@@ -74,12 +99,57 @@ describe('RuntimeDiagnostics', () => {
     expect(summary).not.toContain('an earlier diagnostic');
   });
 
-  it('redacts a known secret when the tail begins inside its value', () => {
+  it('drops a leading partial line when byte truncation removes its credential name', () => {
+    const credentialFragment = 'Basic ZmFrZS10cnVuY2F0ZWQ=';
+    const retainedTail = `${credentialFragment}\nuseful ending`;
+    const withFollowingLine = new RuntimeDiagnostics({}, Buffer.byteLength(retainedTail), 120);
+    withFollowingLine.append(`Authorization: ${retainedTail}`);
+
+    const credentialOnly = new RuntimeDiagnostics(
+      {},
+      Buffer.byteLength(credentialFragment),
+      120,
+    );
+    credentialOnly.append(`Authorization: ${credentialFragment}`);
+
+    expect(withFollowingLine.summary()).toContain('[earlier diagnostics omitted]');
+    expect(withFollowingLine.summary()).toContain('useful ending');
+    expect(withFollowingLine.summary()).not.toContain('Basic');
+    expect(withFollowingLine.summary()).not.toContain('ZmFrZS10cnVuY2F0ZWQ=');
+    expect(credentialOnly.summary()).toBe('[earlier diagnostics omitted]');
+  });
+
+  it('tracks partial credential lines across chunked CRLF and bare-CR truncation', () => {
+    const credentialFragment = 'Basic ZmFrZS1jaHVua2Vk';
+
+    const crlfTail = `${credentialFragment}\r\nuseful CRLF ending`;
+    const chunked = new RuntimeDiagnostics({}, Buffer.byteLength(crlfTail), 120);
+    chunked.append('Authorization: ');
+    chunked.append(credentialFragment);
+    chunked.append('\r');
+    chunked.append('\nuseful CRLF ending');
+
+    const bareCarriageReturnTail = `${credentialFragment}\ruseful CR ending`;
+    const exactSizedChunk = new RuntimeDiagnostics(
+      {},
+      Buffer.byteLength(bareCarriageReturnTail),
+      120,
+    );
+    exactSizedChunk.append('Authorization: ');
+    exactSizedChunk.append(bareCarriageReturnTail);
+
+    expect(chunked.summary()).toContain('useful CRLF ending');
+    expect(chunked.summary()).not.toContain(credentialFragment);
+    expect(exactSizedChunk.summary()).toContain('useful CR ending');
+    expect(exactSizedChunk.summary()).not.toContain(credentialFragment);
+  });
+
+  it('drops a known-secret fragment when the tail begins inside its line', () => {
     const diagnostics = new RuntimeDiagnostics({SERVICE_PASSWORD: 'prefix-sensitive-value'}, 18, 80);
     diagnostics.append('noise prefix-sensitive-value');
 
     const summary = diagnostics.summary();
-    expect(summary).toContain('[REDACTED]');
+    expect(summary).toBe('[earlier diagnostics omitted]');
     expect(summary).not.toContain('sensitive-value');
   });
 

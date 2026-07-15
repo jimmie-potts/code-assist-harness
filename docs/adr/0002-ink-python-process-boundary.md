@@ -22,9 +22,10 @@ The application will consist of two cooperating processes running inside Ubuntu 
 - a TypeScript/Node Ink process owns the terminal; and
 - a Python 3.12 process owns the harness runtime and core behavior.
 
-The Ink process starts Python as a child through `uv`, supervises its lifetime, and terminates it
-when the TUI exits. Node and Python exchange Linux paths; neither process crosses into a
-native-Windows runtime. Native Windows and macOS support are outside the MVP.
+The Ink process starts Python as a child through a resolved and prevalidated Linux `uv` executable,
+supervises its lifetime, and terminates it when the TUI exits. Node and Python exchange Linux paths;
+neither process crosses into a native-Windows runtime. Native Windows and macOS support are outside
+the MVP.
 
 The current launch directory is the default workspace. A `--workspace PATH` argument selects a
 different workspace explicitly. There is exactly one workspace root per runtime process, and the
@@ -109,17 +110,23 @@ physical process boundary:
   combining them into a shell string;
 - `tui/src/workspace.ts` resolves either that directory or one `--workspace PATH` to an existing,
   symlink-free directory before spawn;
-- `tui/src/runtime-supervisor.ts` launches `uv` with `shell: false`, three pipes, and a detached
-  process group. Its exact argument array uses `run --project REPOSITORY_ROOT`, then `--frozen`,
-  `--no-cache`, `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and
-  `--no-python-downloads`, followed by
+- `tui/src/runtime-supervisor.ts` resolves `uv` from a filtered `PATH`, follows symlinks, rejects a
+  resolved path under `/mnt` or a name ending in `.exe`, and requires `.venv/pyvenv.cfg` plus an
+  executable `.venv/bin/python` before spawn. A preflight failure cannot invoke `uv` or create the
+  environment. The supervisor launches the validated path with `shell: false`, three pipes, and a
+  detached process group. Its exact argument array uses `run --project REPOSITORY_ROOT`, then
+  `--frozen`, `--no-cache`, `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and
+  `--no-python-downloads`, selects the prepared interpreter with `--python VENV_PYTHON`, and follows
+  with
   `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`. Its child environment
-  copies the parent except for `PYTHONPATH` and `PYTHONHOME`, which could redirect module loading;
+  copies the parent except for `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and all `UV_*` variables;
+  the supported project, environment, and interpreter choices are supplied explicitly in argv;
 - `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
   writes nothing to stdout, and exits cleanly when its stdin pipe reaches EOF;
-- `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, redacts distinctive inherited
-  environment values plus complete physical-line values for secret-named credential headers and
-  assignments, strips terminal controls, and bounds the visible summary again; and
+- `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, drops a leading partial physical
+  line when byte truncation cuts one, redacts distinctive inherited environment values plus
+  complete physical-line values for recognized separator-delimited and common camel-case or
+  concatenated credential names, strips terminal controls, and bounds the visible summary again;
 - after Ink exits and restores the terminal, `tui/src/run-application.tsx` closes stdin, escalates
   to `SIGTERM` and `SIGKILL` for the detached uv/Python process group when necessary, and waits for
   `close` before cleanup is complete. Parent `SIGHUP` and `SIGTERM` first request an Ink unmount so

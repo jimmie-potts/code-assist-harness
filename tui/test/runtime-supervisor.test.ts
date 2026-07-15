@@ -1,11 +1,23 @@
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {EventEmitter} from 'node:events';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {PassThrough} from 'node:stream';
 
 import {describe, expect, it, vi} from 'vitest';
 
 import {
   buildRuntimeLaunchRequest,
+  prepareRuntimeLaunch,
   PythonRuntimeSupervisor,
   type RuntimeLaunchRequest,
   type RuntimeState,
@@ -36,6 +48,7 @@ function createSupervisor(
     readonly command?: string;
     readonly environment?: NodeJS.ProcessEnv;
     readonly wait?: (milliseconds: number) => Promise<void>;
+    readonly prepareLaunch?: (request: RuntimeLaunchRequest) => RuntimeLaunchRequest;
     readonly signalProcessGroup?: (
       child: ChildProcessWithoutNullStreams,
       signal: NodeJS.Signals,
@@ -54,6 +67,7 @@ function createSupervisor(
         overrides.captureRequest?.(request);
         return asChild(child);
       },
+      prepareLaunch: overrides.prepareLaunch ?? ((request) => request),
       ...(overrides.environment === undefined ? {} : {environment: overrides.environment}),
       ...(overrides.wait === undefined ? {} : {wait: overrides.wait}),
       ...(overrides.signalProcessGroup === undefined
@@ -80,6 +94,8 @@ describe('PythonRuntimeSupervisor', () => {
         '--no-env-file',
         '--no-progress',
         '--no-python-downloads',
+        '--python',
+        '/repo/.venv/bin/python',
         '--',
         'python',
         '-m',
@@ -97,11 +113,14 @@ describe('PythonRuntimeSupervisor', () => {
     });
   });
 
-  it('strips Python path overrides while preserving the remaining child environment', () => {
+  it('strips runtime-selection overrides while preserving the remaining child environment', () => {
     const environment = {
       PATH: '/usr/bin',
       PYTHONHOME: '',
       PYTHONPATH: '/tmp/fake-python-path',
+      UV_PROJECT_ENVIRONMENT: '/tmp/other-environment',
+      UV_ISOLATED: '1',
+      VIRTUAL_ENV: '/tmp/active-environment',
       CUSTOM_SETTING: 'kept',
     };
     const request = buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', environment);
@@ -111,8 +130,124 @@ describe('PythonRuntimeSupervisor', () => {
       PATH: '/usr/bin',
       PYTHONHOME: '',
       PYTHONPATH: '/tmp/fake-python-path',
+      UV_PROJECT_ENVIRONMENT: '/tmp/other-environment',
+      UV_ISOLATED: '1',
+      VIRTUAL_ENV: '/tmp/active-environment',
       CUSTOM_SETTING: 'kept',
     });
+  });
+
+  it('resolves uv to an absolute Linux path after validating the prepared environment', () => {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'cah-prepared-runtime-'));
+    const executableDirectory = mkdtempSync(join(tmpdir(), 'cah-linux-uv-'));
+    const uvExecutable = join(executableDirectory, 'uv');
+    const pythonDirectory = join(repositoryRoot, '.venv', 'bin');
+    const pythonExecutable = join(pythonDirectory, 'python');
+    mkdirSync(pythonDirectory, {recursive: true});
+    writeFileSync(join(repositoryRoot, '.venv', 'pyvenv.cfg'), 'home = /usr/bin\n');
+    writeExecutable(pythonExecutable);
+    writeExecutable(uvExecutable);
+
+    try {
+      const request = buildRuntimeLaunchRequest(repositoryRoot, '/workspace', 'uv', {
+        PATH: executableDirectory,
+      });
+      const prepared = prepareRuntimeLaunch(request);
+
+      expect(prepared.command).toBe(realpathSync(uvExecutable));
+      expect(prepared.arguments).toContain(pythonExecutable);
+    } finally {
+      rmSync(repositoryRoot, {recursive: true, force: true});
+      rmSync(executableDirectory, {recursive: true, force: true});
+    }
+  });
+
+  it('reports an unprepared environment without spawning or creating .venv', async () => {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'cah-missing-runtime-environment-'));
+    const executableDirectory = mkdtempSync(join(tmpdir(), 'cah-preflight-uv-'));
+    writeExecutable(join(executableDirectory, 'uv'));
+    const child = new FakeChild();
+    const spawnProcess = vi.fn((): ChildProcessWithoutNullStreams => asChild(child));
+    const supervisor = new PythonRuntimeSupervisor(
+      {repositoryRoot, workspace: '/workspace'},
+      {environment: {PATH: executableDirectory}, spawnProcess},
+    );
+
+    try {
+      await supervisor.start();
+
+      expect(spawnProcess).not.toHaveBeenCalled();
+      expect(supervisor.getState()).toMatchObject({
+        status: 'failed-to-start',
+        message: expect.stringContaining('is not prepared'),
+      });
+      expect(supervisor.getState()).toMatchObject({
+        message: expect.stringContaining('uv sync --dev'),
+      });
+      expect(existsSync(join(repositoryRoot, '.venv'))).toBe(false);
+      await supervisor.stop();
+    } finally {
+      rmSync(repositoryRoot, {recursive: true, force: true});
+      rmSync(executableDirectory, {recursive: true, force: true});
+    }
+  });
+
+  it('rejects missing and Windows uv executables before spawn', () => {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'cah-invalid-uv-'));
+    const executableDirectory = mkdtempSync(join(tmpdir(), 'cah-windows-uv-'));
+    const windowsUv = join(executableDirectory, 'uv.exe');
+    writeExecutable(windowsUv);
+    symlinkSync(windowsUv, join(executableDirectory, 'uv'));
+
+    try {
+      expect(() =>
+        prepareRuntimeLaunch(
+          buildRuntimeLaunchRequest(repositoryRoot, '/workspace', 'uv', {
+            PATH: join(repositoryRoot, 'empty-path'),
+          }),
+        ),
+      ).toThrow(/uv was not found inside Ubuntu WSL/u);
+      expect(() =>
+        prepareRuntimeLaunch(
+          buildRuntimeLaunchRequest(repositoryRoot, '/workspace', 'uv', {
+            PATH: executableDirectory,
+          }),
+        ),
+      ).toThrow(/Windows executable/u);
+      expect(() =>
+        prepareRuntimeLaunch(
+          buildRuntimeLaunchRequest(repositoryRoot, '/workspace', '/mnt/c/tools/uv.exe', {}),
+        ),
+      ).toThrow(/Windows executable/u);
+    } finally {
+      rmSync(repositoryRoot, {recursive: true, force: true});
+      rmSync(executableDirectory, {recursive: true, force: true});
+    }
+  });
+
+  it('rejects an extensionless uv path under a Windows mount without spawning', async () => {
+    const child = new FakeChild();
+    const spawnProcess = vi.fn((): ChildProcessWithoutNullStreams => asChild(child));
+    const supervisor = new PythonRuntimeSupervisor(
+      {
+        repositoryRoot: '/repo',
+        workspace: '/workspace',
+        command: '/mnt/c/tools/uv',
+      },
+      {environment: {}, spawnProcess},
+    );
+
+    await supervisor.start();
+
+    expect(spawnProcess).not.toHaveBeenCalled();
+    expect(supervisor.getState()).toMatchObject({
+      status: 'failed-to-start',
+      message: expect.stringContaining('Windows executable'),
+    });
+    expect(supervisor.getState()).toMatchObject({
+      message: expect.stringContaining('Install uv inside Ubuntu WSL'),
+    });
+    await supervisor.stop();
   });
 
   it('moves from starting to running only after spawn', async () => {
@@ -236,7 +371,7 @@ describe('PythonRuntimeSupervisor', () => {
     };
     const supervisor = new PythonRuntimeSupervisor(
       {repositoryRoot: '/repo', workspace: '/workspace', command: 'custom uv'},
-      {spawnProcess},
+      {prepareLaunch: (request) => request, spawnProcess},
     );
 
     await supervisor.start();
@@ -246,3 +381,7 @@ describe('PythonRuntimeSupervisor', () => {
     await supervisor.stop();
   });
 });
+
+function writeExecutable(path: string): void {
+  writeFileSync(path, '#!/bin/sh\nexit 0\n', {mode: 0o755});
+}
