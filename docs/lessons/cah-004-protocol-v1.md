@@ -139,11 +139,14 @@ breaking-change gates may then outweigh hand-maintained simplicity.
 ### Typical production capabilities and tools
 
 - [JSON Schema](https://json-schema.org/learn/getting-started-step-by-step) represents portable JSON
-  structure and constraint definitions.
+  structure and constraint definitions, while schema versioning, validator parity, and optional code
+  generation add maintenance work.
 - [Protocol Buffers](https://protobuf.dev/overview/) represents compact schemas and generated
-  cross-language types.
+  cross-language types, at the cost of compiler plugins, generated artifacts, and migration-aware
+  build pipelines.
 - [Buf breaking-change detection](https://buf.build/docs/breaking/) represents automated
-  compatibility checks for schema evolution.
+  compatibility checks for schema evolution, while baselines, CI integration, and policy exceptions
+  require ongoing governance.
 
 These are examples of production capabilities, not replacements selected for this local protocol.
 
@@ -189,3 +192,5 @@ See the shared [project glossary](../glossary.md) for event, command, correlatio
 - [CAH-004 delivery contract](../../user-stories/cah-004-define-protocol-v1.md)
 - [ADR 0003: Use a versioned NDJSON protocol](../adr/0003-ndjson-protocol.md)
 - [JSON Schema introduction](https://json-schema.org/learn/getting-started-step-by-step)
+- [Protocol Buffers overview](https://protobuf.dev/overview/)
+- [Buf breaking-change detection](https://buf.build/docs/breaking/)

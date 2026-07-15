@@ -1,6 +1,6 @@
 # CAH-008 - Establish educational documentation standards
 
-- **Status:** In progress
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-001
 - **Lesson:** [Documentation standards](../docs/lessons/cah-008-documentation-standards.md)
@@ -69,6 +69,13 @@
 Establishes the documentation standard in `AGENTS.md`, the conceptual documents under `docs/`, and
 the unit lesson library under `docs/lessons/`. It also defines the documentation-related clauses
 applied to every later story's definition of done.
+
+## Completion evidence
+
+The [CAH-008 documentation-enforcement note](notes/2026-07-15-cah-008-documentation-enforcement.md)
+records the final Ruff policy, public-API negative probe, exemption checks, documentation audit, and
+validation results. The completed unit changes documentation enforcement only; it adds no runtime
+dependency or agent behavior.
 
 ## Out of scope
 

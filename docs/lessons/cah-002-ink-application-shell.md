@@ -137,13 +137,17 @@ their own.
 
 ### Typical production capabilities and tools
 
-- [Ink](https://github.com/vadimdemedes/ink) represents component-based terminal rendering.
+- [Ink](https://github.com/vadimdemedes/ink) represents component-based terminal rendering, while
+  adding React and Node dependency upgrades plus terminal-compatibility testing.
 - [ink-testing-library](https://github.com/vadimdemedes/ink-testing-library) represents isolated
-  rendering and input tests for terminal components.
+  rendering and input tests for terminal components, but fixtures and render assertions must track
+  Ink and terminal behavior.
 - [npm lockfiles](https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json/) represent
-  repeatable dependency resolution and CI installation.
+  repeatable dependency resolution and CI installation, at the cost of dependency-update review and
+  ongoing security patching.
 - [OpenTelemetry for JavaScript](https://opentelemetry.io/docs/languages/js/) represents optional
-  support telemetry when privacy and operating policy permit it.
+  support telemetry, while instrumentation, collector or backend operation, and privacy review add
+  ongoing cost.
 
 These tools illustrate capabilities; the last capability is not an MVP dependency or endorsement.
 
@@ -188,3 +192,6 @@ See the shared [project glossary](../glossary.md) for TUI, runtime, event, and p
 - [CAH-002 delivery contract](../../user-stories/cah-002-bootstrap-ink-application.md)
 - [ADR 0002: Ink and Python process boundary](../adr/0002-ink-python-process-boundary.md)
 - [Ink documentation](https://github.com/vadimdemedes/ink)
+- [ink-testing-library documentation](https://github.com/vadimdemedes/ink-testing-library)
+- [npm package-lock documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json/)
+- [OpenTelemetry for JavaScript](https://opentelemetry.io/docs/languages/js/)

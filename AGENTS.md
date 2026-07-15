@@ -60,15 +60,16 @@ helpers are exempt from mechanical docstrings, but private code still needs expl
 encodes a protocol invariant, security boundary, concurrency rule, context-selection decision, or
 deliberate tradeoff. Comments explain why a choice exists rather than restating code.
 
-Ruff `D` rules with the Google convention are the intended enforcement. Keep test exemptions
-narrow and do not silence missing documentation broadly across production code.
+Ruff `D` rules with the Google convention enforce this policy. Keep test exemptions narrow and do
+not silence missing documentation broadly across production code.
 
 ## TypeScript and TUI Conventions
 
 Use TypeScript for all TUI production code. Exported protocol types, reducers, hooks, components,
 and other meaningful contracts use TSDoc. State whether a type is a wire shape or local UI state,
-whether reducers must remain pure, how duplicate or unknown events behave, and what happens after
-the child process exits when those concerns apply.
+document legal states and transition invariants for state machines, and state whether reducers must
+remain pure, how duplicate or unknown events behave, and what happens after the child process exits
+when those concerns apply.
 
 The TUI must preserve pending user input while background events arrive, expose keyboard
 cancellation, and remain understandable in narrow or resized terminals. Keep orchestration and
@@ -84,7 +85,9 @@ TUI. Every wire message is exactly one JSON object followed by a newline.
 
 Session events carry a session ID and monotonic sequence. Commands carry an ID that resulting
 events reference as a correlation ID. Use shared golden JSON fixtures in both languages whenever
-the protocol changes. Never write logs, tracebacks, or diagnostics to Python protocol stdout.
+the protocol changes. Protocol-message documentation identifies process ownership, correlation,
+ordering, sequencing, and expected failure behavior. Never write logs, tracebacks, or diagnostics
+to Python protocol stdout.
 
 Use one explicit `asyncio` event loop in the Python runtime. Preserve ordered event writes, model
 active work as cancellable tasks, and check cancellation and limits before starting another costly
@@ -112,7 +115,8 @@ cancellation, expected failures, and security considerations.
 Use pytest for Python and the TUI's chosen test runner for TypeScript. Name Python test files
 `test_*.py` and test functions `test_*`. Add focused regression coverage for every behavior change,
 including at least one meaningful failure path. Unit tests replace model and network interactions
-with deterministic fakes.
+with deterministic fakes. When a test's setup and intent are not self-evident, document the modeled
+scenario and why it matters; trivial tests do not need explanatory comments.
 
 Every implementation-ready story, including documentation-only work, must keep its linked lesson
 consistent with the story status and delivered evidence. The additional behavioral checks below
@@ -168,8 +172,13 @@ Use short, imperative commit subjects consistent with history, such as `Document
 architecture`. Keep each commit to one logical change and, where practical, one user story. Branch
 names should be descriptive, such as `agent/add-tool-registry`. Pull requests explain what changed,
 why it changed, and developer impact; list validation commands and link relevant stories or issues.
-Include screenshots only for visible UI changes. Open work as a draft and mark it ready after all
-checks pass.
+Include screenshots only for visible UI changes.
+
+When a unit reaches **Done** and its required validation passes, complete the publish workflow in the
+same unit: create or switch to a descriptive branch, commit only the intended changes, push the
+branch, open a pull request, and mark it ready for review. Use a draft pull request while work is
+incomplete, but do not leave a completed unit only in the local worktree or in draft state unless the
+user explicitly requests that outcome.
 
 ## Security and Configuration
 

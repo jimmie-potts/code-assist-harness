@@ -133,13 +133,17 @@ longer depend on every engineer knowing which repository to search.
 
 ### Typical production capabilities and tools
 
-- [MADR](https://adr.github.io/madr/) represents a structured, version-controlled ADR format.
+- [MADR](https://adr.github.io/madr/) represents a structured, version-controlled ADR format, but
+  contributors must maintain consistent templates and keep decision links current.
 - [Backstage Software Catalog](https://backstage.io/docs/features/software-catalog/) represents
-  searchable component ownership and metadata across many teams.
+  searchable component ownership and metadata across many teams, while requiring catalog hosting,
+  metadata ownership, and platform upgrades.
 - [GitHub CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
-  represents review routing for architecture-sensitive paths.
+  represents review routing for architecture-sensitive paths, but ownership maps need continual
+  maintenance and can create review bottlenecks.
 - [Open Policy Agent](https://www.openpolicyagent.org/docs) represents automated policy evaluation
-  when rules must be consistent across services.
+  when rules must be consistent across services, at the cost of policy authoring, testing,
+  distribution, and runtime ownership.
 
 These links illustrate capabilities, not preferred vendors or dependencies for this repository.
 
@@ -191,3 +195,6 @@ See the shared [project glossary](../glossary.md) for session, event, provider, 
 - [ADR 0002: Ink and Python process boundary](../adr/0002-ink-python-process-boundary.md)
 - [ADR 0003: Versioned NDJSON](../adr/0003-ndjson-protocol.md)
 - [MADR guidance](https://adr.github.io/madr/)
+- [Backstage Software Catalog](https://backstage.io/docs/features/software-catalog/)
+- [GitHub CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
+- [Open Policy Agent documentation](https://www.openpolicyagent.org/docs)

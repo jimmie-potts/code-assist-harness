@@ -134,13 +134,17 @@ diagnostics.
 ### Typical production capabilities and tools
 
 - [Node child processes](https://nodejs.org/api/child_process.html) represent local spawn, pipes,
-  signals, and exit observation used by this story.
+  signals, and exit observation used by this story, but application code must own signal races,
+  pipe backpressure, and platform edge cases.
 - [Python asyncio subprocesses](https://docs.python.org/3/library/asyncio-subprocess.html) represent
-  asynchronous process and stream supervision within Python services.
+  asynchronous process and stream supervision within Python services, while cancellation, stream
+  draining, and event-loop shutdown require specialized tests.
 - [systemd](https://systemd.io/) represents host-level service lifecycle, process tracking, and
-  restart policy.
+  restart policy, at the cost of unit-file rollout, host operations, log retention, and on-call
+  response.
 - [Kubernetes Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/) represent
-  scheduled, retried, and observable finite workloads across a cluster.
+  scheduled, retried, and observable finite workloads across a cluster, while capacity, manifests,
+  telemetry, and cluster upgrades require platform ownership.
 
 These references describe capabilities, not required deployment choices for the local MVP.
 
@@ -187,3 +191,6 @@ See the shared [project glossary](../glossary.md) for runtime, workspace, comman
 - [ADR 0002: Ink and Python process boundary](../adr/0002-ink-python-process-boundary.md)
 - [Process protocol responsibilities](../protocol.md#process-responsibilities)
 - [Node child-process documentation](https://nodejs.org/api/child_process.html)
+- [Python asyncio subprocesses](https://docs.python.org/3/library/asyncio-subprocess.html)
+- [systemd documentation](https://systemd.io/)
+- [Kubernetes Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/)

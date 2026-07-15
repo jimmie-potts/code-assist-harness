@@ -125,15 +125,24 @@ but gateways and infrastructure must also enforce tenant, service, and cluster b
 These official references show representative capabilities, not endorsed project dependencies:
 
 - [Python `asyncio` timeouts](https://docs.python.org/3/library/asyncio-task.html#timeouts)
-  document the local cancellation-based timeout primitive available to the planned runtime.
+  document the local cancellation-based timeout primitive available to the planned runtime. Their
+  operational burden is disciplined cancellation cleanup plus deterministic timeout and race tests.
 - [Kubernetes ResourceQuota](https://kubernetes.io/docs/concepts/policy/resource-quotas/) illustrates
-  namespace-level aggregate resource constraints that protect shared clusters.
+  namespace-level aggregate resource constraints that protect shared clusters. Its operational
+  burden includes capacity calibration, policy ownership, namespace coordination, and handling
+  workloads rejected by exhausted quotas.
 - [Envoy local rate limiting](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/local_rate_limit_filter)
-  illustrates request-rate enforcement at a network boundary.
+  illustrates request-rate enforcement at a network boundary. Its operational burden includes proxy
+  deployment, consistent configuration rollout, limit tuning, and failure diagnosis across another
+  network hop.
 - [Prometheus histograms](https://prometheus.io/docs/practices/histograms/) illustrate latency and
-  size distributions used to evaluate objectives and choose defensible thresholds.
+  size distributions used to evaluate objectives and choose defensible thresholds. Their
+  operational burden includes bucket design, cardinality control, storage and query cost, and alert
+  maintenance.
 - [OpenTelemetry metrics data model](https://opentelemetry.io/docs/specs/otel/metrics/data-model/)
-  illustrates interoperable transport of pre-aggregated measurements across telemetry systems.
+  illustrates interoperable transport of pre-aggregated measurements across telemetry systems. Its
+  operational burden includes collector and exporter operation, schema governance, pipeline
+  upgrades, cardinality control, and telemetry storage.
 
 ### Local design versus production design
 

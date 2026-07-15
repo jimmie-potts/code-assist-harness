@@ -119,15 +119,20 @@ built, linted, versioned, and contract-tested as part of delivery governance.
 These tools represent capabilities; this repository does not require or endorse them:
 
 - [MkDocs](https://www.mkdocs.org/) illustrates building a searchable site from version-controlled
-  Markdown when repository navigation no longer scales.
+  Markdown when repository navigation no longer scales, while adding theme and plugin upgrades,
+  build pipelines, hosting, search indexing, and publication ownership.
 - [Mermaid](https://mermaid.js.org/intro/) illustrates source-controlled diagrams that can evolve in
-  the same review as architecture text.
+  the same review as architecture text, but renderer-version compatibility, accessibility, and
+  diagram review become ongoing maintenance concerns.
 - [Vale](https://docs.vale.sh/) illustrates automated terminology and prose-style checks across many
-  authors.
+  authors, with continuing cost in rule curation, suppression policy, editor integration, and
+  false-positive tuning.
 - [OpenAPI](https://spec.openapis.org/oas/latest.html) illustrates a machine-readable contract that
-  can drive reference documentation and validation for HTTP APIs.
+  can drive reference documentation and validation for HTTP APIs while requiring schema ownership,
+  compatibility policy, generation tooling, and coordinated version migrations.
 - [markdown-link-check](https://github.com/tcort/markdown-link-check) illustrates automated internal
-  and external link verification for Markdown repositories.
+  and external link verification for Markdown repositories, but CI must manage network flakiness,
+  redirects, allowlists, and recurring external-link maintenance.
 
 ### Local design versus production design
 
@@ -179,3 +184,8 @@ See the shared [project glossary](../glossary.md) for command, event, correlatio
 - [Agent-loop design](../agent-loop.md)
 - [Safety model](../safety-model.md)
 - [Project glossary](../glossary.md)
+- [MkDocs](https://www.mkdocs.org/)
+- [Mermaid](https://mermaid.js.org/intro/)
+- [Vale](https://docs.vale.sh/)
+- [OpenAPI](https://spec.openapis.org/oas/latest.html)
+- [markdown-link-check](https://github.com/tcort/markdown-link-check)

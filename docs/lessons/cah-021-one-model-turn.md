@@ -136,12 +136,17 @@ These official references illustrate capabilities, not repository requirements o
   [background-mode limits](https://developers.openai.com/api/docs/guides/background#limits)
   distinguish terminating a synchronous connection from background operation, while the
   [statefulness guidance](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness)
-  makes provider storage an explicit API concern rather than a local transcript setting.
+  makes provider storage an explicit API concern rather than a local transcript setting. Its
+  operational burden includes credential rotation, quota and spend monitoring, API compatibility,
+  and provider-retention governance.
 - [Envoy circuit breaking](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/circuit_breaking)
-  illustrates network-level connection, pending-request, request, and retry bounds.
+  illustrates network-level connection, pending-request, request, and retry bounds. Its operational
+  burden includes proxy deployment, safe configuration rollout, capacity tuning, and another
+  production failure domain to operate.
 - [OpenTelemetry generative AI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
   illustrate interoperable operation telemetry while leaving content capture and privacy decisions
-  to the application.
+  to the application. Their operational burden includes collector pipelines, sampling and
+  cardinality policy, telemetry storage, privacy review, and on-call ownership.
 
 ### Local design versus production design
 
