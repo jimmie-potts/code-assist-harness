@@ -15,10 +15,11 @@
 ## Quick summary
 
 CAH-002 delivers a launchable conversation-first terminal frame inside Ubuntu WSL. A small shell
-launcher rejects missing tooling, Windows Node executables, and unsupported versions before npm; a
-pure TypeScript gate repeats Node validation before Ink is imported. Ink then renders the title,
-empty conversation, task input, and idle status. Ctrl+C unmounts the application and restores the
-terminal. The shell deliberately performs no task submission or harness work.
+launcher rejects missing tooling, Windows Node or npm executables—including symlink-hidden targets—
+and unsupported versions before npm; a pure TypeScript gate repeats Node validation before Ink is
+imported. Ink then renders the title, empty conversation, task input, and idle status. Ctrl+C
+unmounts the application and restores the terminal. The shell deliberately performs no task
+submission or harness work.
 
 ## Learning objectives
 
@@ -54,10 +55,11 @@ enter Ink's render path.
 ### The launcher owns pre-Node WSL failures
 
 [`scripts/run-tui`](../../scripts/run-tui) runs before TypeScript can help. It reports actionable
-instructions when Node or npm is absent, rejects a Windows executable reached through `/mnt` or an
-`.exe` path, and validates `>=22.13.0 <23` before npm can load `tsx`. It then resolves the repository
-root and launches the npm start script without depending on the caller's current directory. The
-TypeScript gate repeats the range check as defense in depth for direct CLI callers.
+instructions when Node or npm is absent, resolves both executable paths with `readlink -f`, rejects
+a raw or resolved `/mnt` or `.exe` path, and validates `>=22.13.0 <23` before npm can load `tsx`. It
+then resolves the repository root and launches the npm start script without depending on the
+caller's current directory. The TypeScript gate repeats the range check as defense in depth for
+direct CLI callers.
 
 ### A lockfile and metadata form one runtime contract
 
@@ -82,7 +84,8 @@ do not hide the contract being tested.
 
 ```text
 ./scripts/run-tui
-  -> verify Linux Node and npm exist and Node is >=22.13.0 <23
+  -> verify Linux Node and npm exist and resolve to Linux executables
+  -> verify Node is >=22.13.0 <23
   -> npm start with TMPDIR=/tmp
   -> cli.ts
   -> bootstrapApplication(process.versions.node)
@@ -94,7 +97,7 @@ do not hide the contract being tested.
 
 | Concern | Implemented owner | Evidence |
 | --- | --- | --- |
-| Missing, Windows, or unsupported outer runtime | `scripts/run-tui` | `launcher.test.ts` |
+| Missing, Windows, symlink-hidden, or unsupported outer runtime | `scripts/run-tui` | `launcher.test.ts` |
 | Version compatibility defense in depth | `node-version.ts` | `node-version.test.ts`, `runtime-metadata.test.ts` |
 | Pre-render ordering | `bootstrap.ts` | `bootstrap.test.ts` |
 | Initial visible frame | `app.tsx` | `app.test.tsx` |
@@ -104,7 +107,7 @@ do not hide the contract being tested.
 The implemented invariants are:
 
 - unsupported Node versions fail before npm and are rechecked before the Ink-owning module loads;
-- missing tooling and Windows Node paths fail with Ubuntu WSL setup guidance;
+- missing tooling and raw or symlink-hidden Windows Node/npm paths fail with WSL setup guidance;
 - the repository pin, npm engine range, and TypeScript guard stay aligned;
 - the screen contains the title, conversation empty state, task-input placeholder, and idle status;
 - Ctrl+C remains an Ink-owned application exit because no active session exists yet;
@@ -119,8 +122,9 @@ The implemented invariants are:
 
 1. **Inspect the runtime contract.** `.node-version` contains 22.22.1. `package.json` accepts
    `>=22.13.0 <23`, requires npm 9 or newer, and `tui/.npmrc` makes engine mismatches fatal.
-2. **Start at the launcher.** `scripts/run-tui` checks for Node and npm, rejects Windows paths and
-   unsupported versions, finds the repository root, and executes the TUI's `start` script.
+2. **Start at the launcher.** `scripts/run-tui` checks for Node and npm, resolves both executable
+   paths, rejects raw or symlink-hidden Windows binaries and unsupported versions, finds the
+   repository root, and executes the TUI's `start` script.
 3. **Follow the bootstrap.** `cli.ts` passes `process.versions.node` to `bootstrapApplication` and
    supplies a dynamic import. An error is written to stderr with exit status 1.
 4. **Study the pure guard.** `assertSupportedNodeVersion` accepts an explicit value, enabling edge
@@ -130,7 +134,7 @@ The implemented invariants are:
    this unit.
 6. **Trace exit ownership.** `runApplication` asks Ink to handle Ctrl+C and awaits `waitUntilExit`.
    The lifecycle test verifies both arguments; a pseudo-terminal run verified the physical cleanup.
-7. **Run the focused suite.** Six test files contain 15 tests covering the screen, bootstrap order,
+7. **Run the focused suite.** Six test files contain 17 tests covering the screen, bootstrap order,
    launcher failure, version boundaries, runtime metadata, and exit configuration.
 8. **Reproduce the environment lesson.** In the implementation WSL session, inherited `TEMP` and
    `TMP` named a missing Windows directory. The `start` and `test` scripts now set `TMPDIR=/tmp`,
@@ -143,12 +147,13 @@ The exact command results and terminal observation are preserved in the
 
 ## Failure scenarios to study
 
-### Node is missing, unsupported, or resolves to Windows
+### Node or npm is missing, unsupported, or resolves to Windows
 
-**Symptom:** the application cannot reach a reliable Linux runtime. **Boundary:** `scripts/run-tui`.
-**Safe outcome:** exit 1 before npm or Ink with the detected version, supported range, pin, and setup
-commands. **Evidence:** launcher tests cover a missing executable and a fake Node 20 whose fake npm
-must remain uncalled; direct inspection covers the Windows-path branch.
+**Symptom:** the application cannot reach a reliable Linux runtime, or a Linux-looking symlink hides
+a Windows executable. **Boundary:** `scripts/run-tui`. **Safe outcome:** resolve both Node and npm,
+then exit 1 before npm or Ink with the detected path or version and setup commands. **Evidence:**
+launcher tests cover a missing executable, a fake Node 20 whose fake npm remains uncalled, a Windows
+npm target, and a symlink-hidden Windows Node target.
 
 ### The runtime is outside the supported range
 

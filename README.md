@@ -102,10 +102,10 @@ Launch the static shell from the repository root inside Ubuntu WSL:
 ./scripts/run-tui
 ```
 
-The launcher reports actionable setup guidance when Node or npm is missing, rejects a Windows Node
-executable reached through WSL, and checks the supported Node range before npm or the TypeScript
-loader runs. The initial shell is intentionally not connected to Python or task submission. Press
-Ctrl+C to let Ink unmount and restore the terminal.
+The launcher reports actionable setup guidance when Node or npm is missing, rejects Windows Node or
+npm executables reached directly or through a symlink, and checks the supported Node range before
+npm or the TypeScript loader runs. The initial shell is intentionally not connected to Python or
+task submission. Press Ctrl+C to let Ink unmount and restore the terminal.
 
 Run the current Python checks and build:
 

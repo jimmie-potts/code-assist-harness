@@ -118,11 +118,12 @@ tui/
 └── test/              Render, bootstrap, launcher, runtime, and lifecycle tests
 ```
 
-`scripts/run-tui` rejects unsupported Node versions before npm and its TypeScript loader run.
-`cli.ts` repeats the validation through the pure bootstrap before dynamically importing the
-Ink-owning `run-application.tsx` module. These checks keep unsupported runtimes outside the
-renderer. Later TypeScript stories add protocol validation and state reduction separately from
-components; empty planned directories are not created early.
+`scripts/run-tui` resolves and validates both the Node and npm executable paths, rejecting Windows
+paths even when a Linux-looking symlink hides them, then rejects unsupported Node versions before
+npm and its TypeScript loader run. `cli.ts` repeats the version validation through the pure
+bootstrap before dynamically importing the Ink-owning `run-application.tsx` module. These checks
+keep unsupported runtimes outside the renderer. Later TypeScript stories add protocol validation
+and state reduction separately from components; empty planned directories are not created early.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. Schema generation is deferred until contract drift

@@ -51,7 +51,7 @@ contract.
 ## Completion evidence
 
 The [CAH-002 Ink-shell note](notes/2026-07-15-cah-002-ink-shell.md) records the runtime contract,
-implemented modules, WSL launcher, six test files with 15 passing tests, manual pseudo-terminal
+implemented modules, WSL launcher, six test files with 17 passing tests, manual pseudo-terminal
 launch and Ctrl+C evidence, and the `TMPDIR=/tmp` environment discovery. The completed unit renders
 only a static shell; it introduces no Python child, protocol, provider, workspace, tool, policy, or
 approval behavior.

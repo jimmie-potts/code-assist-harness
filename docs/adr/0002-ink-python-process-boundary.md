@@ -102,9 +102,9 @@ test matrix before the core architecture is proven.
 ## Implementation status
 
 This remains the accepted target process decision. CAH-002 now implements the static terminal side:
-`scripts/run-tui` checks for a Linux Node executable and rejects unsupported versions before npm,
-`tui/src/bootstrap.ts` repeats the Node validation before dynamically loading Ink,
-`tui/src/app.tsx` renders the initial shell, and `tui/src/run-application.tsx` enables Ink's Ctrl+C
-exit and awaits terminal cleanup. The repository pins Node 22.22.1 and enforces `>=22.13.0 <23`
-through npm metadata. No Python runtime entry point or child process exists yet; CAH-003 owns
-startup, supervision, failure handling, and child cleanup.
+`scripts/run-tui` resolves both Node and npm executable paths, rejects Windows binaries even behind
+symlinks, and rejects unsupported Node versions before npm. `tui/src/bootstrap.ts` repeats the Node
+validation before dynamically loading Ink, `tui/src/app.tsx` renders the initial shell, and
+`tui/src/run-application.tsx` enables Ink's Ctrl+C exit and awaits terminal cleanup. The repository
+pins Node 22.22.1 and enforces `>=22.13.0 <23` through npm metadata. No Python runtime entry point or
+child process exists yet; CAH-003 owns startup, supervision, failure handling, and child cleanup.
