@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M1 - Conversational core / E1 - Session, state, and event model
 - **Dependencies:** CAH-010
+- **Lesson:** [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md)
 
 ## User story
 
@@ -36,7 +37,9 @@
    otherwise unchanged.
 9. A write or flush failure becomes a visible structured persistence error, avoids recursive writes,
    and does not silently mutate the reducer's terminal outcome.
-10. Re-reading a complete JSONL file and applying the reducer reconstructs the same final state.
+10. Re-reading a complete JSONL file and applying the reducer reconstructs the same terminal
+    lifecycle state and the same values for persisted safe fields; redacted or bounded content is
+    represented by its stored safe value rather than reconstructed.
 11. Tests use temporary directories, fake credentials, and injected write failures; no real home
     state or credential is touched.
 

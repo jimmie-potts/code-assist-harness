@@ -125,6 +125,7 @@ A behavioral story adds or updates:
 - Python and TypeScript checks relevant to the changed boundary.
 - A rendering or reducer test for visible TUI behavior.
 - The conceptual documentation that explains the design rationale.
+- The unit lesson with concrete implementation paths, observed trade-offs, and evidence links.
 
 Default validation must remain model-free and network-free.
 

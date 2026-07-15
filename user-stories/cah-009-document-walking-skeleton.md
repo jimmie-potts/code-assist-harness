@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-006
+- **Lesson:** [Walking-skeleton guide](../docs/lessons/cah-009-walking-skeleton-guide.md)
 
 ## User story
 

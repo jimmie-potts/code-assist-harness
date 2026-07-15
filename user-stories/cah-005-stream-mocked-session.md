@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-002, CAH-003, CAH-004
+- **Lesson:** [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md)
 
 ## User story
 

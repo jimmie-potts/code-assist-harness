@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-003
+- **Lesson:** [Protocol version 1](../docs/lessons/cah-004-protocol-v1.md)
 
 ## User story
 

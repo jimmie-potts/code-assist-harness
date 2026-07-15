@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-021
+- **Lesson:** [Loop limits](../docs/lessons/cah-022-loop-limits.md)
 
 ## User story
 
@@ -17,6 +18,8 @@
 - Emit distinct domain failure codes and understandable TUI messages.
 - Exercise every limit deterministically with the fake provider, including scaffolding for tool-call
   limits before tool execution is implemented.
+- Exercise model-turn exhaustion at the limit-tracker/preflight seam until a later story introduces
+  multi-turn orchestration; this story must not expand CAH-021 beyond one model turn.
 
 ## Acceptance criteria
 
@@ -24,7 +27,7 @@
    assistant-output limit with documented defaults and validation.
 2. Invalid, zero, negative, or unreasonably large values follow a documented reject/clamp policy and
    cannot silently disable safety limits.
-3. Before starting another provider or future tool operation, the loop checks every applicable limit
+3. Before starting a provider or future tool operation, the loop checks every applicable limit
    and stops without making the costly call when exhausted.
 4. The deadline uses a monotonic clock for elapsed-time enforcement and can be injected in tests.
 5. Output limits are enforced during streaming without emitting unbounded content to the TUI or
@@ -36,10 +39,12 @@
 8. The transcript and human-readable summary identify the limit reached and bounded counters at the
    time of failure.
 9. The TUI renders each limit failure in understandable language with a safe next step.
-10. Deterministic fake-provider tests cover every limit at its boundary and prove no additional
-    provider call starts after exhaustion.
+10. Deterministic fake-provider tests cover every limit at its boundary and prove an attempted
+    admission after exhaustion does not start a provider call. Model-turn exhaustion may be seeded
+    at the tracker/preflight seam until multi-turn orchestration exists.
 11. Tool-call accounting can consume provider-requested calls even though execution remains out of
-    scope, preventing an unbounded request sequence from bypassing the limit.
+    scope, preventing calls beyond the configured budget from being admitted without implying tool
+    execution or another provider turn.
 
 ## Validation
 
@@ -56,5 +61,6 @@ and the glossary with model turn, tool call, deadline, output accounting, and li
 
 ## Out of scope
 
-- Tool execution, command timeout implementation, retries, or adaptive budget increases.
+- Multi-turn orchestration, tool execution, command timeout implementation, retries, or adaptive
+  budget increases.
 - User interfaces that allow an active session to weaken its own limits.

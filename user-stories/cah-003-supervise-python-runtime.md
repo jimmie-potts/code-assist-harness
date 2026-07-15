@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-002
+- **Lesson:** [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md)
 
 ## User story
 

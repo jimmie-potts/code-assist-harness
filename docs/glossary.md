@@ -94,6 +94,12 @@ A hard bound on work, such as model turns, tool calls, output size, tool duratio
 time. A limit is checked before beginning another costly operation and produces a distinct failure
 code when exhausted.
 
+## Lesson
+
+The learning companion for one implementation-ready user story. It explains the unit's concepts,
+architecture, practical exercises, failure modes, production alternatives, trade-offs, and local
+glossary. A lesson is educational context, not evidence that planned behavior has shipped.
+
 ## Model turn
 
 One provider request and its complete streamed response. A model turn may produce assistant text,

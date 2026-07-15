@@ -3,6 +3,7 @@
 - **Status:** Planned
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-009
+- **Lesson:** [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md)
 
 ## User story
 

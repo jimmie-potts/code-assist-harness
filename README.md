@@ -115,6 +115,7 @@ tui/                      Ink application and TypeScript tests
 protocol/                 Shared NDJSON fixtures
 evals/                    Deterministic scenario fixtures
 docs/                     Architecture and learning documentation
+docs/lessons/             Unit-by-unit learning companions
 user-stories/             Roadmap, implementation stories, and planning notes
 scripts/                  Development and validation entry points
 ```
@@ -132,6 +133,7 @@ the user story that needs them rather than as empty placeholders.
 - [Tool system](docs/tool-system.md)
 - [Safety model](docs/safety-model.md)
 - [Evaluation](docs/evaluation.md)
+- [Unit lessons](docs/lessons/README.md)
 - [User-story backlog](user-stories/README.md)
 
 Documentation is part of the product. Public Python APIs use Google-style docstrings, meaningful
