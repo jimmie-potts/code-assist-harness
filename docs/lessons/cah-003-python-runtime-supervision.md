@@ -7,9 +7,16 @@
 - **Story:** [CAH-003](../../user-stories/cah-003-supervise-python-runtime.md)
 - **Related architecture:** [ADR 0002](../adr/0002-ink-python-process-boundary.md) and
   [protocol design](../protocol.md#process-responsibilities)
+- **Visual companion:** [CAH-003 lesson deck](assets/cah-003-python-runtime-supervision.pptx)
 
 > This lesson describes planned CAH-003 behavior. It establishes process lifetime and stream
 > ownership but deliberately stops before CAH-004's versioned message parsing.
+
+![Concept illustration of one parent process supervising one child through three distinct
+channels](assets/cah-003-process-supervision-concept.png)
+
+*Concept illustration—not an implementation screenshot. The paired process modules and three
+channels represent the planned parent-child lifetime and stdin, stdout, and stderr ownership.*
 
 ## Quick summary
 
