@@ -5,6 +5,7 @@
 - **Lesson status:** Verified against implementation
 - **Implementation status:** Implemented and validated across the real Node–uv–Python boundary
 - **Story:** [CAH-004](../../user-stories/cah-004-define-protocol-v1.md)
+- **Visual companion:** [Protocol v1 presentation](assets/cah-004-protocol-v1.pptx)
 - **Related architecture:** [ADR 0003](../adr/0003-ndjson-protocol.md) and
   [protocol design](../protocol.md)
 
