@@ -13,7 +13,8 @@ export interface AppProperties {
  * Render the conversation-first shell and its supervised Python runtime state.
  *
  * The component listens for terminal input so the shell remains mounted. Ink owns Ctrl+C cleanup;
- * task submission, protocol events, orchestration, and policy decisions are intentionally absent.
+ * protocol readiness and failure are projected from the supervisor, while task submission,
+ * session-event reduction, orchestration, and policy decisions remain intentionally absent.
  *
  * @param properties - Projection-only runtime state supplied by the lifecycle owner.
  * @returns The initial title, conversation, task-input, and status regions.
@@ -58,6 +59,12 @@ function RuntimeStatus({state}: {readonly state: RuntimeState}): ReactElement {
       return (
         <Text color="red">
           Status: runtime failed to start · {state.message} · Ctrl+C to exit
+        </Text>
+      );
+    case 'protocol-failed':
+      return (
+        <Text color="red">
+          Status: runtime protocol failed ({state.code}) · {state.message} · Ctrl+C to exit
         </Text>
       );
     case 'unexpectedly-exited':

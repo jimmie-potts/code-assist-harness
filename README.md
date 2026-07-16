@@ -10,21 +10,22 @@ harness library.
 
 ## Current status
 
-The repository now contains a minimal supervised Python runtime and an Ink/TypeScript parent that
-launches it through `uv`. Startup validates the WSL Node, npm, and `uv` paths plus the prepared
-Python project environment, resolves exactly one canonical workspace, shows child startup or exit
-failures, and reaps the child when Ink exits. The stdin/stdout pipes are physically reserved for the
-future protocol, but the application does
-**not** yet define NDJSON messages, run an agent loop, read the workspace, or integrate with
-OpenAI. The next unit, CAH-004, defines and validates protocol version 1.
+The repository now contains a supervised Python runtime and an Ink/TypeScript parent that launch
+through `uv` and complete a validated protocol version 1 readiness handshake. Pydantic and Zod
+validate strict, hand-maintained wire contracts on both sides; bounded LF readers contain malformed
+lines; shared fixtures prove cross-language parity; and the TUI enters `running` only after a
+correlated `runtime.ready` confirms the canonical workspace. The application does **not** yet submit
+tasks, stream a mocked session, run an agent loop, read the workspace, or integrate with OpenAI.
+CAH-005 is the next dependency-ready unit.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
 core domain types must not depend on it.
 
 The superseded LangChain packages have been removed from Python project metadata and `uv.lock`.
-Python runtime dependencies remain empty. The TUI's Ink, React, and development dependencies are
-kept separately in `tui/package.json` and its committed npm lockfile.
+Pydantic v2 is the Python runtime's first boundary-validation dependency. The TUI's Ink, React,
+Zod, and development dependencies are kept separately in `tui/package.json` and its committed npm
+lockfile.
 
 Start with the [architecture overview](docs/architecture.md), the
 [decision records](docs/adr/), and the [dependency-ordered backlog](user-stories/README.md).
@@ -119,9 +120,10 @@ The launcher reports actionable setup guidance when Node or npm is missing, reje
 npm executables reached directly or through a symlink, and checks the supported Node range before
 npm or the TypeScript loader runs. The runtime supervisor separately resolves `uv` from its filtered
 `PATH`, follows symlinks, rejects paths under `/mnt` and names ending in `.exe`, and validates the
-prepared project environment before spawn. The TUI then starts Python, displays the canonical
-workspace and runtime state, and keeps task submission disconnected. Press Ctrl+C to let Ink exit
-and restore the terminal; the application lifecycle then closes the child's stdin, terminates its
+prepared project environment before spawn. The TUI then sends a validated `runtime.initialize`
+command, waits for the correctly correlated `runtime.ready` event, displays the canonical workspace
+and runtime state, and keeps task submission disconnected. Press Ctrl+C to let Ink exit and restore
+the terminal; the lifecycle sends `runtime.shutdown`, closes the child's stdin, terminates its
 detached process group if it does not exit within the bounded grace periods, and awaits the child
 close event. `SIGHUP` and `SIGTERM` also request an Ink unmount and enter this same cleanup path.
 
@@ -140,6 +142,9 @@ Startup troubleshooting:
   directory, and is accessible from Ubuntu WSL.
 - If Python exits after spawning, the TUI shows a bounded, sanitized stderr summary and remains in
   a failed state until Ctrl+C. The supervisor does not restart it automatically.
+- If startup reports a protocol failure, inspect the safe failure code. Unsupported, unknown,
+  malformed, mismatched, and timed-out readiness messages never enter trusted TUI state; the
+  supervisor closes command input and reaps the child during normal cleanup.
 
 Run the current Python checks and build:
 
@@ -169,20 +174,20 @@ integration checks without making network requests.
 ## Current and planned project layout
 
 ```text
-src/code_assist_harness/  Current minimal supervised runtime; future harness core
+src/code_assist_harness/  Current runtime and Pydantic protocol boundary; future harness core
 tests/                    Current Python tests mirroring source modules
-tui/                      Current supervised Ink application, npm metadata, and TypeScript tests
+tui/                      Current supervised Ink app, Zod protocol boundary, metadata, and tests
 scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
-protocol/                 Planned shared NDJSON fixtures
+protocol/                 Current reviewed cross-language NDJSON fixtures
 evals/                    Planned deterministic scenario fixtures
 docs/                     Architecture and learning documentation
 docs/lessons/             Unit-by-unit learning companions
 user-stories/             Roadmap, implementation stories, and planning notes
 ```
 
-The Python runtime, supervised TUI, documentation, and backlog exist today. Protocol messages,
-evaluation, provider, tool, and agent paths remain planned and are introduced only by the story
-that needs them.
+The Python runtime, supervised TUI, protocol messages and fixtures, documentation, and backlog exist
+today. Session streaming, evaluation, provider, tool, and agent paths remain planned and are
+introduced only by the story that needs them.
 
 ## Documentation map
 

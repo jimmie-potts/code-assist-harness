@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"runtime.ready","timestamp":"2026-07-16T13:01:05.000Z","correlation_id":"cmd_initialize_002","payload":{"workspace":"/tmp/cah-fixture-workspace"},"debug":true}

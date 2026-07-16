@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"session.cancel","command_id":"cmd_cancel_001","timestamp":"2026-07-16T13:00:02.000Z","payload":{"session_id":"ses_cancel_001"}}

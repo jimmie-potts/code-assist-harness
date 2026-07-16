@@ -1,9 +1,10 @@
 # Process Protocol
 
-> Status: CAH-003 implements the physical pipes and process supervision. Versioned messages,
-> readiness, parsing, validation, and the catalogs below remain proposed for CAH-004.
+> Status: CAH-004 implements protocol version 1 schemas, bounded readers, ordered Python event
+> writes, shared fixtures, and the `runtime.initialize` / `runtime.ready` readiness handshake.
+> Session streaming remains CAH-005 work.
 
-The Ink TUI and Python harness will communicate through a small, versioned NDJSON protocol. The
+The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
 terminal, one local child process owns the harness, and messages flow over standard streams.
 
@@ -11,8 +12,8 @@ terminal, one local child process owns the harness, and messages flow over stand
 
 | Stream | Direction | Permitted content |
 | --- | --- | --- |
-| `stdin` | Ink to Python | Commands, one JSON object per line |
-| `stdout` | Python to Ink | Events, one JSON object per line |
+| `stdin` | Ink to Python | Validated commands, one JSON object per LF-terminated line |
+| `stdout` | Python to Ink | Validated events, one JSON object per LF-terminated line |
 | `stderr` | Python to terminal diagnostics | Human-readable diagnostics and tracebacks |
 
 Ink owns keyboard input, rendering, and child-process supervision. Python will own session
@@ -21,8 +22,8 @@ will reduce validated events into visible state; it must not infer permission or
 decisions.
 
 Protocol stdout is a machine interface. Debug prints, logging, progress bars, and tracebacks must
-never be written there because a single non-JSON line can desynchronize the parent. Python should
-use a single ordered event writer so concurrent tasks cannot interleave output.
+never be written there because a single non-JSON line can desynchronize the parent. Python uses a
+single ordered event writer so concurrent tasks cannot interleave output.
 
 ## Implemented physical boundary
 
@@ -47,45 +48,46 @@ before both Node and Python canonicalize and validate it. The child environment 
 `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable so ambient selectors cannot
 bypass the preflight or redirect the requested harness module.
 
-No line has protocol meaning yet. `src/code_assist_harness/runtime.py` drains and discards stdin
-until EOF and emits no stdout. `tui/src/runtime-supervisor.ts` drains and discards stdout rather
-than displaying or parsing it. stderr is collected separately by
-`tui/src/runtime-diagnostics.ts`, which retains a bounded byte tail, drops a leading partial
-physical line when the byte bound cuts one, removes terminal controls, redacts distinctive inherited
-environment values and complete physical-line values for recognized separator-delimited and common
-camel-case or concatenated credential names, and imposes a second display bound before failure text
-enters TUI state. If truncation leaves no complete physical line, only the omission marker is safe
-to display.
+`src/code_assist_harness/runtime.py` feeds stdin bytes to `CommandLineReader`, validates commands,
+and emits only models serialized by `OrderedEventWriter`. `tui/src/runtime-supervisor.ts` feeds
+stdout bytes through `NdjsonLineReader` and the Zod-backed event parser before any event can affect
+local state. Each reader retains at most 64 KiB for the active physical line, requires LF rather
+than CRLF, decodes UTF-8 strictly, reports one bounded failure for an oversized or incomplete line,
+and resumes at the next LF.
 
-The Node spawn event is CAH-003's temporary `running` transition; it is not a readiness handshake.
-Any child close before requested shutdown, including exit code zero, is shown as an unexpected
-runtime failure. During requested shutdown the parent closes stdin, allowing the minimal runtime to
-exit on EOF, then escalates to `SIGTERM` and `SIGKILL` for the detached uv/Python process group only
-when needed. Cleanup settles after the child `close` event. CAH-004 must replace the temporary
-spawn boundary with the validated `runtime.ready` contract and add the first meaningful stdin and
-stdout lines. Parent `SIGHUP` and `SIGTERM` request Ink unmount so external terminal shutdown uses
-the same child cleanup path instead of abandoning the detached process group.
+After OS spawn, Node sends `runtime.initialize` with the canonical workspace. Spawn alone leaves the
+state at `starting`; only a `runtime.ready` with the matching correlation ID and workspace moves it
+to `running`. Unknown, malformed, unexpected, mismatched, or late readiness data fails closed into
+`protocol-failed` and closes command input. During requested shutdown the parent sends a validated
+`runtime.shutdown`, closes stdin, and retains the CAH-003 `SIGTERM` / `SIGKILL` process-group
+fallback. Parent `SIGHUP` and `SIGTERM` still request Ink unmount and the same cleanup path.
+
+stderr remains separate. `tui/src/runtime-diagnostics.ts` retains a bounded byte tail, drops a
+leading partial physical line when necessary, removes terminal controls, redacts recognized
+credential assignments and inherited secret values, and imposes a display bound before failure
+text enters TUI state.
 
 ## Framing and envelope
 
-Messages use UTF-8. Each physical line contains exactly one complete JSON object followed by
-`\n`. Pretty-printed or multi-line JSON is invalid.
+Messages use UTF-8. Each physical line contains exactly one complete JSON object followed by the LF
+byte `\n`. CRLF, blank lines, pretty-printed JSON, multiple objects on one line, and an unterminated
+final object are invalid.
 
-An initial command will have this shape:
+An initial command has this shape:
 
 ```json
 {
   "protocol_version": 1,
   "type": "session.start",
   "command_id": "cmd_123",
-  "timestamp": "2026-07-13T14:00:00Z",
+  "timestamp": "2026-07-13T14:00:00.000Z",
   "payload": {
     "task": "Explain the configuration loader"
   }
 }
 ```
 
-A related event will have this shape:
+A related event has this shape:
 
 ```json
 {
@@ -93,7 +95,7 @@ A related event will have this shape:
   "type": "session.started",
   "session_id": "ses_123",
   "sequence": 1,
-  "timestamp": "2026-07-13T14:00:00Z",
+  "timestamp": "2026-07-13T14:00:00.000Z",
   "correlation_id": "cmd_123",
   "payload": {}
 }
@@ -106,7 +108,8 @@ Envelope fields have specific jobs:
 - `command_id` uniquely identifies a command within the runtime process.
 - `session_id` groups events for one task.
 - `sequence` is a session-local, strictly increasing event number.
-- `timestamp` is useful for people and diagnostics, but never establishes ordering.
+- `timestamp` uses exact `YYYY-MM-DDTHH:mm:ss.SSSZ` UTC form and is useful for people and
+  diagnostics, but never establishes ordering.
 - `correlation_id` links an event to the command that caused it when a direct relationship exists.
 - `payload` contains only fields defined for that message type.
 
@@ -114,25 +117,33 @@ Session sequence numbers, rather than arrival timestamps, determine event order.
 not reuse a sequence number or emit a lower number. Protocol-level runtime events that do not
 belong to a session need no session sequence.
 
+Command and correlation IDs match `cmd_[A-Za-z0-9_-]{1,64}`. Session IDs match
+`ses_[A-Za-z0-9_-]{1,64}`. Sequence values start at 1 and cannot exceed JavaScript's largest safe
+integer, `9007199254740991`, so Python and TypeScript preserve the same value. Error codes use
+`[a-z][a-z0-9_.-]{0,63}`; visible error messages are 1–1024 characters and reject C0/C1 terminal
+controls. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the terminating LF.
+
 ## Version 1 message set
 
-Initial commands:
+All objects are strict: undeclared envelope or payload fields are invalid.
 
-- `runtime.initialize`: provide the explicitly selected workspace and runtime options.
-- `session.start`: begin one task after initialization.
-- `session.cancel`: request cancellation of the named active session.
-- `runtime.shutdown`: request an orderly child shutdown.
+| Command | Payload | Implemented behavior in CAH-004 |
+| --- | --- | --- |
+| `runtime.initialize` | `workspace: non-empty string` | Compare with the supervised canonical workspace and emit readiness or a terminal initialization error. |
+| `session.start` | `task: non-empty string` | Validate, then report `command_unavailable` until CAH-005. |
+| `session.cancel` | `session_id: ses_…` | Validate, then report `command_unavailable` until CAH-006. |
+| `runtime.shutdown` | Empty object | End the runtime cleanly, even before initialization. |
 
-Initial events:
-
-- `runtime.ready`: initialization succeeded and commands may be accepted.
-- `session.started`: the runtime accepted a task and assigned its session ID.
-- `assistant.delta`: append streamed text to the current assistant response.
-- `assistant.completed`: publish the complete accumulated assistant response.
-- `session.completed`: end a session successfully.
-- `session.cancelled`: end a session because cancellation won the race.
-- `session.failed`: end a session with a structured, actionable failure.
-- `runtime.error`: report a protocol or runtime problem not represented by a normal session event.
+| Event | Scope | Payload |
+| --- | --- | --- |
+| `runtime.ready` | Runtime | `workspace: non-empty string` |
+| `runtime.error` | Runtime | `code`, `message`, and `recoverable` |
+| `session.started` | Session | Empty object |
+| `assistant.delta` | Session | `text: non-empty string` |
+| `assistant.completed` | Session | `text: non-empty string` |
+| `session.completed` | Session | Empty object |
+| `session.cancelled` | Session | Empty object |
+| `session.failed` | Session | `code` and `message` |
 
 Later stories may add plan, tool, approval, diff, transcript, and usage events. They must be
 documented here and added to cross-language fixtures before either process relies on them.
@@ -142,22 +153,22 @@ documented here and added to cross-language fixtures before either process relie
 Static types do not validate untrusted bytes. Both sides therefore validate at the process
 boundary:
 
-- Python uses Pydantic v2 models for incoming commands and outgoing events.
-- TypeScript uses Zod schemas for outgoing commands and incoming events.
+- Python uses strict Pydantic v2 models for incoming commands and outgoing events.
+- TypeScript uses strict Zod schemas for outgoing commands and incoming events.
 - Validated wire objects are converted into local domain or UI types before business logic uses
   them.
 - Provider SDK objects and component-local state never become wire types accidentally.
 
-The schemas will initially be maintained in both languages. Shared golden JSON fixtures prove that
-both implementations agree. Schema generation is intentionally deferred until contract drift
-becomes a demonstrated maintenance problem.
+The schemas are maintained by hand. Both contract suites consume the reviewed
+`protocol/fixtures/v1/manifest.json`; neither implementation generates the other. Schema generation
+is deferred until contract drift becomes a demonstrated maintenance problem.
 
-An unsupported version is rejected before interpreting its payload. Malformed JSON, an invalid
-envelope, or an invalid payload becomes a structured protocol error when a valid event can still be
-sent. The offending raw line must not be copied into user-visible output because it could contain a
-secret. If the TUI cannot validate an event, it surfaces a child-protocol failure and continues to
-supervise or terminate the child predictably; it does not attempt to render the object as trusted
-state. An unknown event type must not crash the TUI.
+An unsupported version is rejected before interpreting its version-specific fields. Malformed JSON,
+numeric overflow, an invalid envelope, an unknown command type, or an invalid known payload becomes
+a safe `runtime.error`; the Python reader continues at the next physical line. The error never
+copies the raw line or validator internals. The TUI uses a stricter authority boundary: an unknown
+or malformed event becomes a visible, classified protocol failure, closes command input, and never
+enters trusted state.
 
 ## Lifecycle and cancellation
 
@@ -181,15 +192,14 @@ Python cancels active work, and Python emits exactly one terminal session event.
 the race before cancellation was processed, the existing completion remains authoritative.
 Repeated cancellation must be harmless.
 
-When `runtime.shutdown` is implemented, Python will stop accepting new work, cancel or finish active
-work according to the shutdown contract, flush validated events and transcripts, and exit. Today,
-CAH-003 shutdown closes stdin and the minimal runtime exits on EOF. If the child exits unexpectedly,
-Ink already enters a visible failed state instead of treating end-of-file as successful completion.
+`runtime.shutdown` is implemented for the idle CAH-004 runtime. Python stops reading commands and
+exits after prior ordered writes have completed. Later session work will define how active work is
+cancelled or flushed. EOF remains a cleanup fallback, and an unrequested child exit remains visible.
 
 ## Compatibility rules
 
-- Additive optional payload fields may be introduced only when older readers can safely ignore
-  them.
+- Version 1 readers reject unknown fields. Additions require coordinated validators, fixtures, and
+  writers in both languages before use.
 - Changing required fields, meanings, or ordering semantics requires a protocol-version change.
 - Unknown message types are diagnostic conditions, never permission to guess behavior.
 - Event names and failure codes are stable machine values; user-facing wording may evolve.
@@ -202,9 +212,9 @@ Ink already enters a visible failed state instead of treating end-of-file as suc
 > As a harness developer, I want a small versioned protocol so that Python and TypeScript can evolve
 > without relying on unstructured console text.
 
-Complete this story when both boundaries validate the envelope, shared fixtures pass in both
-languages, sequence and correlation behavior is tested, unsupported versions fail clearly, and
-diagnostics cannot contaminate stdout.
+This story is complete: both boundaries validate the envelope and selected payload, shared fixtures
+pass in both languages, the ordered writer owns sequence assignment, unsupported versions and bad
+lines fail safely, and the real supervisor reaches `running` only through correlated readiness.
 
 ### CAH-006 — Cancel an active session
 

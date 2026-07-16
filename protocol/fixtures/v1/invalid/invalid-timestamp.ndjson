@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"runtime.error","timestamp":"2026-07-16T13:01:06Z","payload":{"code":"fixture_error","message":"This timestamp omits milliseconds.","recoverable":true}}
