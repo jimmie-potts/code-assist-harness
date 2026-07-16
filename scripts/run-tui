@@ -94,5 +94,7 @@ fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+launch_directory=$(pwd -P)
+export CODE_ASSIST_LAUNCH_DIRECTORY=$launch_directory
 
-exec "$npm_path" --prefix "$repository_root/tui" start
+exec "$npm_path" --prefix "$repository_root/tui" start -- "$@"

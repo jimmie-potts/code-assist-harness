@@ -10,11 +10,13 @@ harness library.
 
 ## Current status
 
-The repository now contains a minimal Python package and a launchable static Ink/TypeScript shell.
-The shell renders the conversation-first frame, validates its WSL Node runtime before loading Ink,
-and exits cleanly on Ctrl+C. It does **not** yet start Python, define the NDJSON protocol, run an
-agent loop, access a workspace, or integrate with OpenAI. The next unit, CAH-003, adds Python child
-startup and supervision without adding model behavior.
+The repository now contains a minimal supervised Python runtime and an Ink/TypeScript parent that
+launches it through `uv`. Startup validates the WSL Node, npm, and `uv` paths plus the prepared
+Python project environment, resolves exactly one canonical workspace, shows child startup or exit
+failures, and reaps the child when Ink exits. The stdin/stdout pipes are physically reserved for the
+future protocol, but the application does
+**not** yet define NDJSON messages, run an agent loop, read the workspace, or integrate with
+OpenAI. The next unit, CAH-004, defines and validates protocol version 1.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -96,16 +98,48 @@ uv sync --dev
 npm --prefix tui ci
 ```
 
-Launch the static shell from the repository root inside Ubuntu WSL:
+`uv sync --dev` is required before launch. The runtime supervisor verifies that `.venv/pyvenv.cfg`
+and an executable `.venv/bin/python` already exist before it invokes `uv`; an unprepared checkout
+therefore fails without spawning a child or creating `.venv`. The launch then selects that exact
+interpreter and starts it without resolving, downloading, or synchronizing dependencies. Launch the
+supervised shell from the repository root inside Ubuntu WSL:
 
 ```bash
 ./scripts/run-tui
 ```
 
+The directory from which the launcher is invoked is the default workspace. Select a different
+single workspace with an absolute path, or with a path relative to that launch directory:
+
+```bash
+./scripts/run-tui --workspace /path/to/repository
+```
+
 The launcher reports actionable setup guidance when Node or npm is missing, rejects Windows Node or
 npm executables reached directly or through a symlink, and checks the supported Node range before
-npm or the TypeScript loader runs. The initial shell is intentionally not connected to Python or
-task submission. Press Ctrl+C to let Ink unmount and restore the terminal.
+npm or the TypeScript loader runs. The runtime supervisor separately resolves `uv` from its filtered
+`PATH`, follows symlinks, rejects paths under `/mnt` and names ending in `.exe`, and validates the
+prepared project environment before spawn. The TUI then starts Python, displays the canonical
+workspace and runtime state, and keeps task submission disconnected. Press Ctrl+C to let Ink exit
+and restore the terminal; the application lifecycle then closes the child's stdin, terminates its
+detached process group if it does not exit within the bounded grace periods, and awaits the child
+close event. `SIGHUP` and `SIGTERM` also request an Ink unmount and enter this same cleanup path.
+
+Startup troubleshooting:
+
+- If startup says `uv` was not found or resolves to a Windows path, install and select Linux `uv`
+  inside Ubuntu WSL, then retry.
+- If startup reports that the project environment is unprepared, run `uv sync --dev` in this
+  repository and retry. The supervisor checks for `.venv/pyvenv.cfg` and executable
+  `.venv/bin/python` before `uv` starts, so this failure does not create or update `.venv`.
+- If Python exits with an environment or import diagnostic, rerun `uv sync --dev`; launch never
+  updates the lockfile or prepared environment for you. The supervised child intentionally removes
+  inherited `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable; supported project,
+  environment, and interpreter choices are supplied explicitly in the argument array instead.
+- If workspace selection fails before Ink renders, check that the `--workspace` value exists, is a
+  directory, and is accessible from Ubuntu WSL.
+- If Python exits after spawning, the TUI shows a bounded, sanitized stderr summary and remains in
+  a failed state until Ctrl+C. The supervisor does not restart it automatically.
 
 Run the current Python checks and build:
 
@@ -135,10 +169,10 @@ integration checks without making network requests.
 ## Current and planned project layout
 
 ```text
-src/code_assist_harness/  Current minimal Python package; future harness core and runtime
+src/code_assist_harness/  Current minimal supervised runtime; future harness core
 tests/                    Current Python tests mirroring source modules
-tui/                      Current static Ink application, npm metadata, and TypeScript tests
-scripts/run-tui           Current WSL-aware TUI launcher
+tui/                      Current supervised Ink application, npm metadata, and TypeScript tests
+scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
 protocol/                 Planned shared NDJSON fixtures
 evals/                    Planned deterministic scenario fixtures
 docs/                     Architecture and learning documentation
@@ -146,8 +180,9 @@ docs/lessons/             Unit-by-unit learning companions
 user-stories/             Roadmap, implementation stories, and planning notes
 ```
 
-The Python scaffold, static TUI, documentation, and backlog exist today. Protocol, evaluation,
-provider, tool, and agent paths remain planned and are introduced only by the story that needs them.
+The Python runtime, supervised TUI, documentation, and backlog exist today. Protocol messages,
+evaluation, provider, tool, and agent paths remain planned and are introduced only by the story
+that needs them.
 
 ## Documentation map
 
