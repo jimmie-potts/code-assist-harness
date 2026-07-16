@@ -32,7 +32,7 @@ An initial event envelope has this shape:
   "type": "session.started",
   "session_id": "ses_123",
   "sequence": 1,
-  "timestamp": "2026-07-13T14:00:00Z",
+  "timestamp": "2026-07-13T14:00:00.000Z",
   "correlation_id": "cmd_123",
   "payload": {}
 }
@@ -58,17 +58,17 @@ code generation is deferred until actual drift makes its benefit greater than it
 - Both processes reject an unsupported `protocol_version` explicitly.
 - Malformed JSON and an invalid known message become structured protocol errors rather than
   unhandled exceptions.
-- An unknown event type does not crash the TUI; it is surfaced safely and handled according to the
-  documented compatibility policy.
+- An unknown or malformed event type does not crash the TUI or enter trusted state. The supervisor
+  fails closed, surfaces a safe `protocol-failed` category, and closes command input.
 - A diagnostic may describe the offending input safely but must not echo credentials or unbounded
   content.
 - Protocol parsing validates the envelope and the payload for the declared type.
 - A writer serializes complete messages so output from concurrent runtime tasks cannot interleave.
 - Session sequence numbers are assigned at the ordered event boundary.
 
-Unknown fields and unknown message types need an explicit compatibility policy in the detailed
-protocol specification before version 1 is considered stable. They must never be accepted merely
-because a static type assertion says the value is valid.
+Version 1 uses closed Pydantic and Zod objects. Unknown fields and unknown message types are
+rejected; an additive field therefore requires coordinated reader, fixture, and writer changes in
+both languages. Required-field, meaning, or ordering changes require a new protocol version.
 
 ## Consequences
 
@@ -87,8 +87,8 @@ because a static type assertion says the value is valid.
 - Very large payloads could block pipes or increase memory use unless message and output bounds are
   enforced.
 
-These risks are controlled through boundary validation, stdout discipline, bounded payloads,
-contract tests, and end-to-end process tests.
+These risks are controlled through boundary validation, stdout discipline, a 64-KiB line limit on
+readers and encoders, contract tests, and end-to-end process tests.
 
 ## Alternatives considered
 
@@ -115,6 +115,8 @@ choice can be revisited if contract drift becomes a recurring failure.
 
 ## Implementation status
 
-This is an accepted target decision. At acceptance time, neither process protocol code nor shared
-fixtures existed. CAH-004 defines version 1 in code and contract tests; CAH-005 exercises it across
-the real Node–Python boundary.
+CAH-004 implements this decision in `src/code_assist_harness/protocol/`, `tui/src/protocol.ts`,
+`tui/src/protocol-stream.ts`, and the shared `protocol/fixtures/v1/` manifest. The runtime and
+supervisor now exchange `runtime.initialize`, `runtime.ready`, and `runtime.shutdown` across the
+real Node–Python boundary. CAH-005 will implement deterministic session-command handling and
+streamed events.

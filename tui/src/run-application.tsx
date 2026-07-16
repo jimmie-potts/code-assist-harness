@@ -64,8 +64,12 @@ export async function runApplication(
     unsubscribe = supervisor.subscribe((runtimeState) => {
       application.rerender(<App runtimeState={runtimeState} />);
     });
-    await supervisor.start();
-    await application.waitUntilExit();
+    const startup = supervisor.start().then(() => 'started' as const);
+    const inkExit = application.waitUntilExit().then(() => 'exited' as const);
+    const firstTransition = await Promise.race([startup, inkExit]);
+    if (firstTransition === 'started') {
+      await inkExit;
+    }
   } finally {
     unsubscribe();
     try {

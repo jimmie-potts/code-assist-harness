@@ -31,7 +31,7 @@ capability it represents so the lesson remains useful if the vendor changes.
 | 2 | CAH-008 | [Educational documentation standards](cah-008-documentation-standards.md) | Done |
 | 3 | CAH-002 | [Ink application shell](cah-002-ink-application-shell.md) | Done |
 | 4 | CAH-003 | [Python runtime supervision](cah-003-python-runtime-supervision.md) | Done |
-| 5 | CAH-004 | [Protocol version 1](cah-004-protocol-v1.md) | Planned |
+| 5 | CAH-004 | [Protocol version 1](cah-004-protocol-v1.md) | Done |
 | 6 | CAH-005 | [Mocked streaming session](cah-005-mocked-streaming-session.md) | Planned |
 | 7 | CAH-006 | [Session cancellation](cah-006-session-cancellation.md) | Planned |
 | 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Planned |

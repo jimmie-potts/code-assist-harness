@@ -23,6 +23,12 @@ import {
   type RuntimeState,
 } from '../src/runtime-supervisor.js';
 
+const WORKSPACE = '/workspace with spaces';
+const COMMAND_TIMESTAMP = '2026-07-16T13:00:00.000Z';
+const EVENT_TIMESTAMP = '2026-07-16T13:00:00.100Z';
+const INITIALIZATION_COMMAND_ID = 'cmd_initialize_001';
+const SHUTDOWN_COMMAND_ID = 'cmd_shutdown_001';
+
 class FakeChild extends EventEmitter {
   public readonly stdin = new PassThrough();
   public readonly stdout = new PassThrough();
@@ -48,6 +54,9 @@ function createSupervisor(
     readonly command?: string;
     readonly environment?: NodeJS.ProcessEnv;
     readonly wait?: (milliseconds: number) => Promise<void>;
+    readonly readinessTimeoutMs?: number;
+    readonly createCommandId?: () => string;
+    readonly now?: () => string;
     readonly prepareLaunch?: (request: RuntimeLaunchRequest) => RuntimeLaunchRequest;
     readonly signalProcessGroup?: (
       child: ChildProcessWithoutNullStreams,
@@ -56,10 +65,11 @@ function createSupervisor(
     readonly captureRequest?: (request: RuntimeLaunchRequest) => void;
   } = {},
 ): PythonRuntimeSupervisor {
+  const commandIds = [INITIALIZATION_COMMAND_ID, SHUTDOWN_COMMAND_ID];
   return new PythonRuntimeSupervisor(
     {
       repositoryRoot: '/harness root',
-      workspace: '/workspace with spaces',
+      workspace: WORKSPACE,
       ...(overrides.command === undefined ? {} : {command: overrides.command}),
     },
     {
@@ -75,8 +85,82 @@ function createSupervisor(
         : {signalProcessGroup: overrides.signalProcessGroup}),
       gracePeriodMs: 1,
       terminatePeriodMs: 1,
+      readinessTimeoutMs: overrides.readinessTimeoutMs ?? 1000,
+      createCommandId:
+        overrides.createCommandId ?? (() => commandIds.shift() ?? 'cmd_additional_001'),
+      now: overrides.now ?? (() => COMMAND_TIMESTAMP),
     },
   );
+}
+
+function initializationCommandLine(): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type: 'runtime.initialize',
+    command_id: INITIALIZATION_COMMAND_ID,
+    timestamp: COMMAND_TIMESTAMP,
+    payload: {workspace: WORKSPACE},
+  })}\n`;
+}
+
+function shutdownCommandLine(): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type: 'runtime.shutdown',
+    command_id: SHUTDOWN_COMMAND_ID,
+    timestamp: COMMAND_TIMESTAMP,
+    payload: {},
+  })}\n`;
+}
+
+function readyEventLine(
+  correlationId = INITIALIZATION_COMMAND_ID,
+  workspace = WORKSPACE,
+): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type: 'runtime.ready',
+    timestamp: EVENT_TIMESTAMP,
+    correlation_id: correlationId,
+    payload: {workspace},
+  })}\n`;
+}
+
+function sessionStartedEventLine(): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type: 'session.started',
+    session_id: 'ses_unexpected_001',
+    sequence: 1,
+    timestamp: EVENT_TIMESTAMP,
+    payload: {},
+  })}\n`;
+}
+
+function nextInputLine(child: FakeChild): Promise<string> {
+  return new Promise((resolve) => {
+    child.stdin.once('data', (chunk: Buffer | string) => {
+      resolve(chunk.toString());
+    });
+  });
+}
+
+async function startReady(
+  child: FakeChild,
+  supervisor: PythonRuntimeSupervisor,
+): Promise<void> {
+  const initializationLine = nextInputLine(child);
+  const start = supervisor.start();
+  child.emit('spawn');
+  expect(await initializationLine).toBe(initializationCommandLine());
+  child.stdout.write(readyEventLine());
+  await start;
+  expect(supervisor.getState().status).toBe('running');
+}
+
+async function closeOnInputEnd(child: FakeChild, supervisor: PythonRuntimeSupervisor): Promise<void> {
+  child.stdin.once('finish', () => child.close(0));
+  await supervisor.stop();
 }
 
 describe('PythonRuntimeSupervisor', () => {
@@ -250,23 +334,219 @@ describe('PythonRuntimeSupervisor', () => {
     await supervisor.stop();
   });
 
-  it('moves from starting to running only after spawn', async () => {
+  it('writes exact initialization and remains starting until matching runtime.ready', async () => {
     const child = new FakeChild();
     let request: RuntimeLaunchRequest | undefined;
     const supervisor = createSupervisor(child, {captureRequest: (value) => (request = value)});
     const states: RuntimeState[] = [];
     supervisor.subscribe((state) => states.push(state));
 
+    const initializationLine = nextInputLine(child);
     const start = supervisor.start();
     expect(supervisor.getState().status).toBe('starting');
     child.emit('spawn');
+
+    expect(await initializationLine).toBe(initializationCommandLine());
+    expect(request?.arguments.at(-1)).toBe(WORKSPACE);
+    expect(supervisor.getState().status).toBe('starting');
+    expect(states).toEqual([]);
+
+    child.stdout.write(readyEventLine());
     await start;
 
-    expect(request?.arguments.at(-1)).toBe('/workspace with spaces');
     expect(supervisor.getState().status).toBe('running');
     expect(states.map((state) => state.status)).toEqual(['running']);
 
-    child.stdin.once('finish', () => child.close(0));
+    await closeOnInputEnd(child, supervisor);
+  });
+
+  it.each([
+    {
+      name: 'wrong correlation ID',
+      readyLine: readyEventLine('cmd_different_001'),
+    },
+    {
+      name: 'wrong canonical workspace',
+      readyLine: readyEventLine(INITIALIZATION_COMMAND_ID, '/different-workspace'),
+    },
+  ])('fails closed when runtime.ready has the $name', async ({readyLine}) => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child);
+    const initializationLine = nextInputLine(child);
+    const start = supervisor.start();
+    child.emit('spawn');
+    expect(await initializationLine).toBe(initializationCommandLine());
+
+    child.stdout.write(readyLine);
+    await start;
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'readiness_mismatch',
+    });
+    expect(child.stdin.writableEnded).toBe(true);
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('surfaces a correlated runtime.error as an initialization failure', async () => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child);
+    const initializationLine = nextInputLine(child);
+    const start = supervisor.start();
+    child.emit('spawn');
+    await initializationLine;
+
+    child.stdout.write(
+      `${JSON.stringify({
+        protocol_version: 1,
+        type: 'runtime.error',
+        timestamp: EVENT_TIMESTAMP,
+        correlation_id: INITIALIZATION_COMMAND_ID,
+        payload: {
+          code: 'workspace_mismatch',
+          message: 'Initialization workspace does not match.',
+          recoverable: false,
+        },
+      })}\n`,
+    );
+    await start;
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'failed-to-start',
+      message: expect.stringContaining('workspace_mismatch'),
+    });
+    expect(supervisor.getState()).toMatchObject({
+      message: expect.stringContaining('Initialization workspace does not match.'),
+    });
+    expect(child.stdin.writableEnded).toBe(true);
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it.each([
+    {
+      name: 'malformed known event',
+      line: `${JSON.stringify({
+        protocol_version: 1,
+        type: 'runtime.ready',
+        timestamp: EVENT_TIMESTAMP,
+        correlation_id: INITIALIZATION_COMMAND_ID,
+        payload: {workspace: 7},
+      })}\n`,
+      code: 'invalid_payload',
+    },
+    {
+      name: 'unknown event',
+      line: `${JSON.stringify({
+        protocol_version: 1,
+        type: 'runtime.future',
+        timestamp: EVENT_TIMESTAMP,
+        correlation_id: INITIALIZATION_COMMAND_ID,
+        payload: {},
+      })}\n`,
+      code: 'unknown_type',
+    },
+  ])('keeps $name distinct before readiness', async ({line, code}) => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child);
+    const initializationLine = nextInputLine(child);
+    const start = supervisor.start();
+    child.emit('spawn');
+    await initializationLine;
+
+    child.stdout.write(line);
+    await start;
+
+    expect(supervisor.getState()).toMatchObject({status: 'protocol-failed', code});
+    expect(child.stdin.writableEnded).toBe(true);
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('fails closed when a valid session event arrives before readiness', async () => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child);
+    const initializationLine = nextInputLine(child);
+    const start = supervisor.start();
+    child.emit('spawn');
+    await initializationLine;
+
+    child.stdout.write(sessionStartedEventLine());
+    await start;
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'unexpected_event',
+      message: expect.stringContaining('before runtime.ready'),
+    });
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('fails closed when runtime.ready misses the readiness deadline', async () => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child, {readinessTimeoutMs: 1});
+    const initializationLine = nextInputLine(child);
+    const start = supervisor.start();
+    child.emit('spawn');
+    expect(await initializationLine).toBe(initializationCommandLine());
+
+    await start;
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'readiness_timeout',
+    });
+    expect(child.stdin.writableEnded).toBe(true);
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('starts the readiness deadline even when the initialization write callback never fires', async () => {
+    const child = new FakeChild();
+    vi.spyOn(child.stdin, 'write').mockImplementation((() => true) as typeof child.stdin.write);
+    const supervisor = createSupervisor(child, {readinessTimeoutMs: 1});
+
+    const start = supervisor.start();
+    child.emit('spawn');
+    await start;
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'readiness_timeout',
+    });
+    expect(child.stdin.writableEnded).toBe(true);
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('fails closed and sanitizes a runtime error received after readiness', async () => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child, {environment: {API_TOKEN: 'hidden-value'}});
+    await startReady(child, supervisor);
+
+    child.stdout.write(
+      `${JSON.stringify({
+        protocol_version: 1,
+        type: 'runtime.error',
+        timestamp: EVENT_TIMESTAMP,
+        payload: {
+          code: 'provider_failed',
+          message: 'Provider exposed hidden-value',
+          recoverable: false,
+        },
+      })}\n`,
+    );
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'unexpected_event',
+      message: expect.stringContaining('[REDACTED]'),
+    });
+    const state = supervisor.getState();
+    expect(state.status === 'protocol-failed' ? state.message : '').not.toContain('hidden-value');
+    child.close(0);
     await supervisor.stop();
   });
 
@@ -287,14 +567,11 @@ describe('PythonRuntimeSupervisor', () => {
     expect(supervisor.getState()).toMatchObject({message: expect.stringContaining('uv sync --dev')});
   });
 
-  it('treats any unrequested close as failure and excludes stdout and secrets', async () => {
+  it('treats any unrequested close as failure and sanitizes stderr secrets', async () => {
     const child = new FakeChild();
     const supervisor = createSupervisor(child, {environment: {API_TOKEN: 'hidden-value'}});
-    const start = supervisor.start();
-    child.emit('spawn');
-    await start;
+    await startReady(child, supervisor);
 
-    child.stdout.write('{"future":"protocol secret hidden-value"}\n');
     child.stderr.write('API_TOKEN=hidden-value\nuseful diagnostic');
     child.close(0);
 
@@ -308,11 +585,57 @@ describe('PythonRuntimeSupervisor', () => {
     }
     expect(state.message).toContain('useful diagnostic');
     expect(state.message).toContain('[REDACTED]');
-    expect(state.message).not.toContain('future');
     expect(state.message).not.toContain('hidden-value');
   });
 
-  it('closes stdin, escalates the detached group, and shares idempotent cleanup', async () => {
+  it('writes shutdown before closing stdin and escalating idempotent cleanup', async () => {
+    const child = new FakeChild();
+    const signals: NodeJS.Signals[] = [];
+    const inputLines: string[] = [];
+    const shutdownWritten = vi.fn();
+    child.stdin.on('data', (chunk: Buffer | string) => {
+      const line = chunk.toString();
+      inputLines.push(line);
+      if (line.includes('runtime.shutdown')) {
+        shutdownWritten();
+      }
+    });
+    const endInput = vi.spyOn(child.stdin, 'end');
+    const signalProcessGroup = vi.fn(
+      (_child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) => {
+        signals.push(signal);
+        if (signal === 'SIGKILL') {
+          child.close(null, signal);
+        }
+      },
+    );
+    const supervisor = createSupervisor(child, {
+      wait: async () => undefined,
+      signalProcessGroup,
+    });
+    await startReady(child, supervisor);
+
+    const firstStop = supervisor.stop();
+    const secondStop = supervisor.stop();
+    expect(firstStop).toBe(secondStop);
+    await firstStop;
+
+    expect(child.stdin.writableEnded).toBe(true);
+    expect(inputLines).toEqual([initializationCommandLine(), shutdownCommandLine()]);
+    expect(shutdownWritten).toHaveBeenCalledOnce();
+    expect(endInput).toHaveBeenCalledOnce();
+    expect(signalProcessGroup).toHaveBeenCalledTimes(2);
+    expect(shutdownWritten.mock.invocationCallOrder[0]).toBeLessThan(
+      endInput.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(endInput.mock.invocationCallOrder[0]).toBeLessThan(
+      signalProcessGroup.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(supervisor.getState().status).toBe('stopped');
+  });
+
+  it('does not let a missing shutdown write callback delay bounded signal escalation', async () => {
     const child = new FakeChild();
     const signals: NodeJS.Signals[] = [];
     const supervisor = createSupervisor(child, {
@@ -324,14 +647,10 @@ describe('PythonRuntimeSupervisor', () => {
         }
       },
     });
-    const start = supervisor.start();
-    child.emit('spawn');
-    await start;
+    await startReady(child, supervisor);
+    vi.spyOn(child.stdin, 'write').mockImplementation((() => true) as typeof child.stdin.write);
 
-    const firstStop = supervisor.stop();
-    const secondStop = supervisor.stop();
-    expect(firstStop).toBe(secondStop);
-    await firstStop;
+    await supervisor.stop();
 
     expect(child.stdin.writableEnded).toBe(true);
     expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
@@ -349,9 +668,7 @@ describe('PythonRuntimeSupervisor', () => {
     });
 
     try {
-      const start = supervisor.start();
-      child.emit('spawn');
-      await start;
+      await startReady(child, supervisor);
       child.exitCode = 0;
 
       await supervisor.stop();

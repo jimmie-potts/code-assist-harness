@@ -100,6 +100,17 @@ export class RuntimeDiagnostics {
     this.#tail = combined;
   }
 
+  /** Sanitize one already-bounded protocol message before it enters visible runtime state. */
+  public sanitize(message: string): string | undefined {
+    const text = sanitizeText(message, this.#secretValues);
+    if (text.length === 0) {
+      return undefined;
+    }
+    return text.length > this.#displayLimit
+      ? `${text.slice(0, Math.max(0, this.#displayLimit - 1))}…`
+      : text;
+  }
+
   /**
    * Return bounded, sanitized context for a visible failure.
    *
@@ -109,12 +120,7 @@ export class RuntimeDiagnostics {
     const displayTail = this.#tailStartsInsideLine
       ? dropLeadingPartialLine(this.#tail)
       : this.#tail;
-    let text = displayTail.toString('utf8').replace(ANSI_SEQUENCE, '').trimEnd();
-    text = redactCredentialLines(text)
-      .replace(BEARER_TOKEN, `Bearer ${REDACTION}`)
-      .replace(OPENAI_STYLE_TOKEN, REDACTION);
-    text = redactKnownValues(text, this.#secretValues);
-    text = removeControlCharacters(text).replace(/\s+/gu, ' ').trim();
+    const text = sanitizeText(displayTail.toString('utf8'), this.#secretValues);
 
     const truncationMarker = this.#truncated ? '[earlier diagnostics omitted] ' : '';
     if (text.length === 0) {
@@ -126,6 +132,15 @@ export class RuntimeDiagnostics {
       text.length > available ? `…${text.slice(-Math.max(0, available - 1))}` : text;
     return `${truncationMarker}${bounded}`;
   }
+}
+
+function sanitizeText(text: string, secretValues: readonly string[]): string {
+  let sanitized = text.replace(ANSI_SEQUENCE, '').trimEnd();
+  sanitized = redactCredentialLines(sanitized)
+    .replace(BEARER_TOKEN, `Bearer ${REDACTION}`)
+    .replace(OPENAI_STYLE_TOKEN, REDACTION);
+  sanitized = redactKnownValues(sanitized, secretValues);
+  return removeControlCharacters(sanitized).replace(/\s+/gu, ' ').trim();
 }
 
 function redactCredentialLines(text: string): string {

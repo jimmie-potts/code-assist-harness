@@ -24,10 +24,10 @@ library.
 Evaluation starts with deterministic M0 scenarios. M4 expands evaluation rather than introducing
 it for the first time.
 
-CAH-003 completes the physical M0 process boundary: Ink now starts one workspace-bound Python
-runtime through `uv`, reports failures, and reaps the detached process group. CAH-004 is the next
-dependency-ready unit and will give the reserved stdin/stdout pipes their first validated,
-versioned NDJSON messages and readiness semantics.
+CAH-004 completes the first trustworthy M0 process contract: Ink and Python now exchange strict,
+versioned NDJSON through bounded readers, prove agreement with shared fixtures, and enter `running`
+only after correlated readiness. CAH-005 is the next dependency-ready unit and will use that
+contract to stream a deterministic mocked session through the real boundary.
 
 ## Epic backlog
 

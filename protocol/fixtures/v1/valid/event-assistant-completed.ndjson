@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"assistant.completed","session_id":"ses_stream_001","sequence":3,"timestamp":"2026-07-16T13:00:01.300Z","correlation_id":"cmd_start_001","payload":{"text":"Fixture response."}}
