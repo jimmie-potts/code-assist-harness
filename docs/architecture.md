@@ -199,6 +199,7 @@ tui/
 ├── src/
 │   ├── cli.ts
 │   ├── bootstrap.ts
+│   ├── check-node-version.ts
 │   ├── node-version.ts
 │   ├── workspace.ts
 │   ├── protocol.ts
@@ -215,12 +216,14 @@ tui/
 paths even when a Linux-looking symlink hides them, then rejects unsupported Node versions before
 npm and its TypeScript loader run. It preserves the caller's canonical launch directory and
 forwards `--workspace` as separate arguments. `cli.ts` repeats Node validation, resolves one
-workspace, and creates `PythonRuntimeSupervisor`. `run-application.tsx` projects supervisor state
-into `app.tsx`, routes `SIGHUP` and `SIGTERM` through Ink unmount, and guarantees cleanup after every
-exit path. `protocol.ts` validates hand-maintained Zod wire shapes and `protocol-stream.ts` owns byte
-framing. `session-state.ts` is the pure conversation and cancelling-state projection;
-`runtime-supervisor.ts` validates each tape, writes at most one cancellation command, and publishes
-updates, while `app.tsx` owns only the draft, Escape binding, and visible feedback.
+workspace, and creates `PythonRuntimeSupervisor`. The canonical repository gate invokes
+`check-node-version.ts` before its first TUI npm stage, reusing the same supported-range assertion.
+`run-application.tsx` projects supervisor state into `app.tsx`, routes `SIGHUP` and `SIGTERM` through
+Ink unmount, and guarantees cleanup after every exit path. `protocol.ts` validates hand-maintained
+Zod wire shapes and `protocol-stream.ts` owns byte framing. `session-state.ts` is the pure
+conversation and cancelling-state projection; `runtime-supervisor.ts` validates each tape, writes at
+most one cancellation command, and publishes updates, while `app.tsx` owns only the draft, Escape
+binding, and visible feedback.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. Schema generation is deferred until contract drift

@@ -13,14 +13,21 @@ def _write_command_stub(bin_directory: Path, name: str) -> None:
     stub.write_text(
         """#!/bin/sh
 set -eu
-printf '%s|%s|%s|%s|%s|%s|%s\\n' \\
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \\
     \"$(basename \"$0\")\" \\
     \"$*\" \\
     \"${OPENAI_API_KEY-unset}\" \\
     \"${NPM_CONFIG_OFFLINE-unset}\" \\
     \"${PYTHONPATH-unset}\" \\
     \"${NODE_OPTIONS-unset}\" \\
-    \"${PYTHONDONTWRITEBYTECODE-unset}\" >> \"$CHECK_LOG\"
+    \"${PYTHONDONTWRITEBYTECODE-unset}\" \\
+    \"${UV_PROJECT-unset}\" \\
+    \"${UV_PROJECT_ENVIRONMENT-unset}\" \\
+    \"${UV_PYTHON-unset}\" \\
+    \"${UV_WORKING_DIR-unset}\" \\
+    \"${UV_NO_PROJECT-unset}\" \\
+    \"${UV_ISOLATED-unset}\" \\
+    \"$PWD\" >> \"$CHECK_LOG\"
 if [ \"${FAIL_COMMAND-}\" = \"$(basename \"$0\") $*\" ]; then
     exit 23
 fi
@@ -35,7 +42,7 @@ def _run_check_with_stubs(
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_directory = tmp_path / "bin"
     bin_directory.mkdir()
-    for name in ("uv", "npm"):
+    for name in ("uv", "npm", "node"):
         _write_command_stub(bin_directory, name)
 
     log_path = tmp_path / "commands.log"
@@ -45,6 +52,12 @@ def _run_check_with_stubs(
             "CHECK_LOG": str(log_path),
             "OPENAI_API_KEY": "must-not-reach-checks",
             "PATH": f"{bin_directory}:{environment['PATH']}",
+            "UV_NO_PROJECT": "true",
+            "UV_ISOLATED": "true",
+            "UV_PROJECT": "/tmp/other-project",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/other-environment",
+            "UV_PYTHON": "/tmp/other-python",
+            "UV_WORKING_DIR": "/tmp/other-working-directory",
         }
     )
     if fail_command is not None:
@@ -62,9 +75,9 @@ def _run_check_with_stubs(
     return result, lines
 
 
-def test_check_runs_every_layer_offline_without_provider_credentials(tmp_path: Path) -> None:
+def test_check_runs_every_layer_without_credentials_or_runtime_selectors(tmp_path: Path) -> None:
     result, commands = _run_check_with_stubs(tmp_path)
-    command_fields = [command.split("|", maxsplit=6) for command in commands]
+    command_fields = [command.split("|", maxsplit=13) for command in commands]
 
     assert result.returncode == 0
     assert ["|".join(fields[:4]) for fields in command_fields] == [
@@ -82,6 +95,7 @@ def test_check_runs_every_layer_offline_without_provider_credentials(tmp_path: P
             "uv|run --offline --frozen --no-sync pytest tests/test_check_script.py "
             "tests/test_repository_policy.py|unset|true"
         ),
+        "node|--import=tsx src/check-node-version.ts|unset|true",
         "npm|--offline --prefix tui run typecheck|unset|true",
         "npm|--offline --prefix tui run lint|unset|true",
         (
@@ -98,8 +112,14 @@ def test_check_runs_every_layer_offline_without_provider_credentials(tmp_path: P
         f'--import="{REPOSITORY_ROOT / "scripts" / "deny-network.mjs"}"'
     }
     assert {fields[6] for fields in command_fields} == {"1"}
+    assert {tuple(fields[7:13]) for fields in command_fields} == {
+        ("unset", "unset", "unset", "unset", "unset", "unset")
+    }
+    node_command = next(fields for fields in command_fields if fields[0] == "node")
+    assert node_command[13] == str(REPOSITORY_ROOT / "tui")
     assert "==> Python lockfile and environment" in result.stdout
     assert "==> Python lint and docstrings" in result.stdout
+    assert "==> Node runtime compatibility" in result.stdout
     assert "==> Node-Python integration" in result.stdout
     assert result.stdout.rstrip().endswith("All repository checks passed.")
 
@@ -135,6 +155,11 @@ def test_check_stops_at_first_failed_layer(tmp_path: Path) -> None:
             "uv run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py",
             "Protocol fixtures: Python",
             "Repository policy",
+        ),
+        (
+            "node --import=tsx src/check-node-version.ts",
+            "Node runtime compatibility",
+            "TUI typecheck",
         ),
         (
             "npm --offline --prefix tui test -- --exclude test/protocol-fixtures.test.ts "

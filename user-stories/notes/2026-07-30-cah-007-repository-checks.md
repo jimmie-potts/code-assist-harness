@@ -12,7 +12,7 @@ check. It is an executable POSIX shell script with `set -eu`, resolves its own r
 therefore behaves the same when invoked from the repository or through an absolute path from another
 working directory.
 
-The script labels and runs these 11 stages in order:
+The script labels and runs these 12 stages in order:
 
 1. Python lockfile and environment.
 2. Python lint and docstrings.
@@ -20,11 +20,12 @@ The script labels and runs these 11 stages in order:
 4. Python tests.
 5. Protocol fixtures: Python.
 6. Repository policy: check script, documentation links, locks, and network.
-7. TUI typecheck.
-8. TUI lint.
-9. TUI tests.
-10. Protocol fixtures: TypeScript.
-11. Node-Python integration.
+7. Node runtime compatibility.
+8. TUI typecheck.
+9. TUI lint.
+10. TUI tests.
+11. Protocol fixtures: TypeScript.
+12. Node-Python integration.
 
 Splitting fixtures, policy, and the real process boundary into their own stages keeps a failure
 attributable without creating separate sources of truth. The focused pytest, Ruff, and npm commands
@@ -37,7 +38,10 @@ while CI uses `uv sync --locked` and `npm ci`. The gate consumes those installed
 sets uv and npm offline modes, verifies the prepared environment with
 `uv sync --check --locked --offline`, and uses `uv run --offline --frozen --no-sync`. It also sets
 `TMPDIR=/tmp`, suppresses Python bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic,
-and Google provider credentials before any constituent command.
+and Google provider credentials before any constituent command. It removes `UV_PROJECT`,
+`UV_PROJECT_ENVIRONMENT`, `UV_PYTHON`, `UV_WORKING_DIR`, `UV_NO_PROJECT`, and `UV_ISOLATED` so
+ambient project, environment, interpreter, discovery, or ephemeral-environment selectors cannot
+redirect local validation.
 It also points `PYTHONPATH` at a `sitecustomize.py` socket guard and preloads the Node network guard
 through `NODE_OPTIONS`, so the top-level check processes reject common network client attempts. The
 runtime supervisor intentionally removes `PYTHONPATH` from its real Python child to preserve the
@@ -67,11 +71,17 @@ that side effect, and CI's actual `npm ci` remains the clean lockfile-install pr
 
 ## Script and failure evidence
 
-`tests/test_check_script.py` uses temporary `uv` and `npm` stubs to verify exact command order, the
-non-mutating uv environment/no-sync flags, offline settings, process-guard preloads, removal of an
-inherited `OPENAI_API_KEY`, layer labels, the success footer, and fail-fast propagation. Six tests
-cover the script contract, including exit-code 23 injections for Python, Python fixtures, TUI tests,
-and Node-Python integration.
+`tests/test_check_script.py` uses temporary `uv`, `node`, and `npm` stubs to verify exact command
+order, the non-mutating uv environment/no-sync flags, removal of six inherited uv selectors,
+offline settings, process-guard preloads, removal of an inherited `OPENAI_API_KEY`, layer labels, the
+success footer, and fail-fast propagation. Seven tests cover the script contract, including exit-code
+23 injections for Python, Python fixtures, Node compatibility, TUI tests, and Node-Python
+integration.
+
+The Node stage runs before the labeled TUI npm stages from the `tui/` directory and reuses
+`assertSupportedNodeVersion(process.versions.node)`. This keeps the canonical local gate on the same
+`>=22.13.0 <23` contract as the interactive bootstrap without duplicating semver logic or requiring
+the exact pinned patch release.
 
 The story's separate transient probes also ran through the genuine gate and were restored after each
 result:
@@ -98,19 +108,19 @@ pull-request run and is not inferred from local execution.
 
 ## Final validation
 
-The final clean `./scripts/check` completed all 11 stages and printed
+The final clean `./scripts/check` completed all 12 stages and printed
 `All repository checks passed.` Evidence was:
 
 - Python lockfile/environment check, Ruff lint/docstrings, and Ruff formatting passed.
 - Python core tests: 105 passed.
 - Python protocol fixtures: 30 passed.
-- Check-script and repository-policy tests: 14 passed.
+- Check-script and repository-policy tests: 15 passed.
 - Python and Node TCP, UDP, fetch, and external-DNS probes were rejected by the preloaded guards.
 - TUI type checking and ESLint passed.
 - TUI core tests: 126 passed.
 - TypeScript protocol fixtures: 29 passed.
 - Real Node-Python boundary tests: 4 passed.
-- Total Python evidence: 149 tests; total TUI evidence: 159 tests.
+- Total Python evidence: 150 tests; total TUI evidence: 159 tests.
 - `git diff --check` passed.
 
 The 10-slide visual companion uses a playful quality-machine/conductor motif, a rail-line stage map,

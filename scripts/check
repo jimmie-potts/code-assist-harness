@@ -13,6 +13,10 @@ unset OPENAI_API_KEY OPENAI_ORGANIZATION OPENAI_ORG_ID OPENAI_PROJECT_ID
 unset AZURE_OPENAI_API_KEY AZURE_OPENAI_AD_TOKEN AZURE_OPENAI_ENDPOINT
 unset ANTHROPIC_API_KEY GOOGLE_API_KEY GEMINI_API_KEY
 
+# Ambient uv selectors can redirect project discovery, the target environment, or the interpreter.
+# Clear only selector settings; the gate supplies its own offline and cache configuration below.
+unset UV_PROJECT UV_PROJECT_ENVIRONMENT UV_PYTHON UV_WORKING_DIR UV_NO_PROJECT UV_ISOLATED
+
 # Keep dependency resolution offline. Setup is a separate, lockfile-driven step (`uv sync --dev`
 # and `npm --prefix tui ci`); the first stage verifies that prepared Python environment without
 # changing it, and every later Python tool invocation explicitly disables synchronization.
@@ -54,6 +58,10 @@ run_check \
     'Repository policy: check script, documentation links, locks, and network' \
     uv run --offline --frozen --no-sync pytest \
     tests/test_check_script.py tests/test_repository_policy.py
+run_check \
+    'Node runtime compatibility' \
+    sh -c 'cd "$1" && exec node --import=tsx src/check-node-version.ts' \
+    sh "$repository_root/tui"
 run_check 'TUI typecheck' npm --offline --prefix tui run typecheck
 run_check 'TUI lint' npm --offline --prefix tui run lint
 run_check \

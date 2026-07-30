@@ -117,20 +117,24 @@ Run the canonical non-live gate from any directory:
 From the repository root, the usual form is `./scripts/check`. Setup and validation are deliberately
 separate: the gate does not install or update dependencies. It checks the Python lock and prepared
 environment, runs Python lint/docstring rules and formatting, then labels Python unit tests, Python
-protocol fixtures, and repository policy separately. It next labels TUI type checking, lint, unit
-tests, TypeScript protocol fixtures, and the real Node-to-`uv`-to-Python integration as distinct
-stages. Repository policy covers local documentation links and anchors, the complete TUI lock graph,
-and the M0 production-source network guard.
+protocol fixtures, and repository policy separately. It then checks the active Node runtime against
+the TUI's supported range before labeling TUI type checking, lint, unit tests, TypeScript protocol
+fixtures, and the real Node-to-`uv`-to-Python integration as distinct stages. Repository policy
+covers local documentation links and anchors, the complete TUI lock graph, and the M0
+production-source network guard.
 
 The script verifies the Python environment with `uv sync --check --locked --offline`, runs Python
 tools with `uv run --offline --frozen --no-sync`, and uses npm offline mode. It sets `TMPDIR=/tmp`,
 suppresses Python bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic, and Google
-provider credentials from its child environment. The top-level Python and Node checks preload guards
-that reject common socket/network client entry points. The runtime supervisor deliberately strips
-ambient Python selectors, including `PYTHONPATH`, before its real Python child; that current child
-remains covered by source-policy tests that reject known network modules and request APIs in
-production paths. These are intentionally small M0 controls, not a general-purpose network sandbox
-for arbitrary native executables.
+provider credentials from its child environment. It also clears ambient uv project, environment,
+interpreter, working-directory, and no-project selectors so local Python checks cannot be redirected
+away from the repository's prepared environment, and clears isolated-run mode so `uv run` cannot
+substitute an ephemeral environment. The top-level Python and Node checks preload guards that reject
+common socket/network client entry points. The runtime supervisor deliberately strips ambient Python
+selectors, including `PYTHONPATH`, before its real Python child; that current child remains covered by
+source-policy tests that reject known network modules and request APIs in production paths. These are
+intentionally small M0 controls, not a general-purpose network sandbox for arbitrary native
+executables.
 
 `uv sync --dev` is required before launch. The runtime supervisor verifies that `.venv/pyvenv.cfg`
 and an executable `.venv/bin/python` already exist before it invokes `uv`; an unprepared checkout
