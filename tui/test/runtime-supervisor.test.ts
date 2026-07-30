@@ -170,7 +170,8 @@ function sessionEventLine(
     | 'assistant.delta'
     | 'assistant.completed'
     | 'session.completed'
-    | 'session.cancelled',
+    | 'session.cancelled'
+    | 'session.failed',
   sequence: number,
   payload: Record<string, string>,
   options: {readonly commandId?: string; readonly sessionId?: string} = {},
@@ -636,7 +637,9 @@ describe('PythonRuntimeSupervisor', () => {
           ? `${update.type}:${update.commandId}`
           : update.type === 'cancel.requested'
             ? `${update.type}:${update.commandId}`
-          : `${update.event.type}:${update.event.session_id}:${update.event.sequence}`,
+            : update.type === 'event.received'
+              ? `${update.event.type}:${update.event.session_id}:${update.event.sequence}`
+              : update.type,
       );
     });
     await startReady(child, supervisor);
@@ -708,6 +711,49 @@ describe('PythonRuntimeSupervisor', () => {
       `session.completed:${secondSession}:6`,
     ]);
     expect(supervisor.getState().status).toBe('running');
+
+    await closeOnInputEnd(child, supervisor);
+  });
+
+  it('accepts session.failed as authoritative and remains ready for a fresh task', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      SECOND_SESSION_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    const updates: SessionUpdate[] = [];
+    supervisor.subscribeToSessionUpdates((update) => updates.push(update));
+    await startReady(child, supervisor);
+
+    const failedTaskLine = nextInputLine(child);
+    supervisor.submitTask('Exercise the failure path.');
+    await failedTaskLine;
+    child.stdout.write(sessionEventLine('session.started', 1, {}));
+    child.stdout.write(
+      sessionEventLine('session.failed', 2, {
+        code: 'mock.failure',
+        message: 'The mock session failed safely.',
+      }),
+    );
+
+    expect(supervisor.getState()).toEqual({status: 'running', workspace: WORKSPACE});
+    expect(supervisor.cancelSession()).toBe(false);
+    expect(updates.at(-1)).toMatchObject({
+      type: 'event.received',
+      event: {
+        type: 'session.failed',
+        payload: {code: 'mock.failure', message: 'The mock session failed safely.'},
+      },
+    });
+
+    const freshTaskLine = nextInputLine(child);
+    expect(supervisor.submitTask('Try again.')).toBe(SECOND_SESSION_COMMAND_ID);
+    expect(await freshTaskLine).toBe(sessionStartCommandLine(SECOND_SESSION_COMMAND_ID, 'Try again.'));
 
     await closeOnInputEnd(child, supervisor);
   });
@@ -835,7 +881,7 @@ describe('PythonRuntimeSupervisor', () => {
     {
       name: 'cancellation acknowledgement without a local request',
       line: sessionEventLine('session.cancelled', 2, {}),
-      expected: 'did not correlate',
+      expected: 'not legal',
       begin: true,
     },
   ])('fails closed before projecting a session event with $name', async ({line, expected, begin, delta}) => {

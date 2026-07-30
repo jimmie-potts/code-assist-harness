@@ -18,13 +18,19 @@ assistant deltas before completion. While a session is running, Escape sends one
 Pydantic and Zod validate strict, hand-maintained wire contracts on both sides; bounded LF readers
 contain malformed lines; shared fixtures prove cross-language parity; and real
 Node-to-`uv`-to-Python tests prove streaming, cancellation, repeated sessions, and process cleanup.
+Pure Python and TypeScript reducers now derive the same eight-state session lifecycle from trusted
+domain facts and validated wire events. Fifty shared transition, replay, and failure cases guard
+correlation, session identity, contiguous sequence, assistant completion, and absorbing terminals.
+The Python mock and TypeScript supervisor route their current event tapes through those cores, while
+the Ink conversation projection preserves completed, cancelled, and failed turns.
 The application does **not** yet run an agent loop, read the workspace, or integrate with OpenAI.
 CAH-009 documents that first end-to-end execution in the
 [walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
 are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
 adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
-evidence. CAH-010 is the next dependency-ready unit; provider, workspace-read, tool, policy,
-transcript, and agent behavior remain unimplemented.
+evidence. CAH-010 begins M1 with replayable in-memory lifecycle state. CAH-011 is next and will add
+the append-only transcript; provider, workspace-read, tool, policy, and agent behavior remain
+unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and

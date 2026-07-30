@@ -127,7 +127,11 @@ describe('reduceSessionState', () => {
       event('session.cancelled', 'cmd_cancel', 'ses_active', 5, {}),
     );
     expect(duplicateTerminal.status).toBe('protocol-failed');
-    expect(duplicateTerminal.protocolFailure).toContain('without an active submitted task');
+    expect(duplicateTerminal.protocolFailureDetails).toEqual({
+      code: 'terminal_state_absorbing',
+      priorStatus: 'completed',
+      eventType: 'session.cancelled',
+    });
   });
 
   it('fails closed on cancellation without a matching local request', () => {
@@ -136,7 +140,7 @@ describe('reduceSessionState', () => {
       event('session.cancelled', 'cmd_cancel', 'ses_active', 2, {}),
     );
     expect(unsolicited.status).toBe('protocol-failed');
-    expect(unsolicited.protocolFailure).toContain('did not correlate');
+    expect(unsolicited.protocolFailureDetails?.code).toBe('illegal_transition');
 
     let mismatched = cancel(runningState(), 'cmd_cancel', 'ses_active');
     mismatched = receive(
@@ -240,7 +244,80 @@ describe('reduceSessionState', () => {
     );
 
     expect(state.status).toBe('protocol-failed');
-    expect(state.protocolFailure).toContain('without an active submitted task');
+    expect(state.protocolFailureDetails?.code).toBe('terminal_state_absorbing');
+  });
+
+  it('projects approval waiting and permits cancellation from the waiting state', () => {
+    let state = runningState();
+    state = reduceSessionState(state, {
+      type: 'approval.requested',
+      sessionId: 'ses_active',
+    });
+
+    expect(state.status).toBe('awaiting_approval');
+    expect(state.turns.at(-1)?.status).toBe('awaiting_approval');
+
+    state = cancel(state, 'cmd_cancel', 'ses_active');
+    expect(state.status).toBe('cancelling');
+    expect(state.turns.at(-1)).toMatchObject({
+      status: 'cancelling',
+      cancelCommandId: 'cmd_cancel',
+    });
+  });
+
+  it('preserves an authoritative failed turn and starts a fresh lifecycle for the next task', () => {
+    let state = runningState();
+    state = receive(
+      state,
+      event('session.failed', 'cmd_active', 'ses_active', 2, {
+        code: 'mock.failure',
+        message: 'The mock session failed safely.',
+      }),
+    );
+
+    expect(state).toMatchObject({
+      status: 'failed',
+      turns: [
+        {
+          status: 'failed',
+          sessionFailure: {
+            code: 'mock.failure',
+            message: 'The mock session failed safely.',
+          },
+        },
+      ],
+    });
+
+    state = submit(state, 'cmd_next', 'Try a safer path');
+    expect(state.status).toBe('starting');
+    expect(state.turns).toHaveLength(2);
+    expect(state.turns[0]?.status).toBe('failed');
+    expect(state.turns[1]).toMatchObject({
+      commandId: 'cmd_next',
+      task: 'Try a safer path',
+      status: 'starting',
+      lastSequence: 0,
+    });
+  });
+
+  it('reports bounded invariant metadata without leaking rejected payloads or identities', () => {
+    const state = receive(
+      runningState(),
+      event('assistant.delta', 'cmd_secret', 'ses_secret', 9, {
+        text: 'TOP-SECRET-PAYLOAD',
+      }),
+    );
+
+    expect(state.status).toBe('protocol-failed');
+    expect(state.protocolFailureDetails).toEqual({
+      code: 'correlation_mismatch',
+      priorStatus: 'running',
+      eventType: 'assistant.delta',
+    });
+    expect(state.protocolFailure).not.toContain('TOP-SECRET-PAYLOAD');
+    expect(state.protocolFailure).not.toContain('cmd_secret');
+    expect(state.protocolFailure).not.toContain('ses_secret');
+    expect(state.protocolFailure?.length).toBeLessThan(220);
   });
 
   it('ignores all later updates after a projection failure', () => {

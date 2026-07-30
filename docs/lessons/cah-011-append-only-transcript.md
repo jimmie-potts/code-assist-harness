@@ -3,7 +3,7 @@
 - **Unit:** CAH-011
 - **Milestone:** M1 - Conversational core
 - **Lesson status:** Planned
-- **Implementation status:** Planned; no transcript writer or session summary exists yet
+- **Implementation status:** Planned and dependency-ready; no transcript writer or summary exists yet
 - **Story:** [CAH-011](../../user-stories/cah-011-append-only-transcript.md)
 - **Related architecture:** [Architecture](../architecture.md),
   [Safety model](../safety-model.md), and [Evaluation](../evaluation.md)
@@ -13,16 +13,19 @@
 
 ## Quick summary
 
-This unit plans a local JSONL transcript that appends each validated session event after redaction.
-It teaches the difference between authoritative in-memory state, durable evidence, and a readable
-summary while preserving an explicit privacy opt-out.
+This unit plans a local JSONL transcript that appends each trusted lifecycle input after redaction:
+application-owned domain facts plus validated session events. It teaches the difference between
+authoritative in-memory state, durable evidence, and a readable summary while preserving an
+explicit privacy opt-out.
 
 ## Learning objectives
 
 After completing this unit, you should be able to:
 
-- explain why validated domain events, rather than raw provider data, form the audit record;
-- preserve event order without making persistence the owner of session state;
+- explain why trusted domain facts and validated events, rather than raw provider data, form the
+  audit record;
+- preserve reducer-input order and authoritative session-event sequence without making persistence
+  the owner of session state;
 - design redaction, restrictive permissions, flushing, and failure reporting as one boundary; and
 - compare a local append-only file with durable, governed production event storage.
 
@@ -36,22 +39,22 @@ intentionally redacted or bounded before storage is not recoverable through repl
 
 ## Key concepts
 
-- **Append-only JSONL:** one complete validated event is added per line; earlier lines are never
-  rewritten during the session.
-- **Event evidence:** the transcript records harness-domain facts, not SDK responses, environment
-  dumps, or arbitrary stderr output.
+- **Append-only JSONL:** one complete trusted lifecycle input is added per line; earlier lines are
+  never rewritten during the session.
+- **Lifecycle evidence:** the transcript records trusted application-owned domain facts and
+  validated wire events, not SDK responses, environment dumps, or arbitrary stderr output.
 - **Redaction boundary:** every persistable value crosses one policy that removes configured secrets
   and bounds large content before bytes are written.
-- **Replay:** validating stored events and applying them to the reducer reconstructs the terminal
-  lifecycle state and persisted safe fields. Replay never repeats side effects or recovers content
-  removed by redaction or bounding.
+- **Replay:** validating stored lifecycle inputs and applying them from `idle` reconstructs the
+  terminal lifecycle state and persisted safe fields. Replay never repeats side effects or recovers
+  content removed by redaction or bounding.
 - **Human-readable summary:** a derived artifact reports task, outcome, changed files, and checks,
   using honest empty values when a capability is not yet available.
 
 ## Architecture and design
 
 ```text
-validated ordered event
+trusted ordered lifecycle input
         |
         +--> session reducer (authoritative live state)
         |
@@ -66,8 +69,10 @@ A stable workspace identifier avoids exposing a personal path in the filename.
 
 Important invariants:
 
-- only validated session events are eligible for persistence;
-- file order matches accepted session-event order;
+- only trusted application-owned domain facts and validated session events are eligible for
+  persistence;
+- file order matches accepted reducer-input order, while session events retain their authoritative
+  sequence;
 - files use restrictive local permissions and never contain raw provider payloads or environment
   values;
 - `--no-transcript` changes persistence only, not session behavior;
@@ -84,8 +89,10 @@ Important invariants:
    identifier and session ID in filenames.
 3. Create the transcript with owner-only permissions before accepting appends. Make file-opening
    semantics explicit so a race cannot silently relax them.
-4. Pass each validated event through one pure redaction-and-bounding function. Seed tests with fake
-   keys and assert that neither exact values nor raw payload containers survive.
+4. Pass each trusted lifecycle input through one pure redaction-and-bounding function. Include the
+   initial `task.submitted`, cancellation intent, and future approval facts as well as validated wire
+   events. Seed tests with fake keys and assert that neither exact values nor raw payload containers
+   survive.
 5. Serialize one compact JSON object plus `\n`, append in sequence, and flush at a documented
    cadence. A killed test process should leave a valid JSONL prefix.
 6. Derive the completion summary from validated state after a terminal event. Do not infer changed
@@ -95,8 +102,8 @@ Important invariants:
 8. Run replay, permissions, redaction, failure-injection, summary, and opt-out tests from the story.
 
 The useful observation is not merely that a file exists. It is that stored bytes correspond to
-accepted events, survive a controlled interruption, omit seeded secrets, and reproduce the expected
-terminal lifecycle state without claiming to recover removed content.
+accepted reducer inputs, survive a controlled interruption, omit seeded secrets, and reproduce the
+expected terminal lifecycle state from `idle` without claiming to recover removed content.
 
 ## Failure scenarios to study
 
@@ -154,7 +161,8 @@ logging product exists.
 
 ## Practical exercises
 
-1. Write a test that appends three fake validated events, replays them, and compares reducer state.
+1. Write a test that appends a fake `task.submitted` fact and validated event sequence, replays the
+   complete tape from `idle`, and compares reducer state.
 2. Inject a writer that fails on the third flush; prove the first two lines parse and no recursive
    persistence attempt occurs.
 3. Seed user text and tool metadata with a fake token in several encodings and inspect the resulting
@@ -166,7 +174,8 @@ logging product exists.
 ## Key takeaways
 
 - Python owns transcript validation and persistence; the transcript does not own session truth.
-- Store ordered, redacted domain events and preserve an explicit no-storage path.
+- Store ordered, redacted domain facts and validated events, and preserve an explicit no-storage
+  path.
 - Local JSONL is inspectable and sufficient for learning; centralized immutable storage is justified
   only by measured sharing, durability, or governance needs.
 
@@ -175,7 +184,8 @@ logging product exists.
 - **Append-only:** new records are added without changing earlier session records.
 - **JSONL:** one JSON value per line, suitable for incremental writes and line-by-line recovery.
 - **Redaction:** removal or replacement of sensitive values before persistence.
-- **Replay:** deterministic state reconstruction from validated events without repeating effects.
+- **Replay:** deterministic state reconstruction from trusted lifecycle inputs without repeating
+  effects.
 - **Retention:** rules governing how long records remain available and when they may be deleted.
 - **WORM:** write-once-read-many storage that prevents protected versions from being overwritten.
 

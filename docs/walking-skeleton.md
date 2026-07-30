@@ -1,7 +1,7 @@
 # Walking-skeleton execution guide
 
 - **Unit:** [CAH-009](../user-stories/cah-009-document-walking-skeleton.md)
-- **Status:** Verified against the implemented CAH-005 and CAH-006 paths
+- **Status:** Verified against the CAH-005, CAH-006, and CAH-010 lifecycle paths
 - **Protocol:** Version 1 NDJSON
 - **Automated boundary:** [Node-to-Python integration test](../tui/test/runtime-boundary.test.ts)
 
@@ -13,8 +13,8 @@
 One task crosses the real Ink-to-Python process boundary and returns as incrementally rendered
 assistant text. A second controlled path proves that Escape can request cancellation while Python
 still owns the terminal outcome. Together they exercise terminal input, child supervision, strict
-wire validation, ordered event production, pure UI reduction, rendering, and cleanup without a
-provider or network call.
+wire validation, equivalent pure lifecycle reduction in both languages, rendering, and cleanup
+without a provider or network call.
 
 The runtime-readiness handshake has already completed before either trace begins:
 `PythonRuntimeSupervisor.start` has sent `runtime.initialize`, and Python has returned the correlated
@@ -111,11 +111,12 @@ event, allocates the next sequence while holding its write lock, and writes one 
 
 The supervisor's bounded line reader yields one physical stdout line. `parseEventLine` establishes
 JSON, version, envelope, known type, and payload trust in stages. Only a successful parse reaches
-`PythonRuntimeSupervisor.#acceptSessionEvent`, which asks `reduceSessionState` whether correlation,
-session identity, sequence, and lifecycle transition are legal.
+`PythonRuntimeSupervisor.#acceptSessionEvent`, which asks `reduceSessionLifecycle` whether the edge,
+correlation, session identity, sequence, and payload-specific transition are legal.
 
-`runApplication` subscribes to each accepted update, reduces it outside React, and rerenders `App`.
-The visible progression is therefore causal rather than timer-driven:
+`runApplication` subscribes to each accepted update, passes it through the multi-turn conversation
+adapter outside React, and rerenders `App`. The visible progression is therefore causal rather than
+timer-driven:
 
 | Event | Trusted state change | Visible result |
 | --- | --- | --- |
@@ -126,9 +127,10 @@ The visible progression is therefore causal rather than timer-driven:
 | `assistant.completed`, sequence 5 | Confirm exact accumulated text | Assistant message is internally complete |
 | `session.completed`, sequence 6 | `running` to `completed` | Completed status; another task is allowed |
 
-The reducer fails closed if a sequence skips, a correlation or session ID changes, a delta follows
-assistant completion, or the completed text differs from the accumulated deltas. React never sees an
-unvalidated wire value.
+The lifecycle core returns a payload-free invariant failure if a sequence skips, a correlation or
+session ID changes, a delta follows assistant completion, or completed text differs from accumulated
+deltas. The supervisor then fails the untrusted tape closed; React never sees an unvalidated or
+semantically rejected wire value.
 
 ## Cancellation execution
 
@@ -235,8 +237,8 @@ loop. This walking skeleton does not yet:
 - discover, search, or read workspace content;
 - expose tools, evaluate policy, or request approval;
 - propose or apply edits, run repository subprocesses, or show diffs;
-- write a durable transcript; or
-- derive reusable Python session state by replaying events.
+- write or reload a durable transcript; or
+- execute a provider-backed agent loop.
 
 These omissions keep the first boundary deterministic. They must not be filled in by explanatory
 prose before their owning stories implement and test them.
@@ -248,9 +250,10 @@ TypeScript, protocol, integration, documentation, and network-policy checks thro
 repository command and Linux CI workflow. It changed how this evidence is run, not the
 walking-skeleton runtime semantics documented here.
 
-[CAH-010](../user-stories/cah-010-session-state-reducer.md) is next. It will replace the
-M0-specific TUI projection with a documented lifecycle transition model and equivalent pure Python
-and TypeScript reducers.
+[CAH-010](../user-stories/cah-010-session-state-reducer.md) now routes this tape through equivalent
+pure Python and TypeScript lifecycle reducers while keeping multi-turn rendering as an adapter.
+[CAH-011](../user-stories/cah-011-append-only-transcript.md) is next. It will persist validated,
+redacted history without becoming the lifecycle source of truth.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

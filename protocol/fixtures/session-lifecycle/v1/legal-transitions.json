@@ -1,0 +1,758 @@
+{
+  "fixture_version": 1,
+  "description": "Every legal CAH-010 transition. Each case starts from idle, applies setup_inputs, then reduces input once.",
+  "cases": [
+    {
+      "id": "idle_task_submitted_starting",
+      "initial_state": "idle",
+      "setup_inputs": [],
+      "input": {
+        "type": "task.submitted",
+        "command_id": "cmd_start_legal_01",
+        "task": "Map the state machine."
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "starting",
+          "start_command_id": "cmd_start_legal_01",
+          "task": "Map the state machine.",
+          "session_id": null,
+          "cancel_command_id": null,
+          "last_sequence": 0,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "starting_session_started_running",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_02",
+          "task": "Start a validated session."
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.started",
+        "session_id": "ses_legal_02",
+        "sequence": 1,
+        "timestamp": "2026-07-30T14:00:01.000Z",
+        "correlation_id": "cmd_start_legal_02",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_legal_02",
+          "task": "Start a validated session.",
+          "session_id": "ses_legal_02",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "running_assistant_delta_running",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_03",
+          "task": "Accumulate one fragment."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_03",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:02.000Z",
+          "correlation_id": "cmd_start_legal_03",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_legal_03",
+        "sequence": 2,
+        "timestamp": "2026-07-30T14:00:02.100Z",
+        "correlation_id": "cmd_start_legal_03",
+        "payload": {"text": "State "}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_legal_03",
+          "task": "Accumulate one fragment.",
+          "session_id": "ses_legal_03",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "State ",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "cancelling_assistant_delta_cancelling",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_04",
+          "task": "Keep an in-flight fragment."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_04",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:03.000Z",
+          "correlation_id": "cmd_start_legal_04",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_legal_04",
+          "session_id": "ses_legal_04"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_legal_04",
+        "sequence": 2,
+        "timestamp": "2026-07-30T14:00:03.100Z",
+        "correlation_id": "cmd_start_legal_04",
+        "payload": {"text": "Already in flight."}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "cancelling",
+          "start_command_id": "cmd_start_legal_04",
+          "task": "Keep an in-flight fragment.",
+          "session_id": "ses_legal_04",
+          "cancel_command_id": "cmd_cancel_legal_04",
+          "last_sequence": 2,
+          "assistant_text": "Already in flight.",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "running_assistant_completed_running",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_05",
+          "task": "Confirm accumulated text."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_05",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:04.000Z",
+          "correlation_id": "cmd_start_legal_05",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_legal_05",
+          "sequence": 2,
+          "timestamp": "2026-07-30T14:00:04.100Z",
+          "correlation_id": "cmd_start_legal_05",
+          "payload": {"text": "Ready."}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.completed",
+        "session_id": "ses_legal_05",
+        "sequence": 3,
+        "timestamp": "2026-07-30T14:00:04.200Z",
+        "correlation_id": "cmd_start_legal_05",
+        "payload": {"text": "Ready."}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_legal_05",
+          "task": "Confirm accumulated text.",
+          "session_id": "ses_legal_05",
+          "cancel_command_id": null,
+          "last_sequence": 3,
+          "assistant_text": "Ready.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "cancelling_assistant_completed_cancelling",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_06",
+          "task": "Finish text during cancellation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_06",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:05.000Z",
+          "correlation_id": "cmd_start_legal_06",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_legal_06",
+          "sequence": 2,
+          "timestamp": "2026-07-30T14:00:05.100Z",
+          "correlation_id": "cmd_start_legal_06",
+          "payload": {"text": "Race complete."}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_legal_06",
+          "session_id": "ses_legal_06"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.completed",
+        "session_id": "ses_legal_06",
+        "sequence": 3,
+        "timestamp": "2026-07-30T14:00:05.200Z",
+        "correlation_id": "cmd_start_legal_06",
+        "payload": {"text": "Race complete."}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "cancelling",
+          "start_command_id": "cmd_start_legal_06",
+          "task": "Finish text during cancellation.",
+          "session_id": "ses_legal_06",
+          "cancel_command_id": "cmd_cancel_legal_06",
+          "last_sequence": 3,
+          "assistant_text": "Race complete.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "running_approval_requested_awaiting_approval",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_07",
+          "task": "Pause for a local approval fact."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_07",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:06.000Z",
+          "correlation_id": "cmd_start_legal_07",
+          "payload": {}
+        }
+      ],
+      "input": {"type": "approval.requested", "session_id": "ses_legal_07"},
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "awaiting_approval",
+          "start_command_id": "cmd_start_legal_07",
+          "task": "Pause for a local approval fact.",
+          "session_id": "ses_legal_07",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "awaiting_approval_approval_resolved_running",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_08",
+          "task": "Resume after approval."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_08",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:07.000Z",
+          "correlation_id": "cmd_start_legal_08",
+          "payload": {}
+        },
+        {"type": "approval.requested", "session_id": "ses_legal_08"}
+      ],
+      "input": {"type": "approval.resolved", "session_id": "ses_legal_08"},
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_legal_08",
+          "task": "Resume after approval.",
+          "session_id": "ses_legal_08",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "running_cancel_requested_cancelling",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_09",
+          "task": "Request cooperative cancellation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_09",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:08.000Z",
+          "correlation_id": "cmd_start_legal_09",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "type": "cancel.requested",
+        "command_id": "cmd_cancel_legal_09",
+        "session_id": "ses_legal_09"
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "cancelling",
+          "start_command_id": "cmd_start_legal_09",
+          "task": "Request cooperative cancellation.",
+          "session_id": "ses_legal_09",
+          "cancel_command_id": "cmd_cancel_legal_09",
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "awaiting_approval_cancel_requested_cancelling",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_10",
+          "task": "Cancel while approval is pending."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_10",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:09.000Z",
+          "correlation_id": "cmd_start_legal_10",
+          "payload": {}
+        },
+        {"type": "approval.requested", "session_id": "ses_legal_10"}
+      ],
+      "input": {
+        "type": "cancel.requested",
+        "command_id": "cmd_cancel_legal_10",
+        "session_id": "ses_legal_10"
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "cancelling",
+          "start_command_id": "cmd_start_legal_10",
+          "task": "Cancel while approval is pending.",
+          "session_id": "ses_legal_10",
+          "cancel_command_id": "cmd_cancel_legal_10",
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "running_session_completed_completed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_11",
+          "task": "Reach successful completion."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_11",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:10.000Z",
+          "correlation_id": "cmd_start_legal_11",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_legal_11",
+          "sequence": 2,
+          "timestamp": "2026-07-30T14:00:10.100Z",
+          "correlation_id": "cmd_start_legal_11",
+          "payload": {"text": "Done."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_legal_11",
+          "sequence": 3,
+          "timestamp": "2026-07-30T14:00:10.200Z",
+          "correlation_id": "cmd_start_legal_11",
+          "payload": {"text": "Done."}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.completed",
+        "session_id": "ses_legal_11",
+        "sequence": 4,
+        "timestamp": "2026-07-30T14:00:10.300Z",
+        "correlation_id": "cmd_start_legal_11",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_legal_11",
+          "task": "Reach successful completion.",
+          "session_id": "ses_legal_11",
+          "cancel_command_id": null,
+          "last_sequence": 4,
+          "assistant_text": "Done.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "cancelling_session_completed_completed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_12",
+          "task": "Let completion win the race."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_12",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:11.000Z",
+          "correlation_id": "cmd_start_legal_12",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_legal_12",
+          "sequence": 2,
+          "timestamp": "2026-07-30T14:00:11.100Z",
+          "correlation_id": "cmd_start_legal_12",
+          "payload": {"text": "Already complete."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_legal_12",
+          "sequence": 3,
+          "timestamp": "2026-07-30T14:00:11.200Z",
+          "correlation_id": "cmd_start_legal_12",
+          "payload": {"text": "Already complete."}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_legal_12",
+          "session_id": "ses_legal_12"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.completed",
+        "session_id": "ses_legal_12",
+        "sequence": 4,
+        "timestamp": "2026-07-30T14:00:11.300Z",
+        "correlation_id": "cmd_start_legal_12",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_legal_12",
+          "task": "Let completion win the race.",
+          "session_id": "ses_legal_12",
+          "cancel_command_id": "cmd_cancel_legal_12",
+          "last_sequence": 4,
+          "assistant_text": "Already complete.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "cancelling_session_cancelled_cancelled",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_13",
+          "task": "Let cancellation win."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_13",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:12.000Z",
+          "correlation_id": "cmd_start_legal_13",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_legal_13",
+          "session_id": "ses_legal_13"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.cancelled",
+        "session_id": "ses_legal_13",
+        "sequence": 2,
+        "timestamp": "2026-07-30T14:00:12.100Z",
+        "correlation_id": "cmd_cancel_legal_13",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "cancelled",
+          "start_command_id": "cmd_start_legal_13",
+          "task": "Let cancellation win.",
+          "session_id": "ses_legal_13",
+          "cancel_command_id": "cmd_cancel_legal_13",
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "running_session_failed_failed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_14",
+          "task": "Surface a safe session failure."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_14",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:13.000Z",
+          "correlation_id": "cmd_start_legal_14",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.failed",
+        "session_id": "ses_legal_14",
+        "sequence": 2,
+        "timestamp": "2026-07-30T14:00:13.100Z",
+        "correlation_id": "cmd_start_legal_14",
+        "payload": {
+          "code": "mock_failure",
+          "message": "The deterministic session stopped safely."
+        }
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_legal_14",
+          "task": "Surface a safe session failure.",
+          "session_id": "ses_legal_14",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "mock_failure",
+            "message": "The deterministic session stopped safely."
+          }
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "awaiting_approval_session_failed_failed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_15",
+          "task": "Fail while approval is pending."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_15",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:14.000Z",
+          "correlation_id": "cmd_start_legal_15",
+          "payload": {}
+        },
+        {"type": "approval.requested", "session_id": "ses_legal_15"}
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.failed",
+        "session_id": "ses_legal_15",
+        "sequence": 2,
+        "timestamp": "2026-07-30T14:00:14.100Z",
+        "correlation_id": "cmd_start_legal_15",
+        "payload": {
+          "code": "approval_interrupted",
+          "message": "The session ended while approval was pending."
+        }
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_legal_15",
+          "task": "Fail while approval is pending.",
+          "session_id": "ses_legal_15",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "approval_interrupted",
+            "message": "The session ended while approval was pending."
+          }
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "cancelling_session_failed_failed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_legal_16",
+          "task": "Fail while cancellation is pending."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_legal_16",
+          "sequence": 1,
+          "timestamp": "2026-07-30T14:00:15.000Z",
+          "correlation_id": "cmd_start_legal_16",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_legal_16",
+          "session_id": "ses_legal_16"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.failed",
+        "session_id": "ses_legal_16",
+        "sequence": 2,
+        "timestamp": "2026-07-30T14:00:15.100Z",
+        "correlation_id": "cmd_start_legal_16",
+        "payload": {
+          "code": "cancellation_failure",
+          "message": "Cancellation ended with a safe failure."
+        }
+      },
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_legal_16",
+          "task": "Fail while cancellation is pending.",
+          "session_id": "ses_legal_16",
+          "cancel_command_id": "cmd_cancel_legal_16",
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "cancellation_failure",
+            "message": "Cancellation ended with a safe failure."
+          }
+        },
+        "failure": null
+      }
+    }
+  ]
+}

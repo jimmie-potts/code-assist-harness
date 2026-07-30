@@ -274,6 +274,54 @@ describe('App', () => {
     }
   });
 
+  it('keeps a draft cancellable while awaiting approval and renders session failure safely', async () => {
+    const onCancelSession = vi.fn(() => true);
+    let state = receive(submittedState('Review this change.'), 'session.started', 1, {});
+    const renderApp = (): ReactElement => (
+      <App
+        runtimeState={{status: 'running', workspace: '/workspace'}}
+        sessionState={state}
+        onSubmitTask={() => undefined}
+        onCancelSession={onCancelSession}
+      />
+    );
+    const view = render(renderApp());
+
+    try {
+      view.stdin.write('preserve this next task');
+      state = reduceSessionState(state, {
+        type: 'approval.requested',
+        sessionId: SESSION_ID,
+      });
+      view.rerender(renderApp());
+
+      await vi.waitFor(() => {
+        expect(view.lastFrame()).toContain('Session status: awaiting approval');
+        expect(view.lastFrame()).toContain('Esc to cancel');
+        expect(view.lastFrame()).toContain('preserve this next task');
+      });
+      view.stdin.write('\u001B');
+      await vi.waitFor(() => expect(onCancelSession).toHaveBeenCalledOnce());
+
+      state = receive(state, 'session.failed', 2, {
+        code: 'approval.unavailable',
+        message: 'Approval could not be completed safely.',
+      });
+      view.rerender(renderApp());
+
+      await vi.waitFor(() => {
+        const frame = view.lastFrame()?.replace(/\s+/g, ' ');
+        expect(frame).toContain('Session status: failed (approval.unavailable)');
+        expect(frame).toContain('Approval could not be completed safely.');
+        expect(frame).toContain('ready for another task');
+        expect(frame).toContain('preserve this next task');
+        expect(frame).not.toContain('Esc to cancel');
+      });
+    } finally {
+      view.unmount();
+    }
+  });
+
   it('renders a cancelled outcome distinctly from a session protocol failure', () => {
     let cancelled = receive(submittedState('Compare terminal states.'), 'session.started', 1, {});
     cancelled = reduceSessionState(cancelled, {
@@ -305,7 +353,7 @@ describe('App', () => {
 
       view.rerender(renderState(protocolFailed));
       expect(view.lastFrame()).toContain('Session status: protocol failed');
-      expect(view.lastFrame()).toContain('without an active submitted task');
+      expect(view.lastFrame()).toContain('terminal_state_absorbing');
       expect(view.lastFrame()).not.toContain('Session status: cancelled · ready for another task');
     } finally {
       view.unmount();
@@ -374,7 +422,8 @@ function receive(
     | 'assistant.delta'
     | 'assistant.completed'
     | 'session.completed'
-    | 'session.cancelled',
+    | 'session.cancelled'
+    | 'session.failed',
   sequence: number,
   payload: Record<string, string>,
   correlationId = COMMAND_ID,

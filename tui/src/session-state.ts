@@ -1,33 +1,38 @@
-import type {ProtocolEvent} from './protocol.js';
+import type {
+  ApprovalRequested,
+  ApprovalResolved,
+  CancelRequested,
+  SessionFailure,
+  SessionInvariantFailure,
+  SessionLifecycleEvent,
+  SessionLifecycleInput,
+  SessionLifecycleState,
+  SessionLifecycleStatus,
+  TaskSubmitted,
+} from './session-lifecycle.js';
+import {
+  INITIAL_SESSION_LIFECYCLE_STATE,
+  isTerminalSessionStatus,
+  reduceSessionLifecycle,
+} from './session-lifecycle.js';
 
-/** Mocked-session event accepted by the local conversation projection. */
-export type SessionEvent = Extract<
-  ProtocolEvent,
-  {
-    readonly type:
-      | 'session.started'
-      | 'assistant.delta'
-      | 'assistant.completed'
-      | 'session.completed'
-      | 'session.cancelled';
-  }
->;
+/** Validated protocol event accepted by the local conversation projection. */
+export type SessionEvent = SessionLifecycleEvent;
 
-/** One local command or validated event in the ordered session projection stream. */
+/**
+ * One local domain fact or validated event in the ordered conversation projection stream.
+ *
+ * Approval updates are internal domain facts, not protocol-v1 wire messages. They reserve the
+ * projection seam for the later approval unit without inventing an unvalidated wire contract.
+ */
 export type SessionUpdate =
-  | {
-      readonly type: 'task.submitted';
-      readonly commandId: string;
-      readonly task: string;
-    }
-  | {
-      readonly type: 'cancel.requested';
-      readonly commandId: string;
-      readonly sessionId: string;
-    }
+  | TaskSubmitted
+  | CancelRequested
+  | ApprovalRequested
+  | ApprovalResolved
   | {readonly type: 'event.received'; readonly event: SessionEvent};
 
-/** Visible state for one submitted task and its authoritative Python session. */
+/** Visible immutable projection of one submitted task and its authoritative Python session. */
 export interface ConversationTurn {
   /** Command that caused this turn. */
   readonly commandId: string;
@@ -35,8 +40,8 @@ export interface ConversationTurn {
   readonly task: string;
   /** Python-owned session identity, available after `session.started`. */
   readonly sessionId?: string;
-  /** Session-local lifecycle projected from validated events. */
-  readonly status: 'starting' | 'running' | 'cancelling' | 'completed' | 'cancelled';
+  /** Session-local lifecycle projected from trusted facts and validated events. */
+  readonly status: Exclude<SessionLifecycleStatus, 'idle'>;
   /** Accepted assistant deltas in sequence order. */
   readonly assistantText: string;
   /** Last accepted Python sequence, or zero before the session starts. */
@@ -45,209 +50,140 @@ export interface ConversationTurn {
   readonly assistantCompleted: boolean;
   /** Command that requested cancellation, present only after a validated local request. */
   readonly cancelCommandId?: string;
+  /** Validated and bounded authoritative failure, present only for `failed`. */
+  readonly sessionFailure?: SessionFailure;
 }
 
 /**
- * Local, immutable conversation projection rendered by Ink.
+ * Local, immutable multi-turn conversation projection rendered by Ink.
  *
- * `idle` has no turns. A local submission enters `starting`; only `session.started` enters
- * `running`, and only a terminal Python event enters a terminal state. `protocol-failed` is a local
- * fail-closed state for an event that violates correlation, sequence, identity, or completion
- * invariants. Turns remain visible after runtime exit because runtime lifecycle changes are reduced
- * separately.
+ * `lifecycle` represents exactly the newest turn and delegates every transition to the shared
+ * pure lifecycle reducer. Terminal lifecycle states stay absorbing for diagnostics; submitting a
+ * later task explicitly starts a fresh lifecycle while preserving prior turns. `protocol-failed`
+ * is a local fail-closed projection whose diagnostic contains only stable invariant metadata.
  */
 export interface SessionState {
   /** Status of the newest turn, or `idle` before the first submission. */
-  readonly status:
-    | 'idle'
-    | 'starting'
-    | 'running'
-    | 'cancelling'
-    | 'completed'
-    | 'cancelled'
-    | 'protocol-failed';
+  readonly status: SessionLifecycleStatus | 'protocol-failed';
   /** Completed turns plus the optional active turn in submission order. */
   readonly turns: readonly ConversationTurn[];
-  /** Safe invariant failure displayed when an event cannot enter trusted UI state. */
+  /** One-session reducer state for the newest turn. */
+  readonly lifecycle: SessionLifecycleState;
+  /** Bounded, payload-free invariant summary displayed after a rejected update. */
   readonly protocolFailure?: string;
+  /** Structured payload-free invariant details retained for tests and diagnostics. */
+  readonly protocolFailureDetails?: SessionInvariantFailure;
 }
 
 /** Empty projection used when the TUI first mounts. */
-export const INITIAL_SESSION_STATE: SessionState = {status: 'idle', turns: []};
+export const INITIAL_SESSION_STATE: SessionState = {
+  status: 'idle',
+  turns: [],
+  lifecycle: INITIAL_SESSION_LIFECYCLE_STATE,
+};
 
 /**
- * Reduce one ordered local/session update into visible conversation state.
+ * Reduce one ordered local/session update into visible multi-turn conversation state.
  *
- * The reducer is pure. It never guesses around duplicate, out-of-order, mismatched, or unknown
- * transitions: the first violation produces `protocol-failed`, and later updates are ignored.
- * A local cancellation request enters `cancelling`, but only Python's `session.cancelled` event
- * enters the terminal `cancelled` state. Start-correlated stream and completion events remain legal
- * while cancellation is pending, so whichever valid terminal event arrives first wins.
- * `assistant.completed` must exactly equal accepted deltas, and `session.completed` is legal only
- * after that confirmation. Runtime lifecycle changes are intentionally outside this reducer.
+ * The adapter is pure and delegates all lifecycle legality, correlation, identity, ordering, and
+ * completion checks to {@link reduceSessionLifecycle}. A terminal turn is retained when the next
+ * task creates a fresh lifecycle. Rejected updates leave the trusted turns and lifecycle exactly
+ * unchanged and expose only bounded invariant metadata, never command IDs or event payloads.
  *
  * @param state - Current immutable conversation projection.
- * @param update - Local submission or validated session event in arrival order.
- * @returns A new projection, or the existing terminal protocol-failure projection.
+ * @param update - Trusted local fact or validated session event in arrival order.
+ * @returns The next projection, or the existing terminal protocol-failure projection.
  */
 export function reduceSessionState(state: SessionState, update: SessionUpdate): SessionState {
   if (state.status === 'protocol-failed') {
     return state;
   }
-  if (update.type === 'task.submitted') {
-    return reduceSubmission(state, update);
-  }
-  if (update.type === 'cancel.requested') {
-    return reduceCancellationRequest(state, update);
-  }
-  return reduceEvent(state, update.event);
-}
 
-function reduceSubmission(
-  state: SessionState,
-  update: Extract<SessionUpdate, {readonly type: 'task.submitted'}>,
-): SessionState {
-  if (
-    state.status === 'starting' ||
-    state.status === 'running' ||
-    state.status === 'cancelling'
-  ) {
-    return failProjection(state, 'A second task was submitted while a session was active.');
-  }
-  const turn: ConversationTurn = {
-    commandId: update.commandId,
-    task: update.task,
-    status: 'starting',
-    assistantText: '',
-    lastSequence: 0,
-    assistantCompleted: false,
-  };
-  return {status: 'starting', turns: [...state.turns, turn]};
-}
-
-function reduceCancellationRequest(
-  state: SessionState,
-  update: Extract<SessionUpdate, {readonly type: 'cancel.requested'}>,
-): SessionState {
-  const turn = state.turns.at(-1);
-  if (
-    state.status !== 'running' ||
-    turn?.status !== 'running' ||
-    turn.sessionId === undefined
-  ) {
-    return failProjection(state, 'Cancellation was requested without an addressable active session.');
-  }
-  if (update.sessionId !== turn.sessionId) {
-    return failProjection(state, 'Cancellation did not target the active session.');
-  }
-  return replaceNewestTurn(
-    state,
-    {...turn, status: 'cancelling', cancelCommandId: update.commandId},
-    'cancelling',
-  );
-}
-
-function reduceEvent(state: SessionState, event: SessionEvent): SessionState {
-  const turn = state.turns.at(-1);
-  if (
-    turn === undefined ||
-    (turn.status !== 'starting' && turn.status !== 'running' && turn.status !== 'cancelling')
-  ) {
-    return failProjection(state, `Received ${event.type} without an active submitted task.`);
-  }
-  const expectedCorrelationId =
-    event.type === 'session.cancelled' ? turn.cancelCommandId : turn.commandId;
-  if (event.correlation_id !== expectedCorrelationId) {
-    return failProjection(state, `${event.type} did not correlate to the active task.`);
+  const input = lifecycleInput(update);
+  const lifecycle =
+    input.type === 'task.submitted' && isTerminalSessionStatus(state.lifecycle.status)
+      ? INITIAL_SESSION_LIFECYCLE_STATE
+      : state.lifecycle;
+  const result = reduceSessionLifecycle(lifecycle, input);
+  if (!result.ok) {
+    return failProjection(state, result.failure);
   }
 
-  if (event.type === 'session.started') {
-    if (turn.status !== 'starting' || event.sequence !== 1) {
-      return failProjection(state, 'session.started must be the first event for a submitted task.');
-    }
-    return replaceNewestTurn(state, {
-      ...turn,
-      sessionId: event.session_id,
-      status: 'running',
-      lastSequence: event.sequence,
+  if (input.type === 'task.submitted') {
+    return {
+      status: result.state.status,
+      turns: [...state.turns, projectTurn(result.state)],
+      lifecycle: result.state,
+    };
+  }
+
+  if (state.turns.length === 0) {
+    // This guard should be unreachable because the lifecycle reducer rejects non-submission input
+    // from idle, but it keeps the adapter total if its representation changes independently.
+    return failProjection(state, {
+      code: 'illegal_transition',
+      priorStatus: state.lifecycle.status,
+      eventType: input.type,
     });
   }
 
-  const mismatch = sessionEventMismatch(turn, event);
-  if (mismatch !== undefined) {
-    return failProjection(state, mismatch);
-  }
-
-  switch (event.type) {
-    case 'assistant.delta':
-      if (turn.assistantCompleted) {
-        return failProjection(state, 'assistant.delta arrived after assistant completion.');
-      }
-      return replaceNewestTurn(state, {
-        ...turn,
-        assistantText: turn.assistantText + event.payload.text,
-        lastSequence: event.sequence,
-      });
-    case 'assistant.completed':
-      if (turn.assistantCompleted || event.payload.text !== turn.assistantText) {
-        return failProjection(
-          state,
-          'assistant.completed did not exactly confirm the accumulated deltas.',
-        );
-      }
-      return replaceNewestTurn(state, {
-        ...turn,
-        assistantCompleted: true,
-        lastSequence: event.sequence,
-      });
-    case 'session.completed':
-      if (!turn.assistantCompleted) {
-        return failProjection(state, 'session.completed arrived before assistant completion.');
-      }
-      return replaceNewestTurn(
-        state,
-        {...turn, status: 'completed', lastSequence: event.sequence},
-        'completed',
-      );
-    case 'session.cancelled':
-      if (turn.status !== 'cancelling' || turn.cancelCommandId === undefined) {
-        return failProjection(state, 'session.cancelled arrived without a cancellation request.');
-      }
-      return replaceNewestTurn(
-        state,
-        {...turn, status: 'cancelled', lastSequence: event.sequence},
-        'cancelled',
-      );
-  }
+  return {
+    status: result.state.status,
+    turns: [...state.turns.slice(0, -1), projectTurn(result.state)],
+    lifecycle: result.state,
+  };
 }
 
-function sessionEventMismatch(
-  turn: ConversationTurn,
-  event: Exclude<SessionEvent, {readonly type: 'session.started'}>,
-): string | undefined {
-  if (
-    (turn.status !== 'running' && turn.status !== 'cancelling') ||
-    turn.sessionId === undefined
-  ) {
-    return `${event.type} arrived before session.started.`;
-  }
-  if (event.session_id !== turn.sessionId) {
-    return `${event.type} did not belong to the active session.`;
-  }
-  if (event.sequence !== turn.lastSequence + 1) {
-    return `${event.type} did not carry the next session sequence.`;
-  }
-  return undefined;
+/** Format structured reducer failure metadata without including rejected input payloads. */
+export function formatSessionInvariantFailure(failure: SessionInvariantFailure): string {
+  const explanation = INVARIANT_EXPLANATIONS[failure.code];
+  return `${explanation} [${failure.code}; prior=${failure.priorStatus}; event=${failure.eventType}]`;
 }
 
-function replaceNewestTurn(
+const INVARIANT_EXPLANATIONS: Readonly<Record<SessionInvariantFailure['code'], string>> = {
+  illegal_transition: 'The session update is not legal from the current lifecycle state.',
+  correlation_mismatch: 'The session event did not correlate to the active command.',
+  session_mismatch: 'The session event did not belong to the active session.',
+  sequence_regression: 'The session event did not carry the next session sequence.',
+  sequence_gap: 'The session event did not carry the next session sequence.',
+  assistant_after_completion: 'Assistant output arrived after assistant completion.',
+  assistant_already_completed: 'Assistant completion was reported more than once.',
+  assistant_completion_mismatch:
+    'Assistant completion did not exactly confirm the accumulated deltas.',
+  session_completion_before_assistant:
+    'Session completion arrived before assistant completion.',
+  terminal_state_absorbing: 'A session update arrived after the terminal outcome.',
+};
+
+function lifecycleInput(update: SessionUpdate): SessionLifecycleInput {
+  return update.type === 'event.received' ? update.event : update;
+}
+
+function projectTurn(state: SessionLifecycleState): ConversationTurn {
+  if (state.status === 'idle' || state.startCommandId === null || state.task === null) {
+    throw new Error('A conversation turn requires a submitted lifecycle.');
+  }
+  return {
+    commandId: state.startCommandId,
+    task: state.task,
+    ...(state.sessionId === null ? {} : {sessionId: state.sessionId}),
+    status: state.status,
+    assistantText: state.assistantText,
+    lastSequence: state.lastSequence,
+    assistantCompleted: state.assistantCompleted,
+    ...(state.cancelCommandId === null ? {} : {cancelCommandId: state.cancelCommandId}),
+    ...(state.sessionFailure === null ? {} : {sessionFailure: state.sessionFailure}),
+  };
+}
+
+function failProjection(
   state: SessionState,
-  turn: ConversationTurn,
-  status: SessionState['status'] = turn.status === 'cancelling' ? 'cancelling' : 'running',
+  failure: SessionInvariantFailure,
 ): SessionState {
-  return {status, turns: [...state.turns.slice(0, -1), turn]};
-}
-
-function failProjection(state: SessionState, message: string): SessionState {
-  return {...state, status: 'protocol-failed', protocolFailure: message};
+  return {
+    ...state,
+    status: 'protocol-failed',
+    protocolFailure: formatSessionInvariantFailure(failure),
+    protocolFailureDetails: failure,
+  };
 }

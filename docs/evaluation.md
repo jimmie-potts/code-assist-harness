@@ -3,8 +3,9 @@
 > Status: proposed evaluation-runner design. CAH-005 and CAH-006 provide deterministic
 > streamed-completion and cancellation evidence in unit and real-boundary tests, and CAH-009 binds
 > normalized teaching tapes to that evidence. CAH-007 runs all current deterministic layers through
-> one offline repository gate and Linux workflow. Filesystem-backed `evals/` scenarios are not
-> implemented yet.
+> one offline repository gate and Linux workflow. CAH-010 adds equivalent pure lifecycle reducers
+> and shared transition/replay fixtures. Filesystem-backed `evals/` scenarios are not implemented
+> yet.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -62,6 +63,14 @@ are regression gates, not yet a serialized `evals/` scenario or metric report. C
 documentation fixtures rather than an evaluation runner: both language suites validate the guide's
 NDJSON, while the real-boundary test compares the normalized session tapes without treating
 timestamps as ordering evidence. See the [walking-skeleton guide](walking-skeleton.md).
+
+CAH-010 adds domain-truth evaluation without introducing the later scenario runner. Fifty shared
+cases construct every prior state from idle, validate each wire envelope through Pydantic or Zod,
+and compare normalized Python and TypeScript state or invariant failures. The suite covers all 16
+legal transitions, seven full replays, 27 failure cases, every terminal path, approval waiting,
+completion winning a cancellation race, and payload-free failure diagnostics. Both suites replay
+every case twice. Focused runtime, supervisor, conversation-reducer, and Ink tests prove that the
+same core semantics participate in the implemented mock path.
 
 ## Assertion layers
 
@@ -127,9 +136,10 @@ An evaluation failure should retain a redacted event transcript, scenario name, 
 when used, expected/actual event diff, metrics, and fixture-state diff. Raw provider payloads and
 environment values are never diagnostic artifacts.
 
-Because visible state is event-derived, replaying a stored validated event list should reproduce the
-same terminal state. Replay does not re-execute tools or provider calls. A transcript that cannot be
-validated fails explicitly rather than being partially trusted.
+Because visible state is input-derived, replaying trusted domain facts and a stored validated event
+list reproduces the same terminal state. CAH-010 implements this fold in both languages and stops at
+the first structured invariant failure. Replay does not re-execute tools or provider calls. A future
+transcript that cannot be validated must fail explicitly rather than being partially trusted.
 
 ## Definition of done for behavioral work
 

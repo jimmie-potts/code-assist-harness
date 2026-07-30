@@ -1,7 +1,7 @@
 # Agent Loop
 
-> Status: proposed model-loop design. CAH-006 verifies its session-cancellation and
-> exactly-one-terminal precursor with the deterministic mock; no model-backed loop exists yet.
+> Status: proposed model-loop design. CAH-010 verifies its pure session-state and replay precursor
+> in Python and TypeScript; no model-backed loop exists yet.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -40,7 +40,8 @@ The Python runtime will use one `asyncio` event loop. The intended task structur
 - A single event-writer task validates and serializes events from an ordered queue to stdout.
 - At most one active session task runs the agent loop in the MVP.
 - Provider and tool operations are awaited child tasks so cancellation and deadlines can propagate.
-- Transcript writing consumes validated events without becoming the source of session truth.
+- Transcript writing consumes trusted domain facts and validated events without becoming the source
+  of session truth.
 
 Small bounded filesystem reads may run synchronously. Work that can block the loop unpredictably
 must be moved to a worker thread or a cancellable executor. Introducing threads should be a measured
@@ -100,11 +101,18 @@ later story and will target the Responses API at the provider boundary.
 
 ## State and terminal outcomes
 
-The target state set is `idle`, `starting`, `running`, `awaiting_approval`, `cancelling`,
-`completed`, `cancelled`, and `failed`. CAH-006 currently projects `idle`, `starting`, `running`,
-`cancelling`, `completed`, and `cancelled` in the TUI, plus a local fail-closed
-`protocol-failed` state. `awaiting_approval`, domain failure, and the equivalent reusable Python
-reducer remain CAH-010 and later work.
+The implemented one-session state set is `idle`, `starting`, `running`, `awaiting_approval`,
+`cancelling`, `completed`, `cancelled`, and `failed`. `session_state.py` and
+`session-lifecycle.ts` are pure native reducers governed by the same transition fixtures. The
+TypeScript conversation adapter preserves terminal turns and retains a separate local
+`protocol-failed` projection for an invalid trusted tape; a later task starts a fresh core.
+
+The reducers consume two kinds of trusted input. Pydantic- or Zod-validated protocol-v1 session
+events establish authoritative Python facts. Command-originated `task.submitted` and
+`cancel.requested` facts establish local intent. Domain-only `approval.requested` and
+`approval.resolved` exercise the waiting state without adding premature approval messages to
+protocol v1. A later approval story must define the action and decision wire identities before a
+live producer uses those facts.
 
 Core invariants are:
 
@@ -113,7 +121,14 @@ Core invariants are:
 - Cancellation is checked before another costly operation begins.
 - Terminal states never return to a running state.
 - A session emits exactly one of `session.completed`, `session.cancelled`, or `session.failed`.
-- Replaying the same validated event list produces the same visible state.
+- Replaying the same trusted lifecycle input list produces the same visible state.
+
+Before a wire event can alter state, the cores check its legal edge, command correlation, session
+identity, contiguous sequence, and payload-specific assistant completion rule. A rejection returns
+the exact prior state plus only a stable code, prior status, and input type. Task text, assistant
+text, IDs, payloads, and validator details are excluded. Every later input to `completed`,
+`cancelled`, or `failed` returns `terminal_state_absorbing`; duplicate terminals never create a
+second outcome.
 
 CAH-006 proves the first cancellation/completion race rule: a `MockSession` lock lets the first
 valid terminal selection win, repeated or recent-terminal requests become no-ops, and the TUI waits
@@ -142,11 +157,13 @@ Raw provider responses are not session events and are not persisted by default.
 
 ### CAH-010 — Implement session state as a reducer
 
-> As a harness developer, I want state derived from events so that runtime tests, the TUI, and
-> replay share lifecycle semantics.
+> As a harness developer, I want state derived from trusted lifecycle inputs so that runtime tests,
+> the TUI, and replay share lifecycle semantics.
 
-Complete this story when legal transitions and every terminal path are tested in Python and have
-equivalent reducer semantics in TypeScript.
+This story is complete. Sixteen legal transitions, seven full replays, and twenty-seven invariant
+failures are shared across both reducers. The mock runtime and TypeScript supervisor route their
+current tapes through the cores, including successful completion, cancellation, completion winning
+the cancellation race, and an authoritative `session.failed` terminal.
 
 ### CAH-020 — Define the provider interface and fake provider
 

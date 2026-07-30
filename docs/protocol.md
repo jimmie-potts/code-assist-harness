@@ -2,7 +2,8 @@
 
 > Status: CAH-006 implements protocol version 1 readiness, deterministic mocked streaming, and
 > cooperative session cancellation across the real Node-to-`uv`-to-Python boundary. CAH-009
-> documents that execution with normalized, cross-language-validated message tapes.
+> documents that execution with normalized message tapes. CAH-010 derives equivalent lifecycle
+> state from validated v1 events without changing the wire contract.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -159,9 +160,11 @@ boundary:
   them.
 - Provider SDK objects and component-local state never become wire types accidentally.
 
-The schemas are maintained by hand. Both contract suites consume the reviewed
-`protocol/fixtures/v1/manifest.json`; neither implementation generates the other. Schema generation
-is deferred until contract drift becomes a demonstrated maintenance problem.
+The schemas are maintained by hand. Both protocol contract suites consume the reviewed
+`protocol/fixtures/v1/manifest.json`; neither implementation generates the other. The separate
+`protocol/fixtures/session-lifecycle/v1/` suite combines complete validated envelopes with
+domain-only lifecycle facts and expected reducer results. Schema generation is deferred until
+contract drift becomes a demonstrated maintenance problem.
 
 An unsupported version is rejected before interpreting its version-specific fields. Malformed JSON,
 numeric overflow, an invalid envelope, an unknown command type, or an invalid known payload becomes
@@ -182,6 +185,31 @@ session produces recoverable `session_not_active`. A repeated request for the ac
 late request for the most recent terminal session deliberately emit no response: they are
 idempotent no-ops, not new lifecycle facts. The TUI prevents those normal repeat and late cases
 locally by writing at most one cancellation command while a session is addressable.
+
+## Lifecycle reduction above the wire
+
+Protocol validation establishes that one object is a safe version-1 message. CAH-010 then applies
+semantic lifecycle guards: the event must be legal from the prior status, carry the expected command
+correlation and session identity, and use exactly the next session sequence. Assistant completion
+must confirm the accumulated deltas before `session.completed` is legal. A violation returns the
+exact prior state plus a bounded code, prior status, and input type; event payloads and identifiers
+are not copied into the invariant diagnostic.
+
+The reducers also consume application-owned facts:
+
+- `task.submitted` records that a validated `session.start` command was accepted for sending;
+- `cancel.requested` records that a validated `session.cancel` command targeted the active session;
+- `approval.requested` enters `awaiting_approval`; and
+- `approval.resolved` returns that session to `running`.
+
+These are domain discriminators, not NDJSON message types. In particular, CAH-010 does not add
+approval messages to protocol v1. A later story must define approval request and decision identities,
+action binding, ownership, and failure behavior before either process relies on a wire shape.
+
+`completed`, `cancelled`, and `failed` are absorbing for one session. Every duplicate or late input,
+including a repeated terminal event, produces `terminal_state_absorbing` and cannot create another
+terminal transition. A later user task creates a fresh one-session reducer state; the TUI's separate
+conversation projection retains the old terminal turn.
 
 ## Lifecycle and cancellation
 
@@ -234,6 +262,11 @@ If cancellation obtains that boundary first, the shortened tape ends in `session
 assistant completion has obtained it first, Python finishes the normal six-event tape and the
 waiting or late cancellation has no effect. The first valid terminal outcome therefore wins and a
 session never emits both `session.completed` and `session.cancelled`.
+
+The existing `session.failed` event is now part of the same lifecycle core. A valid failure from
+`running`, `awaiting_approval`, or `cancelling` ends that session as `failed`, displays its validated
+safe code and message, and leaves the runtime ready for a later task. It is distinct from a malformed
+or semantically invalid tape, which still fails the supervising runtime closed as `protocol-failed`.
 
 Ctrl+C exits the application; it does not invoke `session.cancel`. `runtime.shutdown` and
 command-pipe EOF stop new command processing but drain an already accepted bounded mock before
@@ -290,3 +323,14 @@ CAH-009 is complete. The [walking-skeleton guide](walking-skeleton.md) traces th
 cancelled mock tapes through concrete functions, ownership boundaries, validation, reduction,
 rendering, and automated evidence. It deliberately adds no provider, tool, approval, transcript, or
 other runtime behavior.
+
+### CAH-010 — Implement session state as a reducer
+
+> As a harness developer, I want session state derived from trusted facts so that Python, the TUI,
+> tests, and replay share lifecycle semantics.
+
+This story is complete without a protocol-version change. Both reducers consume the existing
+validated session event union plus four explicitly domain-only facts. Fifty shared cases verify every
+legal edge, replay, invariant failure, and absorbing terminal path. `session.failed` now enters the
+session lifecycle, while malformed or semantically invalid event tapes still fail the supervisor
+closed.
