@@ -32,9 +32,10 @@ starting at 1.
   reject overlap and receive shutdown while the three deltas are delayed.
 - The default checkpoint sleeps for 50 ms before each delta so streaming is visible by hand. Tests
   inject events that hold and release each checkpoint, avoiding timing-based unit assertions.
-- `PythonRuntimeSupervisor.submitTask` publishes `task.submitted` synchronously before writing the
-  command. This closes the race in which a fast child could send `session.started` before the local
-  projection knew the command ID.
+- `PythonRuntimeSupervisor.submitTask` encodes and size-checks the exact `session.start` line before
+  local publication. It then publishes `task.submitted` synchronously before writing those bytes,
+  closing both the oversized-input phantom-session path and the race in which a fast child could
+  send `session.started` before the local projection knew the command ID.
 - `tui/src/session-state.ts` is a pure projection used both to validate the active supervisor tape
   and to build conversation history in `runApplication`. It fails closed on wrong correlation,
   identity, sequence, duplicate completion, or mismatched accumulated text.
@@ -64,9 +65,9 @@ starting at 1.
 - `tui/test/session-state.test.ts` covers successful projection plus correlation, identity,
   sequence, and completion failures.
 - `tui/test/app.test.tsx` covers whitespace feedback, exact submission, intermediate rendering,
-  status changes, and draft preservation during background events.
+  status changes, and draft preservation during background events or synchronous rejection.
 - `tui/test/runtime-supervisor.test.ts` covers command creation, publication order, two session
-  tapes, invalid transitions, local rejection, and write failure.
+  tapes, invalid transitions, local rejection, oversized-command preflight, and write failure.
 - `tui/test/runtime-boundary.test.ts` launches the real process tree, observes all three partial
   accumulations, runs two sessions without restart, verifies no workspace file is created, and
   verifies both `uv` and Python are reaped.

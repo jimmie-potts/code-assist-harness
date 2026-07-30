@@ -8,6 +8,7 @@ import {
   encodeCommandLine,
   MAX_PROTOCOL_LINE_BYTES,
   parseEventLine,
+  ProtocolEncodingError,
   PROTOCOL_VERSION,
   type ProtocolEvent,
   type ProtocolParseErrorCode,
@@ -305,9 +306,10 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
   /**
    * Send one `session.start` command and synchronously announce its local projection update.
    *
-   * Whitespace-only input, an unavailable runtime, and concurrent work are rejected before bytes
-   * are written. The local update is published before the asynchronous write so a very fast child
-   * can never deliver `session.started` before the projection knows the causing command.
+   * Whitespace-only input, an unavailable runtime, concurrent work, and commands that cannot fit
+   * the wire contract are rejected before local state changes or bytes are written. After the exact
+   * command line is validated, the local update is published before the asynchronous write so a
+   * very fast child can never deliver `session.started` before the projection knows the cause.
    *
    * @param task - Exact user task; surrounding whitespace is preserved when non-empty.
    * @returns The unique command ID written in the protocol envelope.
@@ -328,6 +330,27 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     }
 
     const commandId = this.#createCommandId();
+    const command = {
+      protocol_version: PROTOCOL_VERSION,
+      type: 'session.start',
+      command_id: commandId,
+      timestamp: this.#now(),
+      payload: {task},
+    } as const;
+    let commandLine: string;
+    try {
+      commandLine = encodeCommandLine(command);
+    } catch (error) {
+      if (error instanceof ProtocolEncodingError) {
+        throw new SessionSubmissionError(
+          error.code === 'line_too_long'
+            ? 'The task is too large to submit.'
+            : 'The task could not be encoded for the Python runtime.',
+        );
+      }
+      throw error;
+    }
+
     const update: SessionUpdate = {type: 'task.submitted', commandId, task};
     // The supervisor validates only the active tape; conversation history remains solely in the
     // application projection that consumes the published updates.
@@ -342,13 +365,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     this.#sessionValidationState = nextState;
     this.#publishSessionUpdate(update);
 
-    void this.#writeCommand({
-      protocol_version: PROTOCOL_VERSION,
-      type: 'session.start',
-      command_id: commandId,
-      timestamp: this.#now(),
-      payload: {task},
-    }).catch(() => {
+    void this.#writeEncodedCommandLine(commandLine).catch(() => {
       this.#transitionToProtocolFailure(
         'command_write_failed',
         'The task could not be written to the Python runtime.',
@@ -537,11 +554,14 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
   }
 
   async #writeCommand(command: unknown): Promise<void> {
+    await this.#writeEncodedCommandLine(encodeCommandLine(command));
+  }
+
+  async #writeEncodedCommandLine(line: string): Promise<void> {
     const child = this.#child;
     if (child === undefined || child.stdin.destroyed || child.stdin.writableEnded) {
       throw new Error('Python runtime command input is unavailable.');
     }
-    const line = encodeCommandLine(command);
     await new Promise<void>((resolveWrite, rejectWrite) => {
       child.stdin.write(line, 'utf8', (error: Error | null | undefined) => {
         if (error === null || error === undefined) {

@@ -2,6 +2,7 @@ import {render} from 'ink-testing-library';
 import {describe, expect, it, vi} from 'vitest';
 
 import {App} from '../src/app.js';
+import {SessionSubmissionError} from '../src/runtime-supervisor.js';
 import {
   INITIAL_SESSION_STATE,
   reduceSessionState,
@@ -92,6 +93,33 @@ describe('App', () => {
         expect(onSubmitTask).toHaveBeenCalledWith('  Explain this repository.  ');
       });
       expect(view.lastFrame()).toContain('Type a task and press Enter');
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('preserves the editable buffer when submission is rejected synchronously', async () => {
+    const onSubmitTask = vi.fn(() => {
+      throw new SessionSubmissionError('The task is too large to submit.');
+    });
+    const view = render(
+      <App
+        runtimeState={{status: 'running', workspace: '/workspace'}}
+        sessionState={INITIAL_SESSION_STATE}
+        onSubmitTask={onSubmitTask}
+      />,
+    );
+
+    try {
+      view.stdin.write('Keep this task');
+      view.stdin.write('\r');
+
+      await vi.waitFor(() => {
+        expect(onSubmitTask).toHaveBeenCalledWith('Keep this task');
+        expect(view.lastFrame()).toContain('> Keep this task');
+        expect(view.lastFrame()).toContain('The task is too large to submit.');
+        expect(view.lastFrame()).toContain('No messages yet.');
+      });
     } finally {
       view.unmount();
     }

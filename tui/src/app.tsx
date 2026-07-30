@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useEffect, useRef, useState, type ReactElement} from 'react';
 
-import type {RuntimeState} from './runtime-supervisor.js';
+import {SessionSubmissionError, type RuntimeState} from './runtime-supervisor.js';
 import type {ConversationTurn, SessionState} from './session-state.js';
 
 const WAIT_FOR_RUNTIME_FEEDBACK = 'Wait for the Python runtime to become ready.';
@@ -204,8 +204,12 @@ function submitDraft(
     onSubmitTask(draft);
     setDraft('');
     setInputFeedback(undefined);
-  } catch {
-    setInputFeedback('The task could not be submitted. Review the status and retry.');
+  } catch (error) {
+    setInputFeedback(
+      error instanceof SessionSubmissionError
+        ? error.message
+        : 'The task could not be submitted. Review the status and retry.',
+    );
   }
 }
 

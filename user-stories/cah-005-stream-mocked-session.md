@@ -65,9 +65,10 @@ runtime mode. Add the end-to-end development command and describe visible status
 - `src/code_assist_harness/runtime.py` accepts one non-empty task after readiness, rejects
   whitespace with recoverable `invalid_task`, rejects overlap with recoverable `session_active`,
   and drains accepted mock work before shutdown.
-- `tui/src/runtime-supervisor.ts` creates correlated commands and validates the active event tape;
-  `tui/src/session-state.ts` purely reduces identity, correlation, sequence, accumulation, and
-  completion invariants; `tui/src/app.tsx` preserves the draft while background events render.
+- `tui/src/runtime-supervisor.ts` pre-encodes correlated commands before local publication and
+  validates the active event tape; `tui/src/session-state.ts` purely reduces identity, correlation,
+  sequence, accumulation, and completion invariants; `tui/src/app.tsx` preserves the draft while
+  background events render or submission is rejected.
 - `tests/test_runtime.py` covers observable checkpoints, exact ordering and accumulation,
   whitespace and overlap failures, shutdown draining, and a second process session.
 - `tui/test/session-state.test.ts`, `tui/test/app.test.tsx`, and

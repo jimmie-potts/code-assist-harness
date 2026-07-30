@@ -170,9 +170,11 @@ copies the raw line or validator internals. After readiness, Python also returns
 `invalid_task` for a whitespace-only task and recoverable `session_active` for an overlapping task,
 both correlated to the rejected command. The Ink submission path blocks these two cases locally,
 so those runtime errors protect direct or future protocol callers rather than define normal UI
-flow. The TUI uses a stricter authority boundary: an unknown, malformed, or semantically invalid
-event becomes a visible, classified protocol failure, closes command input, and never enters
-trusted state.
+flow. The supervisor also encodes and size-checks the complete `session.start` line before
+publishing local submission state. An oversized task therefore remains editable, publishes no
+phantom session, writes no bytes, and leaves the runtime available. The TUI uses a stricter authority
+boundary: an unknown, malformed, or semantically invalid event becomes a visible, classified
+protocol failure, closes command input, and never enters trusted state.
 
 ## Lifecycle and cancellation
 

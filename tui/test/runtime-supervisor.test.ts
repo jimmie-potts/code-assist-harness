@@ -15,10 +15,12 @@ import {PassThrough} from 'node:stream';
 
 import {describe, expect, it, vi} from 'vitest';
 
+import {MAX_PROTOCOL_LINE_BYTES} from '../src/protocol.js';
 import {
   buildRuntimeLaunchRequest,
   prepareRuntimeLaunch,
   PythonRuntimeSupervisor,
+  SessionSubmissionError,
   type RuntimeLaunchRequest,
   type RuntimeState,
 } from '../src/runtime-supervisor.js';
@@ -772,6 +774,46 @@ describe('PythonRuntimeSupervisor', () => {
 
     child.close(0);
     await supervisor.stop();
+  });
+
+  it('rejects an oversized task before publishing or writing and remains usable', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      SECOND_SESSION_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    const updates: string[] = [];
+    supervisor.subscribeToSessionUpdates((update) => {
+      updates.push(update.type);
+    });
+    await startReady(child, supervisor);
+    const write = vi.spyOn(child.stdin, 'write');
+
+    let submissionError: unknown;
+    try {
+      supervisor.submitTask('é'.repeat(MAX_PROTOCOL_LINE_BYTES));
+    } catch (error) {
+      submissionError = error;
+    }
+    expect(submissionError).toBeInstanceOf(SessionSubmissionError);
+    expect(submissionError).toMatchObject({message: expect.stringContaining('too large')});
+    expect(write).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(supervisor.getState()).toEqual({status: 'running', workspace: WORKSPACE});
+
+    const acceptedLine = nextInputLine(child);
+    expect(supervisor.submitTask('Still usable.')).toBe(SECOND_SESSION_COMMAND_ID);
+    expect(await acceptedLine).toBe(
+      sessionStartCommandLine(SECOND_SESSION_COMMAND_ID, 'Still usable.'),
+    );
+    expect(updates).toEqual(['task.submitted']);
+
+    await closeOnInputEnd(child, supervisor);
   });
 
   it('reports an actionable startup failure without entering running', async () => {

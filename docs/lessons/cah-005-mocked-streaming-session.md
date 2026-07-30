@@ -62,7 +62,7 @@ lifecycle; React components do not decide completion.
 
 ```text
 App editable draft
-   -> PythonRuntimeSupervisor.submitTask publishes task.submitted, then writes session.start
+   -> submitTask encodes session.start, publishes task.submitted, then writes the exact line
    -> run_runtime validates task and starts one MockSessionRunner child task
    -> OrderedEventWriter emits started, 3 deltas, assistant completion, session completion
    -> supervisor validates correlation/identity/sequence before publishing each update
@@ -88,8 +88,9 @@ add a broker or production telemetry stack.
 1. `App` keeps the draft in component state. Enter calls `submitDraft`, which rejects whitespace,
    waits for runtime readiness, preserves input during active work, and otherwise calls the
    supervisor.
-2. `PythonRuntimeSupervisor.submitTask` creates a command ID, publishes `task.submitted` before any
-   child response can race it, and writes one Zod-validated `session.start` line.
+2. `PythonRuntimeSupervisor.submitTask` creates a command ID and encodes the complete
+   `session.start` line before changing projection state. Once the command fits the wire contract,
+   it publishes `task.submitted` before any child response can race it and writes that exact line.
 3. `run_runtime` independently strips the task for validity, rejects overlap, and starts one
    `MockSessionRunner` child task while continuing to read commands.
 4. `MockSessionRunner` assigns `ses_mock_1`, emits `session.started` at sequence 1, then emits
@@ -117,6 +118,7 @@ workspace file appeared, and verifies the process tree is reaped.
 | Final response is buffered | No partial text appears | TUI read/reduce/render path | `app.test.tsx` and `runtime-boundary.test.ts` observe all three accumulations. |
 | Delta is duplicated or reordered | Projection cannot trust accumulation | Ordered writer or reducer | `session-state.test.ts` fails closed on sequence or completion disagreement. |
 | Whitespace starts work | Empty session appears | Ink and Python validation | App writes no command; runtime returns correlated `invalid_task` for a direct caller. |
+| An oversized task is projected | A phantom starting turn replaces the editable draft | TypeScript command boundary | Supervisor rejects before publishing or writing; App preserves the draft and the runtime remains usable. |
 | A task overlaps active work | Two lifecycles compete | Ink and Python ownership | Draft is preserved locally; runtime returns correlated `session_active`. |
 | Second task reuses state | Old text or sequence leaks | Session initialization | Real-boundary test requires `ses_mock_2` and a fresh `1..6`. |
 | Diagnostic reaches stdout | NDJSON parser fails | Python output discipline | Every captured stdout line parses. |
@@ -133,9 +135,11 @@ workspace file appeared, and verifies the process tree is reaped.
 - `tui/test/session-state.test.ts` proves pure transition, identity, correlation, sequence, and
   exact-completion rules, including meaningful fail-closed paths.
 - `tui/test/app.test.tsx` proves whitespace feedback, exact task submission, visible intermediate
-  text, completed status, and preservation of a draft during background rerenders.
+  text, completed status, and preservation of a draft during background rerenders or synchronous
+  submission rejection.
 - `tui/test/runtime-supervisor.test.ts` proves one child can publish two complete event tapes and
-  that local whitespace and overlap checks write no command.
+  that local whitespace, overlap, and encoded-size checks write no command. The oversized-task
+  regression also proves no update is published and a subsequent valid task still succeeds.
 - `tui/test/runtime-boundary.test.ts` proves the real launch boundary, all three intermediate
   accumulations, two sessions, an unchanged workspace, and complete process cleanup.
 
@@ -184,13 +188,15 @@ These references illustrate capabilities, not vendor endorsements or project dep
 
 The implementation confirmed that pipes make ordering and ownership inspectable with almost no
 operational cost. Publishing `task.submitted` before the command write was necessary to remove a
-fast-child correlation race. A pure reducer also gave the supervisor and renderer one transition
-contract, but CAH-005 deliberately recognizes only the successful mock tape; cancellation and
-failure terminal events must expand it later. Injectable checkpoints made Python timing evidence
-strong, while the genuine process test still uses short polling because OS process discovery and
-pipe delivery are external scheduling boundaries. Draining a fixed 150 ms mock simplifies shutdown,
-but is not suitable for an unbounded provider call; CAH-006 must replace that assumption with an
-authoritative cancellation outcome.
+fast-child correlation race, but publication can occur only after the exact command has passed
+encoding and byte-limit validation. This ordering prevents both an early child event and a phantom
+local session caused by invalid user input. A pure reducer also gave the supervisor and renderer one
+transition contract, but CAH-005 deliberately recognizes only the successful mock tape;
+cancellation and failure terminal events must expand it later. Injectable checkpoints made Python
+timing evidence strong, while the genuine process test still uses short polling because OS process
+discovery and pipe delivery are external scheduling boundaries. Draining a fixed 150 ms mock
+simplifies shutdown, but is not suitable for an unbounded provider call; CAH-006 must replace that
+assumption with an authoritative cancellation outcome.
 
 A broker improves durability and horizontal decoupling but introduces delivery semantics, schema
 governance, retention, security, and failure modes that obscure the M0 lesson. Graduate when
