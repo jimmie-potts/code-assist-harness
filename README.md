@@ -19,7 +19,10 @@ Pydantic and Zod validate strict, hand-maintained wire contracts on both sides; 
 contain malformed lines; shared fixtures prove cross-language parity; and real
 Node-to-`uv`-to-Python tests prove streaming, cancellation, repeated sessions, and process cleanup.
 The application does **not** yet run an agent loop, read the workspace, or integrate with OpenAI.
-CAH-009 is the next dependency-ready unit and will document this first end-to-end execution.
+CAH-009 now documents that first end-to-end execution in the
+[walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
+are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
+is the next dependency-ready unit and will establish one repository-wide non-live check command.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -31,7 +34,8 @@ Zod, and development dependencies are kept separately in `tui/package.json` and 
 lockfile.
 
 Start with the [architecture overview](docs/architecture.md), the
-[decision records](docs/adr/), and the [dependency-ordered backlog](user-stories/README.md).
+[walking-skeleton execution guide](docs/walking-skeleton.md), the [decision records](docs/adr/), and
+the [dependency-ordered backlog](user-stories/README.md).
 
 ## MVP boundary
 
@@ -192,9 +196,10 @@ npm --prefix tui run check
 ```
 
 `npm --prefix tui test` includes `tui/test/runtime-boundary.test.ts`, which launches the genuine
-offline `uv`/Python child, exercises streamed completion and cancellation, starts another session,
-and verifies cleanup. The `npm --prefix tui run check` command adds TypeScript type checking and
-linting around that suite.
+offline `uv`/Python child, exercises streamed completion and cancellation, compares the normalized
+walking-skeleton message tapes with the teaching fixtures, starts another session, and verifies
+cleanup. Python and TypeScript protocol tests also parse every NDJSON line reproduced by the guide.
+The `npm --prefix tui run check` command adds TypeScript type checking and linting around that suite.
 
 The TUI start and test scripts set `TMPDIR=/tmp`. This avoids a WSL environment failure observed
 when inherited `TEMP` and `TMP` values named a missing Windows directory. The checks use installed
@@ -210,7 +215,7 @@ src/code_assist_harness/  Current runtime and Pydantic protocol boundary; future
 tests/                    Current Python tests mirroring source modules
 tui/                      Current supervised Ink app, Zod protocol boundary, metadata, and tests
 scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
-protocol/                 Current reviewed cross-language NDJSON fixtures
+protocol/                 Current reviewed cross-language NDJSON and walking-skeleton fixtures
 evals/                    Planned deterministic scenario fixtures
 docs/                     Architecture and learning documentation
 docs/lessons/             Unit-by-unit learning companions
@@ -225,6 +230,7 @@ planned and are introduced only by the story that needs them.
 ## Documentation map
 
 - [Architecture](docs/architecture.md)
+- [Walking-skeleton execution guide](docs/walking-skeleton.md)
 - [Glossary](docs/glossary.md)
 - [Protocol](docs/protocol.md)
 - [Agent loop](docs/agent-loop.md)

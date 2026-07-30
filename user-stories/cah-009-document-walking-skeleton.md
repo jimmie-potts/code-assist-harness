@@ -1,9 +1,10 @@
 # CAH-009 - Document the first end-to-end execution
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-006
 - **Lesson:** [Walking-skeleton guide](../docs/lessons/cah-009-walking-skeleton-guide.md)
+- **Delivered guide:** [First end-to-end execution](../docs/walking-skeleton.md)
 
 ## User story
 
@@ -49,9 +50,10 @@
 
 ## Documentation impact
 
-Creates the walking-skeleton execution guide, expected under `docs/agent-loop.md` or a clearly linked
-dedicated document, and updates protocol and architecture cross-links. This is the learning record
-for the first working vertical slice.
+Creates the dedicated [walking-skeleton execution guide](../docs/walking-skeleton.md) and updates
+protocol, architecture, agent-loop, evaluation, fixture, lesson, and backlog cross-links. The guide
+and its checked NDJSON examples are the learning record for the first working vertical slice; this
+unit adds documentation and evidence, not runtime behavior.
 
 ## Out of scope
 

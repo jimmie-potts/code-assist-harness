@@ -18,6 +18,7 @@ import {fileURLToPath} from 'node:url';
 import {render as renderInk} from 'ink-testing-library';
 import {describe, expect, it} from 'vitest';
 
+import type {ProtocolCommand} from '../src/protocol.js';
 import {
   runApplication,
   type ApplicationRenderer,
@@ -31,10 +32,24 @@ import {
 import {
   INITIAL_SESSION_STATE,
   reduceSessionState,
+  type SessionEvent,
   type SessionState,
 } from '../src/session-state.js';
 
 const repositoryRoot = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+const scenarioFixtureRoot = new URL('../../protocol/fixtures/v1/scenarios/', import.meta.url);
+const successScenarioCommands = readScenarioFixture<ProtocolCommand>(
+  'walking-skeleton-success.commands.ndjson',
+);
+const successScenarioEvents = readScenarioFixture<SessionEvent>(
+  'walking-skeleton-success.events.ndjson',
+);
+const cancellationScenarioCommands = readScenarioFixture<ProtocolCommand>(
+  'walking-skeleton-cancel.commands.ndjson',
+);
+const cancellationScenarioEvents = readScenarioFixture<SessionEvent>(
+  'walking-skeleton-cancel.events.ndjson',
+);
 // A broken cancellation path would finish the three 500 ms mock checkpoints inside this window.
 const POST_CANCELLATION_OBSERVATION_MS = 2000;
 
@@ -70,12 +85,30 @@ describe('real Node to uv to Python boundary', () => {
       uvPid = child.pid;
       return child;
     };
+    const successCommand = successScenarioCommands[0];
+    if (successScenarioCommands.length !== 1 || successCommand?.type !== 'session.start') {
+      throw new Error('successful walking-skeleton fixture must contain one session.start');
+    }
+    const commandIds = [
+      'cmd_walk_success_initialize_001',
+      successCommand.command_id,
+      'cmd_walk_success_second_001',
+      'cmd_walk_success_shutdown_001',
+    ];
+    const commandTimestamps = [
+      '2026-07-30T13:59:59.000Z',
+      successCommand.timestamp,
+      '2026-07-30T14:00:02.000Z',
+      '2026-07-30T14:00:04.000Z',
+    ];
     const supervisor = new PythonRuntimeSupervisor(
       {repositoryRoot, workspace},
       {
         spawnProcess,
         gracePeriodMs: 2000,
         terminatePeriodMs: 2000,
+        createCommandId: nextFixtureValue(commandIds, 'success command ID'),
+        now: nextFixtureValue(commandTimestamps, 'success command timestamp'),
         environment: {
           ...process.env,
           PYTHONHOME: join(workspace, 'missing-python-home'),
@@ -88,11 +121,15 @@ describe('real Node to uv to Python boundary', () => {
     );
     const states: RuntimeState[] = [];
     const sessionProjections: SessionState[] = [];
+    const receivedEvents: SessionEvent[] = [];
     let sessionState = INITIAL_SESSION_STATE;
     const unsubscribe = supervisor.subscribe((state) => states.push(state));
     const unsubscribeFromSession = supervisor.subscribeToSessionUpdates((update) => {
       sessionState = reduceSessionState(sessionState, update);
       sessionProjections.push(sessionState);
+      if (update.type === 'event.received') {
+        receivedEvents.push(update.event);
+      }
     });
 
     try {
@@ -113,7 +150,8 @@ describe('real Node to uv to Python boundary', () => {
       expect(readCommandLine(pythonPid)).toContain('code_assist_harness.runtime');
       expect(readExecutableName(pythonPid)).toMatch(/^python(?:\d+(?:\.\d+)*)?$/u);
 
-      const firstCommandId = supervisor.submitTask('Explain the real boundary.');
+      const firstCommandId = supervisor.submitTask(successCommand.payload.task);
+      expect(firstCommandId).toBe(successCommand.command_id);
       await waitForCondition(
         () => sessionState.status === 'completed',
         7000,
@@ -122,12 +160,16 @@ describe('real Node to uv to Python boundary', () => {
       const firstTurn = sessionState.turns[0];
       expect(firstTurn).toMatchObject({
         commandId: firstCommandId,
+        task: successCommand.payload.task,
         sessionId: 'ses_mock_1',
         status: 'completed',
         assistantText:
           'Mock response: the task crossed the process boundary and streamed back successfully.',
         lastSequence: 6,
       });
+      expect(normalizeEventTimestamps(receivedEvents, successScenarioEvents)).toEqual(
+        successScenarioEvents,
+      );
       expect(
         sessionProjections
           .filter((projection) => projection.turns.length === 1)
@@ -174,14 +216,47 @@ describe('real Node to uv to Python boundary', () => {
 
   it('cancels genuine sessions before the first delta and between later deltas', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-cancel-workspace-'));
+    const [cancelStartCommand, cancelCommand] = cancellationScenarioCommands;
+    if (
+      cancellationScenarioCommands.length !== 2 ||
+      cancelStartCommand?.type !== 'session.start' ||
+      cancelCommand?.type !== 'session.cancel'
+    ) {
+      throw new Error('cancellation walking-skeleton fixture must contain start then cancel');
+    }
+    const commandIds = [
+      'cmd_walk_cancel_initialize_001',
+      cancelStartCommand.command_id,
+      cancelCommand.command_id,
+      'cmd_walk_cancel_start_002',
+      'cmd_walk_cancel_002',
+      'cmd_walk_cancel_shutdown_001',
+    ];
+    const commandTimestamps = [
+      '2026-07-30T14:00:59.000Z',
+      cancelStartCommand.timestamp,
+      cancelCommand.timestamp,
+      '2026-07-30T14:01:01.000Z',
+      '2026-07-30T14:01:01.700Z',
+      '2026-07-30T14:01:02.000Z',
+    ];
     const supervisor = new PythonRuntimeSupervisor(
       {repositoryRoot, workspace},
-      {gracePeriodMs: 2000, terminatePeriodMs: 2000},
+      {
+        gracePeriodMs: 2000,
+        terminatePeriodMs: 2000,
+        createCommandId: nextFixtureValue(commandIds, 'cancellation command ID'),
+        now: nextFixtureValue(commandTimestamps, 'cancellation command timestamp'),
+      },
     );
     let sessionState = INITIAL_SESSION_STATE;
     const updates: string[] = [];
+    const receivedEvents: SessionEvent[] = [];
     const unsubscribe = supervisor.subscribeToSessionUpdates((update) => {
       sessionState = reduceSessionState(sessionState, update);
+      if (update.type === 'event.received') {
+        receivedEvents.push(update.event);
+      }
       updates.push(
         update.type === 'event.received'
           ? `${update.event.type}:${update.event.sequence}`
@@ -192,7 +267,9 @@ describe('real Node to uv to Python boundary', () => {
     try {
       await withTimeout(supervisor.start(), 5000, 'runtime did not become ready for cancellation');
 
-      supervisor.submitTask('Cancel before output.');
+      expect(supervisor.submitTask(cancelStartCommand.payload.task)).toBe(
+        cancelStartCommand.command_id,
+      );
       await waitForCondition(
         () => sessionState.status === 'running',
         3000,
@@ -207,10 +284,17 @@ describe('real Node to uv to Python boundary', () => {
         'first session did not acknowledge cancellation',
       );
       expect(sessionState.turns[0]).toMatchObject({
+        commandId: cancelStartCommand.command_id,
+        cancelCommandId: cancelCommand.command_id,
+        task: cancelStartCommand.payload.task,
+        sessionId: cancelCommand.payload.session_id,
         status: 'cancelled',
         assistantText: '',
         lastSequence: 2,
       });
+      expect(normalizeEventTimestamps(receivedEvents, cancellationScenarioEvents)).toEqual(
+        cancellationScenarioEvents,
+      );
       const firstTerminalUpdates = [...updates];
       await delay(POST_CANCELLATION_OBSERVATION_MS);
       expect(updates).toEqual(firstTerminalUpdates);
@@ -448,6 +532,37 @@ describe('real Node to uv to Python boundary', () => {
     expect(supervisor.getState().status).toBe('stopped');
   }, 15_000);
 });
+
+function readScenarioFixture<T>(filename: string): readonly T[] {
+  const contents = readFileSync(new URL(filename, scenarioFixtureRoot), 'utf8');
+  return contents
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as T);
+}
+
+function nextFixtureValue(values: string[], label: string): () => string {
+  return () => {
+    const value = values.shift();
+    if (value === undefined) {
+      throw new Error(`real-boundary test exhausted its ${label} values`);
+    }
+    return value;
+  };
+}
+
+function normalizeEventTimestamps(
+  events: readonly SessionEvent[],
+  expectedEvents: readonly SessionEvent[],
+): readonly SessionEvent[] {
+  return events.map((event, index) => {
+    const expected = expectedEvents[index];
+    if (expected === undefined) {
+      throw new Error('real boundary emitted more session events than its teaching fixture');
+    }
+    return {...event, timestamp: expected.timestamp};
+  });
+}
 
 async function findRuntimeProcess(uvPid: number): Promise<number> {
   const deadline = Date.now() + 5000;

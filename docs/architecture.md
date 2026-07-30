@@ -25,8 +25,10 @@ editable Ink input to a deterministic Python session: three delayed deltas are r
 before exact assistant and session completion, and a second session runs with a new ID and sequence
 reset. CAH-006 adds Escape-driven cooperative cancellation: the TUI sends one addressable request,
 Python serializes cancellation against assistant and terminal writes, and exactly one cancelled or
-completed outcome wins. Provider, tool, workspace-read, policy, transcript, and agent behavior
-remain target architecture; CAH-009 is the next dependency-ready unit.
+completed outcome wins. CAH-009 records that implemented path in a fixture-backed
+[walking-skeleton guide](walking-skeleton.md), without adding runtime behavior. Provider, tool,
+workspace-read, policy, transcript, and agent behavior remain target architecture; CAH-007 is the
+next dependency-ready unit.
 
 ## Product boundary
 
@@ -147,6 +149,8 @@ for immediate feedback, but the runtime independently rejects them as `invalid_t
 `cancel.requested` update and send one validated `session.cancel`. That local update projects
 `cancelling`; only a terminal Python event projects `cancelled` or `completed`. Normal shutdown
 still drains the bounded mock, while user-requested cancellation wakes its current checkpoint.
+The [walking-skeleton guide](walking-skeleton.md) follows these exact functions and both terminal
+paths using normalized protocol examples checked by the Python and TypeScript test suites.
 
 The implemented Node project uses npm, commits `package-lock.json`, pins Node 22.22.1, and enforces
 the Ink-compatible range `>=22.13.0 <23`. Python remains at version 3.12 and is managed with `uv`;

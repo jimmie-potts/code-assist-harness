@@ -1,7 +1,8 @@
 # Process Protocol
 
 > Status: CAH-006 implements protocol version 1 readiness, deterministic mocked streaming, and
-> cooperative session cancellation across the real Node-to-`uv`-to-Python boundary.
+> cooperative session cancellation across the real Node-to-`uv`-to-Python boundary. CAH-009
+> documents that execution with normalized, cross-language-validated message tapes.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -285,5 +286,7 @@ requests, and process cleanup. Exactly one Python terminal event remains authori
 > As a learner, I want the implemented walking skeleton traced across both processes so that I can
 > connect the protocol design to observable behavior.
 
-This page records both the successful and cancelled mock tapes. CAH-009 must turn them into a
-learner-focused execution narrative that traces concrete functions, ownership boundaries, and tests.
+CAH-009 is complete. The [walking-skeleton guide](walking-skeleton.md) traces the successful and
+cancelled mock tapes through concrete functions, ownership boundaries, validation, reduction,
+rendering, and automated evidence. It deliberately adds no provider, tool, approval, transcript, or
+other runtime behavior.

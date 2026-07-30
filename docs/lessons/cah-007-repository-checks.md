@@ -8,8 +8,9 @@
 - **Related architecture:** [Architecture](../architecture.md), [evaluation](../evaluation.md), and
   [ADR 0002](../adr/0002-ink-python-process-boundary.md)
 
-> This lesson defines the planned validation seam. Current Python commands remain useful, but they
-> are not evidence that the future TUI, protocol fixtures, or integration path have been checked.
+> This lesson defines the planned validation seam. Separate Python, TUI, protocol, and integration
+> commands are useful today, but no single repository gate or Linux CI workflow proves that they all
+> ran together.
 
 ## Quick summary
 

@@ -54,7 +54,9 @@ The current M0 precursor uses that same event loop without pretending to be an a
 `run_runtime` keeps reading commands while one `MockSession` task streams. The session owns a
 cooperative cancellation event and serializes delta writes, completion, and cancellation through
 one state lock. This proves request routing and terminal selection before provider and tool child
-tasks make propagation deeper.
+tasks make propagation deeper. The [walking-skeleton guide](walking-skeleton.md) traces this
+implemented precursor from the Ink keypress through its authoritative Python terminal event and
+back to rendering; it does not describe the future provider loop as shipped.
 
 ## Bounded loop
 

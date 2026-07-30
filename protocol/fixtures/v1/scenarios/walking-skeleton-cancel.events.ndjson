@@ -1,0 +1,2 @@
+{"protocol_version":1,"type":"session.started","session_id":"ses_mock_1","sequence":1,"timestamp":"2026-07-30T14:01:00.100Z","correlation_id":"cmd_walk_cancel_start_001","payload":{}}
+{"protocol_version":1,"type":"session.cancelled","session_id":"ses_mock_1","sequence":2,"timestamp":"2026-07-30T14:01:00.300Z","correlation_id":"cmd_walk_cancel_001","payload":{}}

@@ -570,6 +570,25 @@ describe('PythonRuntimeSupervisor', () => {
     await supervisor.stop();
   });
 
+  it('fails closed when a human diagnostic is written to protocol stdout', async () => {
+    const child = new FakeChild();
+    const supervisor = createSupervisor(child);
+    const updates: SessionUpdate[] = [];
+    supervisor.subscribeToSessionUpdates((update) => updates.push(update));
+    await startReady(child, supervisor);
+
+    child.stdout.write('debug: starting mocked session\n');
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'malformed_json',
+    });
+    expect(child.stdin.writableEnded).toBe(true);
+    expect(updates).toEqual([]);
+    child.close(0);
+    await supervisor.stop();
+  });
+
   it('fails closed and sanitizes a runtime error received after readiness', async () => {
     const child = new FakeChild();
     const supervisor = createSupervisor(child, {environment: {API_TOKEN: 'hidden-value'}});
