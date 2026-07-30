@@ -116,7 +116,10 @@ choice can be revisited if contract drift becomes a recurring failure.
 ## Implementation status
 
 CAH-004 implements this decision in `src/code_assist_harness/protocol/`, `tui/src/protocol.ts`,
-`tui/src/protocol-stream.ts`, and the shared `protocol/fixtures/v1/` manifest. The runtime and
-supervisor now exchange `runtime.initialize`, `runtime.ready`, and `runtime.shutdown` across the
-real Node–Python boundary. CAH-005 will implement deterministic session-command handling and
-streamed events.
+`tui/src/protocol-stream.ts`, and the shared `protocol/fixtures/v1/` manifest. CAH-005 exercises the
+same contract in `src/code_assist_harness/mock_session.py`, `src/code_assist_harness/runtime.py`,
+`tui/src/runtime-supervisor.ts`, and `tui/src/session-state.ts`: one correlated `session.start`
+causes `session.started`, three `assistant.delta` events, exact `assistant.completed`, and one
+`session.completed` with session-local sequence `1..6`. A second session receives a distinct ID and
+restarts sequence at 1. The real Node-to-`uv`-to-Python test proves intermediate delivery and
+process cleanup. `session.cancel` remains defined but unavailable until CAH-006.

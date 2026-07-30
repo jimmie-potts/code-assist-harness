@@ -9,12 +9,16 @@ import sys
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
+from .mock_session import MockSessionRunner
 from .protocol import (
+    Command,
     CommandLineReader,
     OrderedEventWriter,
     ProtocolParseFailure,
     RuntimeInitializeCommand,
     RuntimeShutdownCommand,
+    SessionId,
+    SessionStartCommand,
 )
 
 _READ_CHUNK_SIZE = 64 * 1024
@@ -123,14 +127,32 @@ async def _write_stdout_line(line: bytes) -> None:
     sys.stdout.buffer.flush()
 
 
+async def _read_commands() -> AsyncIterator[Command | ProtocolParseFailure]:
+    """Incrementally parse stdin and yield each command or contained line failure.
+
+    Yields:
+        Validated commands and safe parse failures in physical input order.
+
+    Raises:
+        OSError: If the stdin pipe cannot be monitored or read.
+    """
+    reader = CommandLineReader()
+    async for chunk in _read_stdin_chunks():
+        for result in reader.feed(chunk):
+            yield result
+    for failure in reader.finish():
+        yield failure
+
+
 async def run_runtime(workspace: Path) -> None:
     """Validate commands and emit ordered protocol events until shutdown or pipe EOF.
 
     The runtime owns exactly one canonical workspace for its lifetime. Each physical stdin line is
     contained independently: malformed input becomes a safe ``runtime.error`` and a later valid
     line is still processed. Initialization succeeds only when its payload resolves to the same
-    canonical workspace supplied by the supervisor. Session commands validate as protocol v1 but
-    report ``command_unavailable`` until CAH-005 and CAH-006 implement their behavior.
+    canonical workspace supplied by the supervisor. After readiness, one ``session.start`` runs the
+    deterministic CAH-005 stream in a child task so the command reader can reject overlapping work
+    and honor orderly shutdown. ``session.cancel`` remains unavailable until CAH-006.
 
     Args:
         workspace: Canonical existing directory owned by this runtime process.
@@ -152,12 +174,38 @@ async def run_runtime(workspace: Path) -> None:
     if workspace != resolved_workspace or not resolved_workspace.is_dir():
         raise RuntimeConfigurationError("workspace must be a canonical existing directory")
 
-    reader = CommandLineReader()
     writer = OrderedEventWriter(_write_stdout_line)
+    mock_sessions = MockSessionRunner(writer)
     initialized = False
+    active_session: asyncio.Task[SessionId] | None = None
+    commands = _read_commands()
+    next_command = asyncio.create_task(anext(commands))
 
-    async for chunk in _read_stdin_chunks():
-        for result in reader.feed(chunk):
+    try:
+        while True:
+            waiters: set[asyncio.Task[object]] = {next_command}
+            if active_session is not None:
+                waiters.add(active_session)
+            completed, _pending = await asyncio.wait(
+                waiters,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if active_session is not None and active_session in completed:
+                await active_session
+                active_session = None
+
+            if next_command not in completed:
+                continue
+
+            try:
+                result = next_command.result()
+            except StopAsyncIteration:
+                if active_session is not None:
+                    await active_session
+                return
+            next_command = asyncio.create_task(anext(commands))
+
             if isinstance(result, ProtocolParseFailure):
                 await writer.emit_runtime(
                     "runtime.error",
@@ -170,6 +218,8 @@ async def run_runtime(workspace: Path) -> None:
                 continue
 
             if isinstance(result, RuntimeShutdownCommand):
+                if active_session is not None:
+                    await active_session
                 return
 
             if isinstance(result, RuntimeInitializeCommand):
@@ -211,31 +261,72 @@ async def run_runtime(workspace: Path) -> None:
                 )
                 continue
 
-            error_code = "command_unavailable" if initialized else "not_initialized"
-            error_message = (
-                "Session commands are unavailable until the mocked-session unit is implemented."
-                if initialized
-                else "Runtime initialization must complete before session commands are accepted."
-            )
+            if not initialized:
+                await writer.emit_runtime(
+                    "runtime.error",
+                    {
+                        "code": "not_initialized",
+                        "message": (
+                            "Runtime initialization must complete before session commands are "
+                            "accepted."
+                        ),
+                        "recoverable": True,
+                    },
+                    correlation_id=result.command_id,
+                )
+                continue
+
+            if isinstance(result, SessionStartCommand):
+                if not result.payload.task.strip():
+                    await writer.emit_runtime(
+                        "runtime.error",
+                        {
+                            "code": "invalid_task",
+                            "message": "A session task must contain non-whitespace text.",
+                            "recoverable": True,
+                        },
+                        correlation_id=result.command_id,
+                    )
+                    continue
+                if active_session is not None:
+                    await writer.emit_runtime(
+                        "runtime.error",
+                        {
+                            "code": "session_active",
+                            "message": "A session is already active.",
+                            "recoverable": True,
+                        },
+                        correlation_id=result.command_id,
+                    )
+                    continue
+                active_session = asyncio.create_task(mock_sessions.run(result))
+                continue
+
             await writer.emit_runtime(
                 "runtime.error",
                 {
-                    "code": error_code,
-                    "message": error_message,
+                    "code": "command_unavailable",
+                    "message": "Session cancellation is unavailable until CAH-006.",
                     "recoverable": True,
                 },
                 correlation_id=result.command_id,
             )
+    finally:
+        if not next_command.done():
+            next_command.cancel()
+        try:
+            await next_command
+        except (StopAsyncIteration, asyncio.CancelledError):
+            pass
+        await commands.aclose()
 
-    for failure in reader.finish():
-        await writer.emit_runtime(
-            "runtime.error",
-            {
-                "code": failure.code.value,
-                "message": failure.message,
-                "recoverable": True,
-            },
-        )
+        if active_session is not None and not active_session.done():
+            active_session.cancel()
+        if active_session is not None:
+            try:
+                await active_session
+            except asyncio.CancelledError:
+                pass
 
 
 def main(argv: Sequence[str] | None = None) -> int:

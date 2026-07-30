@@ -104,7 +104,8 @@ test matrix before the core architecture is proven.
 ## Implementation status
 
 CAH-002 implements terminal ownership and WSL runtime validation, CAH-003 implements the physical
-process boundary, and CAH-004 gives that boundary its first validated protocol:
+process boundary, CAH-004 gives that boundary its first validated protocol, and CAH-005 exercises a
+complete mocked session across it:
 
 - `scripts/run-tui` preserves the canonical caller directory and forwards arguments without
   combining them into a shell string;
@@ -122,8 +123,8 @@ process boundary, and CAH-004 gives that boundary its first validated protocol:
   copies the parent except for `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and all `UV_*` variables;
   the supported project, environment, and interpreter choices are supplied explicitly in argv;
 - `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
-  parses bounded protocol commands, writes validated events to stdout, and exits cleanly on
-  `runtime.shutdown` or stdin EOF;
+  parses bounded protocol commands, starts at most one `MockSessionRunner` task, writes validated
+  events to stdout, and drains accepted mock work before clean `runtime.shutdown` or stdin EOF;
 - `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, drops a leading partial physical
   line when byte truncation cuts one, redacts distinctive inherited environment values plus
   complete physical-line values for recognized separator-delimited and common camel-case or
@@ -137,9 +138,16 @@ process boundary, and CAH-004 gives that boundary its first validated protocol:
   physical lines;
 - after spawn, the supervisor sends `runtime.initialize` and remains `starting` until a matching
   `runtime.ready` confirms the canonical workspace. Invalid or unexpected stdout becomes a visible
-  `protocol-failed` state and closes command input.
+  `protocol-failed` state and closes command input;
+- after readiness, `tui/src/runtime-supervisor.ts` sends correlated `session.start` commands and
+  validates the active event tape before `tui/src/session-state.ts` reduces it. `tui/src/app.tsx`
+  preserves editable input while rendering three intermediate accumulations and completion; and
+- `tui/test/runtime-boundary.test.ts` proves two consecutive sessions through the real
+  Node-to-`uv`-to-Python process tree, distinct session IDs, per-session sequences `1..6`, unchanged
+  workspace contents, and process reaping.
 
 An operating-system spawn establishes only the physical process; it is not evidence that Python
 accepted a protocol command. Any unrequested close, even with exit code zero, produces a visible
-failed state, and the supervisor does not restart the child. CAH-005 will use this implemented
-boundary for deterministic session streaming.
+failed state, and the supervisor does not restart the child. CAH-005 proves the deterministic
+streaming boundary; CAH-006 will add session cancellation without moving lifecycle authority into
+Ink.

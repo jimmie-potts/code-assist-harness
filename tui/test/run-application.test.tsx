@@ -7,13 +7,17 @@ import type {
 } from '../src/run-application.js';
 import {runApplication} from '../src/run-application.js';
 import type {RuntimeState, RuntimeSupervisor} from '../src/runtime-supervisor.js';
+import type {SessionUpdate} from '../src/session-state.js';
 
 function createSupervisor(): RuntimeSupervisor & {
   readonly start: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly stop: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  readonly submitTask: ReturnType<typeof vi.fn<(task: string) => string>>;
+  readonly emitSessionUpdate: (update: SessionUpdate) => void;
 } {
   let state: RuntimeState = {status: 'starting', workspace: '/workspace'};
   const listeners = new Set<(nextState: RuntimeState) => void>();
+  const sessionListeners = new Set<(update: SessionUpdate) => void>();
   const start = vi.fn<() => Promise<void>>(async () => {
     state = {status: 'running', workspace: '/workspace'};
     for (const listener of listeners) {
@@ -21,12 +25,23 @@ function createSupervisor(): RuntimeSupervisor & {
     }
   });
   const stop = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const submitTask = vi.fn<(task: string) => string>(() => 'cmd_test_001');
 
   return {
     getState: () => state,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    subscribeToSessionUpdates: (listener) => {
+      sessionListeners.add(listener);
+      return () => sessionListeners.delete(listener);
+    },
+    submitTask,
+    emitSessionUpdate: (update) => {
+      for (const listener of sessionListeners) {
+        listener(update);
+      }
     },
     start,
     stop,
@@ -48,6 +63,59 @@ describe('runApplication', () => {
     expect(supervisor.start).toHaveBeenCalledOnce();
     expect(rerender).toHaveBeenCalledOnce();
     expect(waitUntilExit).toHaveBeenCalledOnce();
+    expect(supervisor.stop).toHaveBeenCalledOnce();
+  });
+
+  it('reduces ordered session updates before rerendering the terminal projection', async () => {
+    const supervisor = createSupervisor();
+    let resolveExit = (): void => undefined;
+    const rerender = vi.fn();
+    const renderApplication = vi.fn<ApplicationRenderer>(() => ({
+      rerender,
+      unmount: vi.fn(),
+      waitUntilExit: () =>
+        new Promise<void>((resolve) => {
+          resolveExit = resolve;
+        }),
+    }));
+
+    const running = runApplication(supervisor, renderApplication);
+    await vi.waitFor(() => expect(supervisor.start).toHaveBeenCalledOnce());
+    supervisor.emitSessionUpdate({
+      type: 'task.submitted',
+      commandId: 'cmd_stream_001',
+      task: 'Explain streaming.',
+    });
+    supervisor.emitSessionUpdate({
+      type: 'event.received',
+      event: {
+        protocol_version: 1,
+        type: 'session.started',
+        session_id: 'ses_stream_001',
+        sequence: 1,
+        timestamp: '2026-07-30T12:00:00.000Z',
+        correlation_id: 'cmd_stream_001',
+        payload: {},
+      },
+    });
+
+    expect(rerender.mock.calls.at(-1)?.[0]).toMatchObject({
+      props: {
+        sessionState: {
+          status: 'running',
+          turns: [
+            {
+              task: 'Explain streaming.',
+              sessionId: 'ses_stream_001',
+              lastSequence: 1,
+            },
+          ],
+        },
+      },
+    });
+
+    resolveExit();
+    await running;
     expect(supervisor.stop).toHaveBeenCalledOnce();
   });
 

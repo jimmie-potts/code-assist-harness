@@ -3,6 +3,7 @@ import type {ReactElement} from 'react';
 
 import {App} from './app.js';
 import type {RuntimeSupervisor} from './runtime-supervisor.js';
+import {INITIAL_SESSION_STATE, reduceSessionState} from './session-state.js';
 
 /** Minimal Ink instance contract needed by the application lifecycle. */
 export interface RunningApplication {
@@ -51,18 +52,43 @@ export async function runApplication(
   renderApplication: ApplicationRenderer = render,
   subscribeToTermination: ApplicationTerminationSubscriber = subscribeToProcessTermination,
 ): Promise<void> {
-  let unsubscribe = (): void => undefined;
+  let unsubscribeFromRuntime = (): void => undefined;
+  let unsubscribeFromSession = (): void => undefined;
   let unsubscribeFromTermination = (): void => undefined;
+  let runtimeState = supervisor.getState();
+  let sessionState = INITIAL_SESSION_STATE;
 
   try {
-    const application = renderApplication(<App runtimeState={supervisor.getState()} />, {
-      exitOnCtrlC: true,
-    });
+    const taskSubmission = (task: string): void => {
+      supervisor.submitTask(task);
+    };
+    const application = renderApplication(
+      <App
+        runtimeState={runtimeState}
+        sessionState={sessionState}
+        onSubmitTask={taskSubmission}
+      />,
+      {exitOnCtrlC: true},
+    );
+    const rerender = (): void => {
+      application.rerender(
+        <App
+          runtimeState={runtimeState}
+          sessionState={sessionState}
+          onSubmitTask={taskSubmission}
+        />,
+      );
+    };
     unsubscribeFromTermination = subscribeToTermination(() => {
       application.unmount();
     });
-    unsubscribe = supervisor.subscribe((runtimeState) => {
-      application.rerender(<App runtimeState={runtimeState} />);
+    unsubscribeFromRuntime = supervisor.subscribe((nextRuntimeState) => {
+      runtimeState = nextRuntimeState;
+      rerender();
+    });
+    unsubscribeFromSession = supervisor.subscribeToSessionUpdates((update) => {
+      sessionState = reduceSessionState(sessionState, update);
+      rerender();
     });
     const startup = supervisor.start().then(() => 'started' as const);
     const inkExit = application.waitUntilExit().then(() => 'exited' as const);
@@ -71,7 +97,8 @@ export async function runApplication(
       await inkExit;
     }
   } finally {
-    unsubscribe();
+    unsubscribeFromRuntime();
+    unsubscribeFromSession();
     try {
       await supervisor.stop();
     } finally {

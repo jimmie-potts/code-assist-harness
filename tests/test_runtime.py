@@ -1,13 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import select
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from code_assist_harness.protocol import Event, EventLineReader, ProtocolParseFailure
+from code_assist_harness.mock_session import (
+    MOCK_RESPONSE_DELTAS,
+    MOCK_RESPONSE_TEXT,
+    MockSessionRunner,
+)
+from code_assist_harness.protocol import (
+    Event,
+    EventLineReader,
+    OrderedEventWriter,
+    ProtocolParseFailure,
+    SessionStartCommand,
+)
 from code_assist_harness.runtime import RuntimeConfigurationError, resolve_workspace
 
 TIMESTAMP = "2026-07-16T12:34:56.789Z"
@@ -41,10 +54,31 @@ def _command(
 
 
 def _stdout_events(completed: subprocess.CompletedProcess[bytes]) -> list[Event]:
+    return _event_lines(completed.stdout)
+
+
+def _event_lines(lines: bytes) -> list[Event]:
     reader = EventLineReader()
-    results = [*reader.feed(completed.stdout), *reader.finish()]
+    results = [*reader.feed(lines), *reader.finish()]
     assert all(not isinstance(result, ProtocolParseFailure) for result in results)
     return [result for result in results if not isinstance(result, ProtocolParseFailure)]
+
+
+def _session_start(command_id: str, task: str = "Explain this repository") -> SessionStartCommand:
+    return SessionStartCommand.model_validate_json(
+        _command("session.start", command_id, {"task": task})
+    )
+
+
+def _read_process_event(process: subprocess.Popen[bytes]) -> Event:
+    assert process.stdout is not None
+    readable, _, _ = select.select([process.stdout], [], [], 5)
+    assert readable, "runtime did not emit the next event before the test deadline"
+    line = process.stdout.readline()
+    assert line, "runtime stdout closed before the expected event"
+    events = _event_lines(line)
+    assert len(events) == 1
+    return events[0]
 
 
 def test_resolve_workspace_returns_canonical_directory(tmp_path: Path) -> None:
@@ -102,6 +136,254 @@ def test_runtime_emits_correlated_ready_then_honors_orderly_shutdown(tmp_path: P
     assert ready.payload.workspace == str(tmp_path.resolve())
 
 
+def test_mock_session_checkpoints_expose_each_intermediate_delta() -> None:
+    async def scenario() -> tuple[list[tuple[int, str]], list[bytes]]:
+        lines: list[bytes] = []
+        reached: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
+        releases = [asyncio.Event() for _delta in MOCK_RESPONSE_DELTAS]
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def checkpoint(index: int, delta: str) -> None:
+            await reached.put((index, delta))
+            await releases[index - 1].wait()
+
+        runner = MockSessionRunner(OrderedEventWriter(sink), checkpoint)
+        running = asyncio.create_task(runner.run(_session_start("cmd_session")))
+        observations: list[tuple[int, str]] = []
+
+        for expected_count, release in enumerate(releases, start=1):
+            observations.append(await asyncio.wait_for(reached.get(), timeout=1))
+            events = _event_lines(b"".join(lines))
+            assert [event.type for event in events] == [
+                "session.started",
+                *["assistant.delta"] * (expected_count - 1),
+            ]
+            release.set()
+
+        await asyncio.wait_for(running, timeout=1)
+        return observations, lines
+
+    observations, lines = asyncio.run(scenario())
+    events = _event_lines(b"".join(lines))
+
+    assert observations == list(enumerate(MOCK_RESPONSE_DELTAS, start=1))
+    assert [event.type for event in events] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert [event.sequence for event in events] == [1, 2, 3, 4, 5, 6]
+    assert {event.session_id for event in events} == {"ses_mock_1"}
+    assert {event.correlation_id for event in events} == {"cmd_session"}
+    assert [event.payload.text for event in events if event.type == "assistant.delta"] == list(
+        MOCK_RESPONSE_DELTAS
+    )
+    completed = next(event for event in events if event.type == "assistant.completed")
+    assert completed.payload.text == MOCK_RESPONSE_TEXT
+
+
+def test_mock_session_runner_assigns_a_new_id_and_sequence_for_a_second_session() -> None:
+    async def scenario() -> list[bytes]:
+        lines: list[bytes] = []
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def immediate_checkpoint(_index: int, _delta: str) -> None:
+            return
+
+        runner = MockSessionRunner(OrderedEventWriter(sink), immediate_checkpoint)
+        await runner.run(_session_start("cmd_first", "First task"))
+        await runner.run(_session_start("cmd_second", "Second task"))
+        return lines
+
+    events = _event_lines(b"".join(asyncio.run(scenario())))
+    first = [event for event in events if event.session_id == "ses_mock_1"]
+    second = [event for event in events if event.session_id == "ses_mock_2"]
+
+    assert len(first) == len(second) == 6
+    assert [event.sequence for event in first] == [1, 2, 3, 4, 5, 6]
+    assert [event.sequence for event in second] == [1, 2, 3, 4, 5, 6]
+    assert {event.correlation_id for event in first} == {"cmd_first"}
+    assert {event.correlation_id for event in second} == {"cmd_second"}
+
+
+def test_runtime_streams_one_session_then_drains_it_before_shutdown(tmp_path: Path) -> None:
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(tmp_path.resolve())},
+            ),
+            _command("session.start", "cmd_session", {"task": "Explain this repository"}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime("--workspace", str(tmp_path), input_bytes=input_bytes)
+    events = _stdout_events(completed)
+    session_events = [event for event in events if hasattr(event, "session_id")]
+
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    assert events[0].type == "runtime.ready"
+    assert [event.type for event in session_events] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert [event.sequence for event in session_events] == [1, 2, 3, 4, 5, 6]
+    assert {event.correlation_id for event in session_events} == {"cmd_session"}
+    assert sum(event.type == "session.completed" for event in session_events) == 1
+
+
+def test_runtime_rejects_a_second_session_while_the_first_is_active(tmp_path: Path) -> None:
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(tmp_path.resolve())},
+            ),
+            _command("session.start", "cmd_first", {"task": "First task"}),
+            _command("session.start", "cmd_second", {"task": "Second task"}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime("--workspace", str(tmp_path), input_bytes=input_bytes)
+    events = _stdout_events(completed)
+    errors = [event for event in events if event.type == "runtime.error"]
+    session_events = [event for event in events if hasattr(event, "session_id")]
+
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    assert len(errors) == 1
+    assert errors[0].payload.code == "session_active"
+    assert errors[0].payload.recoverable is True
+    assert errors[0].correlation_id == "cmd_second"
+    assert {event.session_id for event in session_events} == {"ses_mock_1"}
+    assert {event.correlation_id for event in session_events} == {"cmd_first"}
+    assert sum(event.type == "session.completed" for event in session_events) == 1
+
+
+def test_runtime_rejects_a_whitespace_only_task_without_starting_a_session(
+    tmp_path: Path,
+) -> None:
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(tmp_path.resolve())},
+            ),
+            _command("session.start", "cmd_whitespace", {"task": " \t "}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime("--workspace", str(tmp_path), input_bytes=input_bytes)
+    events = _stdout_events(completed)
+
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    assert [event.type for event in events] == ["runtime.ready", "runtime.error"]
+    error = events[1]
+    assert error.type == "runtime.error"
+    assert error.payload.code == "invalid_task"
+    assert error.payload.recoverable is True
+    assert error.correlation_id == "cmd_whitespace"
+
+
+def test_runtime_accepts_a_second_session_after_the_first_completes(tmp_path: Path) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-m", "code_assist_harness.runtime", "--workspace", str(tmp_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    first_events: list[Event] = []
+    second_events: list[Event] = []
+    try:
+        process.stdin.write(
+            b"".join(
+                [
+                    _command(
+                        "runtime.initialize",
+                        "cmd_initialize",
+                        {"workspace": str(tmp_path.resolve())},
+                    ),
+                    _command("session.start", "cmd_first", {"task": "First task"}),
+                ]
+            )
+        )
+        process.stdin.flush()
+
+        ready = _read_process_event(process)
+        assert ready.type == "runtime.ready"
+        while not first_events or first_events[-1].type != "session.completed":
+            first_events.append(_read_process_event(process))
+
+        process.stdin.write(
+            b"".join(
+                [
+                    _command("session.start", "cmd_second", {"task": "Second task"}),
+                    _command("runtime.shutdown", "cmd_shutdown", {}),
+                ]
+            )
+        )
+        process.stdin.flush()
+        process.stdin.close()
+        process.stdin = None
+
+        process.wait(timeout=5)
+        second_events = _event_lines(process.stdout.read())
+        stderr = process.stderr.read()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0
+    assert stderr == b""
+    assert [event.type for event in first_events] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert [event.sequence for event in first_events] == [1, 2, 3, 4, 5, 6]
+    assert {event.session_id for event in first_events} == {"ses_mock_1"}
+    assert {event.correlation_id for event in first_events} == {"cmd_first"}
+    assert [event.type for event in second_events] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert [event.sequence for event in second_events] == [1, 2, 3, 4, 5, 6]
+    assert {event.session_id for event in second_events} == {"ses_mock_2"}
+    assert {event.correlation_id for event in second_events} == {"cmd_second"}
+
+
 @pytest.mark.parametrize(
     ("unsafe_workspace", "expected_code", "expected_correlation"),
     [
@@ -149,7 +431,7 @@ def test_runtime_contains_bad_lines_and_processes_later_valid_commands(tmp_path:
         "cmd_initialize",
         {"workspace": str(tmp_path.resolve())},
     )
-    unavailable = _command("session.start", "cmd_session", {"task": "Explain this repository"})
+    unavailable = _command("session.cancel", "cmd_session", {"session_id": "ses_mock_1"})
     shutdown = _command("runtime.shutdown", "cmd_shutdown", {})
 
     completed = _run_runtime(
