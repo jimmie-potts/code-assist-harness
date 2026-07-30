@@ -66,7 +66,9 @@ building both boundaries at once.
 supported `>=22.13.0 <23` range and the pinned 22.22.1 release.
 [`bootstrap.ts`](../../tui/src/bootstrap.ts) runs that check before invoking an injected dynamic
 loader. [`cli.ts`](../../tui/src/cli.ts) therefore imports `run-application.tsx` only after the
-runtime is accepted, so an unsupported runtime cannot enter Ink's render path.
+runtime is accepted, so an unsupported runtime cannot enter Ink's render path. The canonical
+repository gate uses [`check-node-version.ts`](../../tui/src/check-node-version.ts) to run the same
+assertion before every npm-backed repository-policy or TUI stage.
 
 ### The launcher owns pre-Node WSL failures
 
@@ -120,7 +122,7 @@ flowchart LR
 | Concern | Implemented owner | Evidence |
 | --- | --- | --- |
 | Missing, Windows, symlink-hidden, or unsupported outer runtime | `scripts/run-tui` | `launcher.test.ts` |
-| Version compatibility defense in depth | `node-version.ts` | `node-version.test.ts`, `runtime-metadata.test.ts` |
+| Version compatibility defense in depth | `node-version.ts`, `check-node-version.ts` | `node-version.test.ts`, `runtime-metadata.test.ts`, `test_check_script.py` |
 | Pre-render ordering | `bootstrap.ts` | `bootstrap.test.ts` |
 | Initial visible frame | `app.tsx` | `app.test.tsx` |
 | Ctrl+C and awaited teardown | `run-application.tsx` | `run-application.test.tsx`, manual PTY check |
@@ -151,7 +153,8 @@ implemented in `app.tsx` and asserted in `app.test.tsx`.
 
 The implemented invariants are:
 
-- unsupported Node versions fail before npm and are rechecked before the Ink-owning module loads;
+- unsupported Node versions fail before npm in the launcher, before TUI npm stages in the canonical
+  gate, and before the Ink-owning module loads;
 - missing tooling and raw or symlink-hidden Windows Node/npm paths fail with WSL setup guidance;
 - the repository pin, npm engine range, and TypeScript guard stay aligned;
 - the screen contains the title, conversation empty state, task-input placeholder, and idle status;

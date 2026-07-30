@@ -243,10 +243,14 @@ prose before their owning stories implement and test them.
 
 ## What comes next
 
-[CAH-007](../user-stories/cah-007-establish-repository-checks.md) will make the separate Python,
-TypeScript, protocol, integration, and documentation checks available through one repository-wide,
-non-live command and CI workflow. It changes how this evidence is run, not the walking-skeleton
-runtime semantics documented here.
+[CAH-007](../user-stories/cah-007-establish-repository-checks.md) now runs the separate Python,
+TypeScript, protocol, integration, documentation, and network-policy checks through one offline
+repository command and Linux CI workflow. It changed how this evidence is run, not the
+walking-skeleton runtime semantics documented here.
+
+[CAH-010](../user-stories/cah-010-session-state-reducer.md) is next. It will replace the
+M0-specific TUI projection with a documented lifecycle transition model and equivalent pure Python
+and TypeScript reducers.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

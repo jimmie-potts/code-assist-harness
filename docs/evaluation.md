@@ -2,7 +2,8 @@
 
 > Status: proposed evaluation-runner design. CAH-005 and CAH-006 provide deterministic
 > streamed-completion and cancellation evidence in unit and real-boundary tests, and CAH-009 binds
-> normalized teaching tapes to that evidence. Filesystem-backed `evals/` scenarios are not
+> normalized teaching tapes to that evidence. CAH-007 runs all current deterministic layers through
+> one offline repository gate and Linux workflow. Filesystem-backed `evals/` scenarios are not
 > implemented yet.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
@@ -144,6 +145,16 @@ A behavioral story adds or updates:
 - The unit lesson with concrete implementation paths, observed trade-offs, and evidence links.
 
 Default validation must remain model-free and network-free.
+
+CAH-007 makes `./scripts/check` the canonical local and CI entry point for this evidence. It removes
+common provider credentials, forces dependency tools offline after setup, and preloads guards into
+the top-level Python and Node checks that reject common socket/network client entry points. The real
+Python integration child preserves its runtime-selector sanitization, including removal of
+`PYTHONPATH`, and is covered by the current M0 production-source denylist instead. The gate also
+checks local Markdown targets and anchors. These controls are defense in depth rather than an
+operating-system sandbox for arbitrary native executables.
+Focused tests remain useful for diagnosis, but a completed unit returns to the unified gate and
+records its result.
 
 ## Implementation stories
 

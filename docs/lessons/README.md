@@ -23,6 +23,12 @@ scale, risk, regulations, existing platform capabilities, operational maturity, 
 ownership. Prefer an official product or project reference when naming a tool, and explain the
 capability it represents so the lesson remains useful if the vendor changes.
 
+CAH-007 and every unit completed going forward also link a visual PowerPoint companion under
+`assets/`; this policy is prospective for units that were already Done. Treat each new deck as tested
+learning material: render and inspect every slide, run the overflow check, and keep its status and
+evidence aligned with the written lesson. Tasteful humor and visual flair are welcome when they
+clarify or reinforce the concept; they must never weaken accuracy, legibility, or caveats.
+
 ## Lesson sequence
 
 | Order | Unit | Lesson | Story status |
@@ -35,7 +41,7 @@ capability it represents so the lesson remains useful if the vendor changes.
 | 6 | CAH-005 | [Mocked streaming session](cah-005-mocked-streaming-session.md) | Done |
 | 7 | CAH-006 | [Session cancellation](cah-006-session-cancellation.md) | Done |
 | 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Done |
-| 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Planned |
+| 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Done |
 | 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Planned |
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Planned |
 | 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | Planned |
@@ -59,6 +65,8 @@ Every unit lesson contains:
 9. Practical exercises that work without a live model or network unless explicitly opt-in.
 10. A concise takeaway list and a lesson-local glossary.
 11. Further reading that links the story, local architecture, and named production references.
+12. For CAH-007 and units completed going forward, a linked visual PPTX that has passed
+    slide-by-slide and overflow review.
 
 Use [the lesson template](lesson-template.md) when a new implementation-ready story is added.
 

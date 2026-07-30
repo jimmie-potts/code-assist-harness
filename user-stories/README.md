@@ -27,12 +27,13 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, and CAH-009 are **Done**: the
-architecture baseline, documentation standard, Ink shell, supervised Python process, protocol
-version 1 boundary, deterministic mocked-session slice, authoritative cancellation lifecycle, and
-fixture-backed walking-skeleton guide are implemented and validated. CAH-007 is the next
-dependency-ready unit. Task submission, streaming, and cancellation work; provider, workspace-read,
-tool, policy, transcript, and agent behavior remain unimplemented.
+CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, and CAH-007 are **Done**:
+the architecture baseline, documentation standard, Ink shell, supervised Python process, protocol
+version 1 boundary, deterministic mocked-session slice, authoritative cancellation lifecycle,
+fixture-backed walking-skeleton guide, and offline repository/CI gate are implemented and validated.
+M0 is complete, and CAH-010 is the next dependency-ready unit. Task submission, streaming, and
+cancellation work; provider, workspace-read, tool, policy, transcript, and agent behavior remain
+unimplemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -46,7 +47,7 @@ tool, policy, transcript, and agent behavior remain unimplemented.
 | 6 | [CAH-005: Stream a mocked session end to end](cah-005-stream-mocked-session.md) | [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md) | M0 | Done | CAH-002, CAH-003, CAH-004 |
 | 7 | [CAH-006: Cancel an active session](cah-006-cancel-active-session.md) | [Session cancellation](../docs/lessons/cah-006-session-cancellation.md) | M0 | Done | CAH-005 |
 | 8 | [CAH-009: Document the first end-to-end execution](cah-009-document-walking-skeleton.md) | [Walking-skeleton guide](../docs/lessons/cah-009-walking-skeleton-guide.md) | M0 | Done | CAH-006 |
-| 9 | [CAH-007: Establish repository-wide checks](cah-007-establish-repository-checks.md) | [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md) | M0 | Planned | CAH-009 |
+| 9 | [CAH-007: Establish repository-wide checks](cah-007-establish-repository-checks.md) | [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md) | M0 | Done | CAH-009 |
 | 10 | [CAH-010: Implement session state as a reducer](cah-010-session-state-reducer.md) | [Session state reducer](../docs/lessons/cah-010-session-state-reducer.md) | M1 | Planned | CAH-004, CAH-006, CAH-007 |
 | 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md) | M1 | Planned | CAH-010 |
 | 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | Planned | CAH-010, CAH-011 |
@@ -85,3 +86,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-30 CAH-009 walking-skeleton guide](notes/2026-07-30-cah-009-walking-skeleton-guide.md)
   records the normalized teaching tapes, documentation-to-fixture checks, ownership trace, and work
   deliberately left to later runtime stories.
+- [2026-07-30 CAH-007 repository checks](notes/2026-07-30-cah-007-repository-checks.md) records the
+  canonical offline gate, Linux workflow, policy guards, failure probes, visual lesson evidence, and
+  M0-to-M1 handoff.
