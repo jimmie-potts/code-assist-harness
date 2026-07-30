@@ -26,9 +26,11 @@ it for the first time.
 
 CAH-005 completes the first task-to-response M0 slice: Ink sends a validated task through the real
 Node-to-`uv`-to-Python boundary, Python emits a fixed three-delta response, and the TUI renders each
-validated event while preserving correlation and session-local order. Two consecutive sessions run
-without restarting or changing the selected workspace. CAH-006 is the next dependency-ready unit
-and will add an authoritative cancellation lifecycle to this active-session path.
+validated event while preserving correlation and session-local order. CAH-006 makes that same path
+cancellable: Escape sends one addressable request, Python cooperatively selects either cancellation
+or prior completion, and the TUI waits for the authoritative terminal event. CAH-009 is the next
+dependency-ready unit and will turn the verified walking skeleton into a learner-focused execution
+guide.
 
 ## Epic backlog
 

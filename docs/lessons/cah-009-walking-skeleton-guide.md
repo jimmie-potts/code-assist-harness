@@ -3,13 +3,15 @@
 - **Unit:** CAH-009
 - **Milestone:** M0 - Walking skeleton
 - **Lesson status:** Planned
-- **Implementation status:** Planned; the execution guide cannot be verified until CAH-005 and CAH-006 exist
+- **Implementation status:** Planned; CAH-005 and CAH-006 now provide the verified execution paths,
+  but the learner-focused guide has not been built
 - **Story:** [CAH-009](../../user-stories/cah-009-document-walking-skeleton.md)
 - **Related architecture:** [Architecture](../architecture.md), [protocol](../protocol.md),
   [agent loop](../agent-loop.md), and [evaluation](../evaluation.md)
 
-> This is a lesson about creating evidence-based documentation later. It does not claim that the
-> walking skeleton, its integration fixture, or the final CAH-009 execution guide exists today.
+> The successful and cancelled walking-skeleton paths and their integration tests now exist. This
+> planned lesson describes the still-undelivered CAH-009 guide; it does not claim that the final
+> execution narrative or normalized teaching fixtures exist today.
 
 ## Quick summary
 
@@ -79,7 +81,7 @@ diagnostics are not events, and an EOF is not successful session completion.
 
 ## Practical walkthrough
 
-1. Wait until CAH-005 and CAH-006 have passing real-boundary integration scenarios.
+1. Confirm the existing CAH-005 and CAH-006 real-boundary integration scenarios still pass.
 2. Select one normalized successful fixture and one controlled cancellation fixture.
 3. Copy examples through a fixture-generation or validation path; do not type plausible IDs by hand.
 4. Begin at the user action and name the Ink input handler responsible for `session.start`.

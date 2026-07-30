@@ -60,6 +60,93 @@ describe('reduceSessionState', () => {
     });
   });
 
+  it('projects cancelling until an authoritative cancelled terminal event arrives', () => {
+    let state = runningState();
+    state = receive(
+      state,
+      event('assistant.delta', 'cmd_active', 'ses_active', 2, {text: 'partial'}),
+    );
+    state = cancel(state, 'cmd_cancel', 'ses_active');
+
+    expect(state).toMatchObject({
+      status: 'cancelling',
+      turns: [
+        {
+          status: 'cancelling',
+          assistantText: 'partial',
+          cancelCommandId: 'cmd_cancel',
+        },
+      ],
+    });
+
+    // A delta already in flight remains legal until Python acknowledges cancellation.
+    state = receive(
+      state,
+      event('assistant.delta', 'cmd_active', 'ses_active', 3, {text: ' output'}),
+    );
+    expect(state.status).toBe('cancelling');
+    state = receive(state, event('session.cancelled', 'cmd_cancel', 'ses_active', 4, {}));
+
+    expect(state).toMatchObject({
+      status: 'cancelled',
+      turns: [
+        {
+          status: 'cancelled',
+          assistantText: 'partial output',
+          lastSequence: 4,
+        },
+      ],
+    });
+
+    state = submit(state, 'cmd_next', 'Continue after cancellation');
+    expect(state.status).toBe('starting');
+    expect(state.turns).toHaveLength(2);
+  });
+
+  it('allows normal completion to win while cancellation is pending', () => {
+    let state = runningState();
+    state = receive(
+      state,
+      event('assistant.delta', 'cmd_active', 'ses_active', 2, {text: 'complete'}),
+    );
+    state = cancel(state, 'cmd_cancel', 'ses_active');
+    state = receive(
+      state,
+      event('assistant.completed', 'cmd_active', 'ses_active', 3, {text: 'complete'}),
+    );
+    state = receive(
+      state,
+      event('session.completed', 'cmd_active', 'ses_active', 4, {}),
+    );
+
+    expect(state.status).toBe('completed');
+    expect(state.turns.at(-1)?.status).toBe('completed');
+
+    const duplicateTerminal = receive(
+      state,
+      event('session.cancelled', 'cmd_cancel', 'ses_active', 5, {}),
+    );
+    expect(duplicateTerminal.status).toBe('protocol-failed');
+    expect(duplicateTerminal.protocolFailure).toContain('without an active submitted task');
+  });
+
+  it('fails closed on cancellation without a matching local request', () => {
+    const unsolicited = receive(
+      runningState(),
+      event('session.cancelled', 'cmd_cancel', 'ses_active', 2, {}),
+    );
+    expect(unsolicited.status).toBe('protocol-failed');
+    expect(unsolicited.protocolFailure).toContain('did not correlate');
+
+    let mismatched = cancel(runningState(), 'cmd_cancel', 'ses_active');
+    mismatched = receive(
+      mismatched,
+      event('session.cancelled', 'cmd_other_cancel', 'ses_active', 2, {}),
+    );
+    expect(mismatched.status).toBe('protocol-failed');
+    expect(mismatched.protocolFailure).toContain('did not correlate');
+  });
+
   it.each([
     {
       name: 'wrong correlation',
@@ -181,6 +268,10 @@ function runningState(): SessionState {
 
 function submit(state: SessionState, commandId: string, task: string): SessionState {
   return reduceSessionState(state, {type: 'task.submitted', commandId, task});
+}
+
+function cancel(state: SessionState, commandId: string, sessionId: string): SessionState {
+  return reduceSessionState(state, {type: 'cancel.requested', commandId, sessionId});
 }
 
 function receive(state: SessionState, value: SessionEvent): SessionState {

@@ -24,6 +24,7 @@ import {
   type RuntimeLaunchRequest,
   type RuntimeState,
 } from '../src/runtime-supervisor.js';
+import type {SessionUpdate} from '../src/session-state.js';
 
 const WORKSPACE = '/workspace with spaces';
 const COMMAND_TIMESTAMP = '2026-07-16T13:00:00.000Z';
@@ -32,6 +33,7 @@ const INITIALIZATION_COMMAND_ID = 'cmd_initialize_001';
 const SHUTDOWN_COMMAND_ID = 'cmd_shutdown_001';
 const SESSION_COMMAND_ID = 'cmd_session_001';
 const SECOND_SESSION_COMMAND_ID = 'cmd_session_002';
+const CANCEL_COMMAND_ID = 'cmd_cancel_001';
 const SESSION_ID = 'ses_stream_001';
 
 class FakeChild extends EventEmitter {
@@ -149,6 +151,16 @@ function sessionStartCommandLine(commandId: string, task: string): string {
     command_id: commandId,
     timestamp: COMMAND_TIMESTAMP,
     payload: {task},
+  })}\n`;
+}
+
+function sessionCancelCommandLine(commandId: string, sessionId: string): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type: 'session.cancel',
+    command_id: commandId,
+    timestamp: COMMAND_TIMESTAMP,
+    payload: {session_id: sessionId},
   })}\n`;
 }
 
@@ -603,6 +615,8 @@ describe('PythonRuntimeSupervisor', () => {
       updates.push(
         update.type === 'task.submitted'
           ? `${update.type}:${update.commandId}`
+          : update.type === 'cancel.requested'
+            ? `${update.type}:${update.commandId}`
           : `${update.event.type}:${update.event.session_id}:${update.event.sequence}`,
       );
     });
@@ -679,6 +693,95 @@ describe('PythonRuntimeSupervisor', () => {
     await closeOnInputEnd(child, supervisor);
   });
 
+  it('writes one idempotent cancellation request and accepts its authoritative outcome', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      CANCEL_COMMAND_ID,
+      SECOND_SESSION_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    const updates: SessionUpdate[] = [];
+    supervisor.subscribeToSessionUpdates((update) => updates.push(update));
+    await startReady(child, supervisor);
+
+    expect(supervisor.cancelSession()).toBe(false);
+    const startLine = nextInputLine(child);
+    supervisor.submitTask('Cancel this stream.');
+    expect(await startLine).toBe(sessionStartCommandLine(SESSION_COMMAND_ID, 'Cancel this stream.'));
+    expect(supervisor.cancelSession()).toBe(false);
+
+    child.stdout.write(sessionEventLine('session.started', 1, {}));
+    child.stdout.write(sessionEventLine('assistant.delta', 2, {text: 'partial'}));
+    const cancelLine = nextInputLine(child);
+    expect(supervisor.cancelSession()).toBe(true);
+    expect(await cancelLine).toBe(sessionCancelCommandLine(CANCEL_COMMAND_ID, SESSION_ID));
+
+    const write = vi.spyOn(child.stdin, 'write');
+    expect(supervisor.cancelSession()).toBe(false);
+    expect(write).not.toHaveBeenCalled();
+
+    // Output already in flight remains ordered until Python acknowledges the request.
+    child.stdout.write(sessionEventLine('assistant.delta', 3, {text: ' output'}));
+    child.stdout.write(
+      sessionEventLine('session.cancelled', 4, {}, {commandId: CANCEL_COMMAND_ID}),
+    );
+    expect(supervisor.getState().status).toBe('running');
+    expect(supervisor.cancelSession()).toBe(false);
+    expect(updates.map((update) => update.type)).toEqual([
+      'task.submitted',
+      'event.received',
+      'event.received',
+      'cancel.requested',
+      'event.received',
+      'event.received',
+    ]);
+
+    const nextTaskLine = nextInputLine(child);
+    expect(supervisor.submitTask('Continue.')).toBe(SECOND_SESSION_COMMAND_ID);
+    expect(await nextTaskLine).toBe(sessionStartCommandLine(SECOND_SESSION_COMMAND_ID, 'Continue.'));
+
+    await closeOnInputEnd(child, supervisor);
+  });
+
+  it('keeps start-correlated completion authoritative when it wins the cancellation race', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      CANCEL_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    await startReady(child, supervisor);
+    const startLine = nextInputLine(child);
+    supervisor.submitTask('Race completion.');
+    await startLine;
+    child.stdout.write(sessionEventLine('session.started', 1, {}));
+    child.stdout.write(sessionEventLine('assistant.delta', 2, {text: 'complete'}));
+
+    const cancelLine = nextInputLine(child);
+    expect(supervisor.cancelSession()).toBe(true);
+    await cancelLine;
+    child.stdout.write(
+      sessionEventLine('assistant.completed', 3, {text: 'complete'}),
+    );
+    child.stdout.write(sessionEventLine('session.completed', 4, {}));
+
+    expect(supervisor.getState().status).toBe('running');
+    const write = vi.spyOn(child.stdin, 'write');
+    expect(supervisor.cancelSession()).toBe(false);
+    expect(write).not.toHaveBeenCalled();
+
+    await closeOnInputEnd(child, supervisor);
+  });
+
   it.each([
     {
       name: 'wrong correlation',
@@ -711,9 +814,9 @@ describe('PythonRuntimeSupervisor', () => {
       begin: true,
     },
     {
-      name: 'terminal type outside the CAH-005 tape',
+      name: 'cancellation acknowledgement without a local request',
       line: sessionEventLine('session.cancelled', 2, {}),
-      expected: 'unexpected session.cancelled',
+      expected: 'did not correlate',
       begin: true,
     },
   ])('fails closed before projecting a session event with $name', async ({line, expected, begin, delta}) => {

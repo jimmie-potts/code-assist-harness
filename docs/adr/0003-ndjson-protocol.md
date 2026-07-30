@@ -121,5 +121,10 @@ same contract in `src/code_assist_harness/mock_session.py`, `src/code_assist_har
 `tui/src/runtime-supervisor.ts`, and `tui/src/session-state.ts`: one correlated `session.start`
 causes `session.started`, three `assistant.delta` events, exact `assistant.completed`, and one
 `session.completed` with session-local sequence `1..6`. A second session receives a distinct ID and
-restarts sequence at 1. The real Node-to-`uv`-to-Python test proves intermediate delivery and
-process cleanup. `session.cancel` remains defined but unavailable until CAH-006.
+restarts sequence at 1. CAH-006 now exercises the previously defined `session.cancel` and
+`session.cancelled` messages: a winning cancellation event uses the cancel command as its
+correlation ID and next session-local sequence, while start, delta, and completed events retain the
+start command correlation. Repeated and recent-terminal cancellation requests add no message; a
+wrong active target produces recoverable `session_mismatch`, and an unrelated inactive target
+produces recoverable `session_not_active`. The real Node-to-`uv`-to-Python tests prove intermediate
+delivery, cancellation, exactly-one terminal outcome, and process cleanup.

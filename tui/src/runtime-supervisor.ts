@@ -90,6 +90,8 @@ export interface RuntimeSupervisor {
   subscribeToSessionUpdates(listener: (update: SessionUpdate) => void): () => void;
   /** Validate and send one task while the runtime is ready and no session is active. */
   submitTask(task: string): string;
+  /** Request cancellation once for the addressable active session. */
+  cancelSession(): boolean;
   /** Start this supervisor's only child at most once. */
   start(): Promise<void>;
   /** Stop and reap the child; repeated calls share the same cleanup. */
@@ -324,9 +326,10 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     }
     if (
       this.#sessionValidationState.status === 'starting' ||
-      this.#sessionValidationState.status === 'running'
+      this.#sessionValidationState.status === 'running' ||
+      this.#sessionValidationState.status === 'cancelling'
     ) {
-      throw new SessionSubmissionError('Wait for the active session to complete.');
+      throw new SessionSubmissionError('Wait for the active session to finish.');
     }
 
     const commandId = this.#createCommandId();
@@ -355,7 +358,8 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     // The supervisor validates only the active tape; conversation history remains solely in the
     // application projection that consumes the published updates.
     const validationState =
-      this.#sessionValidationState.status === 'completed'
+      this.#sessionValidationState.status === 'completed' ||
+      this.#sessionValidationState.status === 'cancelled'
         ? INITIAL_SESSION_STATE
         : this.#sessionValidationState;
     const nextState = reduceSessionState(validationState, update);
@@ -372,6 +376,69 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
       );
     });
     return commandId;
+  }
+
+  /**
+   * Request cancellation for the active Python-owned session at most once.
+   *
+   * Cancellation is addressable only after `session.started` supplies a session ID. The validated
+   * local request is published before its asynchronous write so a fast `session.cancelled` cannot
+   * outrun the projection. Repeated requests, startup races, and requests after a terminal event
+   * are harmless local no-ops. Python remains authoritative for whether cancellation or completion
+   * wins and emits the only terminal event.
+   *
+   * @returns `true` when one command was accepted for writing, otherwise `false`.
+   */
+  public cancelSession(): boolean {
+    if (this.#state.status !== 'running' || this.#sessionValidationState.status !== 'running') {
+      return false;
+    }
+    const turn = this.#sessionValidationState.turns.at(-1);
+    if (turn?.status !== 'running' || turn.sessionId === undefined) {
+      return false;
+    }
+
+    const commandId = this.#createCommandId();
+    let commandLine: string;
+    try {
+      commandLine = encodeCommandLine({
+        protocol_version: PROTOCOL_VERSION,
+        type: 'session.cancel',
+        command_id: commandId,
+        timestamp: this.#now(),
+        payload: {session_id: turn.sessionId},
+      });
+    } catch {
+      this.#transitionToProtocolFailure(
+        'command_write_failed',
+        'The cancellation request could not be encoded for the Python runtime.',
+      );
+      return false;
+    }
+
+    const update: SessionUpdate = {
+      type: 'cancel.requested',
+      commandId,
+      sessionId: turn.sessionId,
+    };
+    const nextState = reduceSessionState(this.#sessionValidationState, update);
+    if (nextState.status === 'protocol-failed') {
+      this.#transitionToProtocolFailure(
+        'unexpected_event',
+        nextState.protocolFailure ?? 'Cancellation could not enter a valid local session state.',
+      );
+      return false;
+    }
+    this.#sessionValidationState = nextState;
+    this.#publishSessionUpdate(update);
+
+    void this.#writeEncodedCommandLine(commandLine).catch(() => {
+      this.#transitionToProtocolFailure(
+        'command_write_failed',
+        'The cancellation request could not be written to the Python runtime.',
+      );
+    });
+    return true;
   }
 
   /** Start this supervisor's single child and settle after protocol readiness or startup failure. */
@@ -772,7 +839,8 @@ function isSessionEvent(event: ProtocolEvent): event is SessionEvent {
     event.type === 'session.started' ||
     event.type === 'assistant.delta' ||
     event.type === 'assistant.completed' ||
-    event.type === 'session.completed'
+    event.type === 'session.completed' ||
+    event.type === 'session.cancelled'
   );
 }
 

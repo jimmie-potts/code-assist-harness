@@ -1,4 +1,5 @@
 import {render} from 'ink-testing-library';
+import type {ReactElement} from 'react';
 import {describe, expect, it, vi} from 'vitest';
 
 import {App} from '../src/app.js';
@@ -21,6 +22,7 @@ describe('App', () => {
         runtimeState={{status: 'running', workspace: '/home/user/project'}}
         sessionState={INITIAL_SESSION_STATE}
         onSubmitTask={() => undefined}
+        onCancelSession={() => false}
       />,
     );
 
@@ -59,6 +61,7 @@ describe('App', () => {
         runtimeState={{status: 'running', workspace: '/workspace'}}
         sessionState={INITIAL_SESSION_STATE}
         onSubmitTask={onSubmitTask}
+        onCancelSession={() => false}
       />,
     );
 
@@ -82,6 +85,7 @@ describe('App', () => {
         runtimeState={{status: 'running', workspace: '/workspace'}}
         sessionState={INITIAL_SESSION_STATE}
         onSubmitTask={onSubmitTask}
+        onCancelSession={() => false}
       />,
     );
 
@@ -107,6 +111,7 @@ describe('App', () => {
         runtimeState={{status: 'running', workspace: '/workspace'}}
         sessionState={INITIAL_SESSION_STATE}
         onSubmitTask={onSubmitTask}
+        onCancelSession={() => false}
       />,
     );
 
@@ -131,6 +136,7 @@ describe('App', () => {
         runtimeState={{status: 'running', workspace: '/workspace'}}
         sessionState={INITIAL_SESSION_STATE}
         onSubmitTask={() => undefined}
+        onCancelSession={() => false}
       />,
     );
 
@@ -157,6 +163,7 @@ describe('App', () => {
         runtimeState={{status: 'running', workspace: '/workspace'}}
         sessionState={state}
         onSubmitTask={() => undefined}
+        onCancelSession={() => false}
       />,
     );
 
@@ -167,6 +174,7 @@ describe('App', () => {
           runtimeState={{status: 'running', workspace: '/workspace'}}
           sessionState={state}
           onSubmitTask={() => undefined}
+          onCancelSession={() => false}
         />,
       );
       expect(view.lastFrame()).toContain('Session status: running');
@@ -175,7 +183,7 @@ describe('App', () => {
       await vi.waitFor(() => expect(view.lastFrame()).toContain('my next task'));
       view.stdin.write('\r');
       await vi.waitFor(() => {
-        expect(view.lastFrame()).toContain('Wait for the active session to complete.');
+        expect(view.lastFrame()).toContain('Wait for the active session to finish.');
       });
 
       for (const [sequence, text, accumulated] of [
@@ -189,6 +197,7 @@ describe('App', () => {
             runtimeState={{status: 'running', workspace: '/workspace'}}
             sessionState={state}
             onSubmitTask={() => undefined}
+            onCancelSession={() => false}
           />,
         );
         expect(view.lastFrame()).toContain(accumulated);
@@ -203,6 +212,7 @@ describe('App', () => {
           runtimeState={{status: 'running', workspace: '/workspace'}}
           sessionState={state}
           onSubmitTask={() => undefined}
+          onCancelSession={() => false}
         />,
       );
 
@@ -211,8 +221,92 @@ describe('App', () => {
         expect(view.lastFrame()).toContain('my next task');
         expect(view.lastFrame()).toContain('Session status: completed');
         expect(view.lastFrame()).toContain('ready for another task');
-        expect(view.lastFrame()).not.toContain('Wait for the active session to complete.');
+        expect(view.lastFrame()).not.toContain('Wait for the active session to finish.');
       });
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('requests cancellation with Escape once and renders the authoritative cancelled outcome', async () => {
+    const onCancelSession = vi.fn(() => true);
+    let state = receive(submittedState('Stop this task.'), 'session.started', 1, {});
+    const renderApp = (): ReactElement => (
+      <App
+        runtimeState={{status: 'running', workspace: '/workspace'}}
+        sessionState={state}
+        onSubmitTask={() => undefined}
+        onCancelSession={onCancelSession}
+      />
+    );
+    const view = render(renderApp());
+
+    try {
+      expect(view.lastFrame()).toContain('Esc to cancel');
+      view.stdin.write('keep this draft');
+      view.stdin.write('\u001B');
+      await vi.waitFor(() => expect(onCancelSession).toHaveBeenCalledOnce());
+
+      state = reduceSessionState(state, {
+        type: 'cancel.requested',
+        commandId: 'cmd_cancel_001',
+        sessionId: SESSION_ID,
+      });
+      view.rerender(renderApp());
+      expect(view.lastFrame()).toContain('Session status: cancelling');
+      expect(view.lastFrame()).toContain('waiting for Python');
+      expect(view.lastFrame()).not.toContain('Esc to cancel');
+      expect(view.lastFrame()).toContain('keep this draft');
+
+      view.stdin.write('\u001B');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(onCancelSession).toHaveBeenCalledOnce();
+
+      state = receive(state, 'session.cancelled', 2, {}, 'cmd_cancel_001');
+      view.rerender(renderApp());
+      expect(view.lastFrame()).toContain('Session status: cancelled');
+      expect(view.lastFrame()).toContain('ready for another task');
+      expect(view.lastFrame()).toContain('Cancelled before a response.');
+      expect(view.lastFrame()).toContain('keep this draft');
+      expect(view.lastFrame()).not.toContain('protocol failed');
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('renders a cancelled outcome distinctly from a session protocol failure', () => {
+    let cancelled = receive(submittedState('Compare terminal states.'), 'session.started', 1, {});
+    cancelled = reduceSessionState(cancelled, {
+      type: 'cancel.requested',
+      commandId: 'cmd_cancel_001',
+      sessionId: SESSION_ID,
+    });
+    cancelled = receive(cancelled, 'session.cancelled', 2, {}, 'cmd_cancel_001');
+    const protocolFailed = receive(
+      cancelled,
+      'session.cancelled',
+      3,
+      {},
+      'cmd_cancel_001',
+    );
+    const renderState = (sessionState: SessionState): ReactElement => (
+      <App
+        runtimeState={{status: 'running', workspace: '/workspace'}}
+        sessionState={sessionState}
+        onSubmitTask={() => undefined}
+        onCancelSession={() => false}
+      />
+    );
+    const view = render(renderState(cancelled));
+
+    try {
+      expect(view.lastFrame()).toContain('Session status: cancelled · ready for another task');
+      expect(view.lastFrame()).not.toContain('Session status: protocol failed');
+
+      view.rerender(renderState(protocolFailed));
+      expect(view.lastFrame()).toContain('Session status: protocol failed');
+      expect(view.lastFrame()).toContain('without an active submitted task');
+      expect(view.lastFrame()).not.toContain('Session status: cancelled · ready for another task');
     } finally {
       view.unmount();
     }
@@ -250,6 +344,7 @@ describe('App', () => {
         runtimeState={runtimeState}
         sessionState={INITIAL_SESSION_STATE}
         onSubmitTask={() => undefined}
+        onCancelSession={() => false}
       />,
     );
 
@@ -278,9 +373,11 @@ function receive(
     | 'session.started'
     | 'assistant.delta'
     | 'assistant.completed'
-    | 'session.completed',
+    | 'session.completed'
+    | 'session.cancelled',
   sequence: number,
   payload: Record<string, string>,
+  correlationId = COMMAND_ID,
 ): SessionState {
   return reduceSessionState(state, {
     type: 'event.received',
@@ -290,7 +387,7 @@ function receive(
       session_id: SESSION_ID,
       sequence,
       timestamp: TIMESTAMP,
-      correlation_id: COMMAND_ID,
+      correlation_id: correlationId,
       payload,
     } as SessionEvent,
   });

@@ -1,6 +1,8 @@
 # Evaluation
 
-> Status: proposed design. The evaluation runner and scenarios are not yet implemented.
+> Status: proposed evaluation-runner design. CAH-005 and CAH-006 already provide deterministic
+> streamed-completion and cancellation evidence in unit and real-boundary tests; filesystem-backed
+> `evals/` scenarios are not implemented yet.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -33,7 +35,7 @@ at exact points. An unexpected request fails the scenario with a useful diff.
 | Scenario | Expected behavior |
 | --- | --- |
 | Normal streamed response | Deltas remain ordered and the session completes once. |
-| User cancellation | Active work stops and the session is cancelled once. |
+| User cancellation | Active work stops and the session is cancelled once. Unit and boundary tests exist; a reusable evaluation scenario remains planned. |
 | Provider exception | A structured provider failure is emitted and persisted. |
 | Invalid protocol line | The runtime survives when possible and reports a safe protocol error. |
 | Unknown tool | Dispatch is rejected and the model receives a structured result. |
@@ -46,6 +48,15 @@ at exact points. An unexpected request fails the scenario with a useful diff.
 Additional scenarios should be added with the story that introduces a behavior. A regression test
 belongs at the lowest useful layer as well as in an end-to-end scenario when the process boundary or
 event sequence is part of the contract.
+
+CAH-006 applies that layering before a scenario runner exists. `tests/test_runtime.py` controls mock
+checkpoints to prove cancellation before output, between deltas, and against a blocked completion
+write. TypeScript reducer, supervisor, and render tests prove the pending-versus-authoritative state
+distinction and fail closed on conflicting terminal events. `tui/test/runtime-boundary.test.ts`
+sends cancellation through the genuine Node-to-`uv`-to-Python process tree before the first delta
+and between later deltas, rejects delayed post-terminal output, and verifies active shutdown reaps
+the process tree. `tui/test/app.test.tsx` separately drives Escape through the Ink binding. These
+are regression gates, not yet a serialized `evals/` scenario or metric report.
 
 ## Assertion layers
 
@@ -93,9 +104,10 @@ fixtures test unsupported versions, bad discriminators, missing fields, and malf
 
 ### Integration tests
 
-The walking-skeleton test starts the real Node parent and Python child with mocked runtime behavior.
-Later integrations may use a fake provider and fake or restricted executor. They assert ordered
-events, shutdown, stderr/stdout separation, and visible lifecycle state.
+The walking-skeleton tests start the real Node parent and Python child with mocked runtime behavior.
+They assert ordered streamed completion, authoritative cancellation, another session after a
+terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. Later
+integrations may use a fake provider and fake or restricted executor.
 
 ### Live-provider smoke evaluations
 

@@ -9,7 +9,7 @@ import sys
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
-from .mock_session import MockSessionRunner
+from .mock_session import MockSession, MockSessionRunner
 from .protocol import (
     Command,
     CommandLineReader,
@@ -17,6 +17,7 @@ from .protocol import (
     ProtocolParseFailure,
     RuntimeInitializeCommand,
     RuntimeShutdownCommand,
+    SessionCancelCommand,
     SessionId,
     SessionStartCommand,
 )
@@ -152,7 +153,8 @@ async def run_runtime(workspace: Path) -> None:
     line is still processed. Initialization succeeds only when its payload resolves to the same
     canonical workspace supplied by the supervisor. After readiness, one ``session.start`` runs the
     deterministic CAH-005 stream in a child task so the command reader can reject overlapping work
-    and honor orderly shutdown. ``session.cancel`` remains unavailable until CAH-006.
+    and honor orderly shutdown. A matching ``session.cancel`` cooperatively stops the active mock;
+    Python remains authoritative for its sole terminal event.
 
     Args:
         workspace: Canonical existing directory owned by this runtime process.
@@ -177,23 +179,29 @@ async def run_runtime(workspace: Path) -> None:
     writer = OrderedEventWriter(_write_stdout_line)
     mock_sessions = MockSessionRunner(writer)
     initialized = False
-    active_session: asyncio.Task[SessionId] | None = None
+    active_session: MockSession | None = None
+    active_session_task: asyncio.Task[SessionId] | None = None
+    latest_terminal_session_id: SessionId | None = None
     commands = _read_commands()
     next_command = asyncio.create_task(anext(commands))
 
     try:
         while True:
             waiters: set[asyncio.Task[object]] = {next_command}
-            if active_session is not None:
-                waiters.add(active_session)
+            if active_session_task is not None:
+                waiters.add(active_session_task)
             completed, _pending = await asyncio.wait(
                 waiters,
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            if active_session is not None and active_session in completed:
-                await active_session
+            if active_session_task is not None and active_session_task in completed:
+                await active_session_task
+                if active_session is None:
+                    raise RuntimeError("active session task is missing its lifecycle owner")
+                latest_terminal_session_id = active_session.session_id
                 active_session = None
+                active_session_task = None
 
             if next_command not in completed:
                 continue
@@ -201,8 +209,8 @@ async def run_runtime(workspace: Path) -> None:
             try:
                 result = next_command.result()
             except StopAsyncIteration:
-                if active_session is not None:
-                    await active_session
+                if active_session_task is not None:
+                    await active_session_task
                 return
             next_command = asyncio.create_task(anext(commands))
 
@@ -218,8 +226,8 @@ async def run_runtime(workspace: Path) -> None:
                 continue
 
             if isinstance(result, RuntimeShutdownCommand):
-                if active_session is not None:
-                    await active_session
+                if active_session_task is not None:
+                    await active_session_task
                 return
 
             if isinstance(result, RuntimeInitializeCommand):
@@ -299,18 +307,51 @@ async def run_runtime(workspace: Path) -> None:
                         correlation_id=result.command_id,
                     )
                     continue
-                active_session = asyncio.create_task(mock_sessions.run(result))
+                active_session = mock_sessions.create(result)
+                active_session_task = asyncio.create_task(active_session.run())
                 continue
 
-            await writer.emit_runtime(
-                "runtime.error",
-                {
-                    "code": "command_unavailable",
-                    "message": "Session cancellation is unavailable until CAH-006.",
-                    "recoverable": True,
-                },
-                correlation_id=result.command_id,
-            )
+            if isinstance(result, SessionCancelCommand):
+                target_session_id = result.payload.session_id
+                if active_session is None:
+                    if target_session_id == latest_terminal_session_id:
+                        continue
+                    await writer.emit_runtime(
+                        "runtime.error",
+                        {
+                            "code": "session_not_active",
+                            "message": "No matching active or recently completed session exists.",
+                            "recoverable": True,
+                        },
+                        correlation_id=result.command_id,
+                    )
+                    continue
+
+                if target_session_id != active_session.session_id:
+                    await writer.emit_runtime(
+                        "runtime.error",
+                        {
+                            "code": "session_mismatch",
+                            "message": "Cancellation target does not match the active session.",
+                            "recoverable": True,
+                        },
+                        correlation_id=result.command_id,
+                    )
+                    continue
+
+                await active_session.request_cancellation(result.command_id)
+                if active_session_task is None:
+                    raise RuntimeError("active session is missing its task")
+                # Reap the bounded cooperative task before accepting another command. Its sole
+                # terminal event is written before this await returns, so a task submitted after
+                # the TUI observes cancellation cannot race a stale active-session reference.
+                await active_session_task
+                latest_terminal_session_id = active_session.session_id
+                active_session = None
+                active_session_task = None
+                continue
+
+            raise RuntimeError(f"unhandled validated command type: {type(result).__name__}")
     finally:
         if not next_command.done():
             next_command.cancel()
@@ -320,11 +361,11 @@ async def run_runtime(workspace: Path) -> None:
             pass
         await commands.aclose()
 
-        if active_session is not None and not active_session.done():
-            active_session.cancel()
-        if active_session is not None:
+        if active_session_task is not None and not active_session_task.done():
+            active_session_task.cancel()
+        if active_session_task is not None:
             try:
-                await active_session
+                await active_session_task
             except asyncio.CancelledError:
                 pass
 

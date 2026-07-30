@@ -10,14 +10,16 @@ harness library.
 
 ## Current status
 
-The repository now contains the complete M0 mocked-session path. A supervised Ink/TypeScript parent
+The repository now contains a cancellable M0 mocked-session path. A supervised Ink/TypeScript parent
 launches Python through `uv`, completes the validated protocol version 1 readiness handshake, sends
 non-empty tasks as correlated `session.start` commands, and renders three deliberately delayed
-assistant deltas before completion. Pydantic and Zod validate strict, hand-maintained wire contracts
-on both sides; bounded LF readers contain malformed lines; shared fixtures prove cross-language
-parity; and a real Node-to-`uv`-to-Python test proves two consecutive sessions with distinct IDs and
-session-local sequences. The application does **not** yet cancel active work, run an agent loop,
-read the workspace, or integrate with OpenAI. CAH-006 is the next dependency-ready unit.
+assistant deltas before completion. While a session is running, Escape sends one correlated
+`session.cancel`; Python cooperatively stops the mock and emits the authoritative terminal outcome.
+Pydantic and Zod validate strict, hand-maintained wire contracts on both sides; bounded LF readers
+contain malformed lines; shared fixtures prove cross-language parity; and real
+Node-to-`uv`-to-Python tests prove streaming, cancellation, repeated sessions, and process cleanup.
+The application does **not** yet run an agent loop, read the workspace, or integrate with OpenAI.
+CAH-009 is the next dependency-ready unit and will document this first end-to-end execution.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -136,11 +138,21 @@ Together they form `Mock response: the task crossed the process boundary and str
 successfully.` The session status moves from idle through starting and running to completed; after
 completion, another task can run without restarting the application. Entering only whitespace
 shows local feedback and sends no command. Input submitted during an active session is preserved
-with feedback rather than sent. Cancellation is not implemented yet: Ctrl+C exits the application,
-not just the current session. The lifecycle sends `runtime.shutdown`; Python drains an accepted
-mock session before exiting, and Node then closes stdin, terminates the detached process group if it
-does not exit within bounded grace periods, and awaits the child close event. `SIGHUP` and `SIGTERM`
-also request an Ink unmount and enter this same cleanup path.
+with feedback rather than sent.
+
+The mock pauses for 500 ms before each delta so its lifecycle is visible during manual use. After
+`session.started` makes the Python-owned session ID addressable, the running status shows
+`Esc to cancel`. Press Escape once to enter `cancelling`; the TUI waits for Python rather than
+optimistically declaring success. If cancellation wins, Python emits `session.cancelled`, the TUI
+shows `cancelled · ready for another task`, and no later assistant or terminal event is accepted.
+If normal completion wins first, `completed` remains authoritative. Repeated or late Escape presses
+are harmless local no-ops.
+
+Ctrl+C still exits the whole application rather than cancelling only the session. The lifecycle
+sends `runtime.shutdown`; Python drains an accepted bounded mock before exiting, and Node then
+closes stdin, terminates the detached process group if it does not exit within bounded grace
+periods, and awaits the child close event. `SIGHUP` and `SIGTERM` also request an Ink unmount and
+enter this same cleanup path.
 
 Startup troubleshooting:
 
@@ -180,8 +192,9 @@ npm --prefix tui run check
 ```
 
 `npm --prefix tui test` includes `tui/test/runtime-boundary.test.ts`, which launches the genuine
-offline `uv`/Python child, runs two mocked sessions, and verifies cleanup. The
-`npm --prefix tui run check` command adds TypeScript type checking and linting around that suite.
+offline `uv`/Python child, exercises streamed completion and cancellation, starts another session,
+and verifies cleanup. The `npm --prefix tui run check` command adds TypeScript type checking and
+linting around that suite.
 
 The TUI start and test scripts set `TMPDIR=/tmp`. This avoids a WSL environment failure observed
 when inherited `TEMP` and `TMP` values named a missing Windows directory. The checks use installed
@@ -205,9 +218,9 @@ user-stories/             Roadmap, implementation stories, and planning notes
 ```
 
 The Python runtime, supervised TUI, protocol messages and fixtures, deterministic mocked streaming,
-conversation projection, documentation, and backlog exist today. Cancellation, broader evaluation,
-provider, workspace-read, tool, policy, transcript, and agent paths remain planned and are
-introduced only by the story that needs them.
+cooperative session cancellation, conversation projection, documentation, and backlog exist today.
+Broader evaluation, provider, workspace-read, tool, policy, transcript, and agent paths remain
+planned and are introduced only by the story that needs them.
 
 ## Documentation map
 

@@ -35,6 +35,8 @@ import {
 } from '../src/session-state.js';
 
 const repositoryRoot = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+// A broken cancellation path would finish the three 500 ms mock checkpoints inside this window.
+const POST_CANCELLATION_OBSERVATION_MS = 2000;
 
 describe('real Node to uv to Python boundary', () => {
   it('starts the genuine runtime with filtered overrides and reaps the process group', async () => {
@@ -114,7 +116,7 @@ describe('real Node to uv to Python boundary', () => {
       const firstCommandId = supervisor.submitTask('Explain the real boundary.');
       await waitForCondition(
         () => sessionState.status === 'completed',
-        5000,
+        7000,
         'first mocked session did not complete',
       );
       const firstTurn = sessionState.turns[0];
@@ -140,7 +142,7 @@ describe('real Node to uv to Python boundary', () => {
       const secondCommandId = supervisor.submitTask('Prove a second session.');
       await waitForCondition(
         () => sessionState.status === 'completed' && sessionState.turns.length === 2,
-        5000,
+        7000,
         'second mocked session did not complete',
       );
       expect(secondCommandId).not.toBe(firstCommandId);
@@ -168,7 +170,152 @@ describe('real Node to uv to Python boundary', () => {
       rmSync(workspace, {recursive: true, force: true});
       rmSync(poisonPythonPath, {recursive: true, force: true});
     }
-  }, 10_000);
+  }, 15_000);
+
+  it('cancels genuine sessions before the first delta and between later deltas', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'cah-real-cancel-workspace-'));
+    const supervisor = new PythonRuntimeSupervisor(
+      {repositoryRoot, workspace},
+      {gracePeriodMs: 2000, terminatePeriodMs: 2000},
+    );
+    let sessionState = INITIAL_SESSION_STATE;
+    const updates: string[] = [];
+    const unsubscribe = supervisor.subscribeToSessionUpdates((update) => {
+      sessionState = reduceSessionState(sessionState, update);
+      updates.push(
+        update.type === 'event.received'
+          ? `${update.event.type}:${update.event.sequence}`
+          : update.type,
+      );
+    });
+
+    try {
+      await withTimeout(supervisor.start(), 5000, 'runtime did not become ready for cancellation');
+
+      supervisor.submitTask('Cancel before output.');
+      await waitForCondition(
+        () => sessionState.status === 'running',
+        3000,
+        'first session never became addressable',
+      );
+      expect(sessionState.turns.at(-1)?.assistantText).toBe('');
+      expect(supervisor.cancelSession()).toBe(true);
+      expect(supervisor.cancelSession()).toBe(false);
+      await waitForCondition(
+        () => sessionState.status === 'cancelled',
+        3000,
+        'first session did not acknowledge cancellation',
+      );
+      expect(sessionState.turns[0]).toMatchObject({
+        status: 'cancelled',
+        assistantText: '',
+        lastSequence: 2,
+      });
+      const firstTerminalUpdates = [...updates];
+      await delay(POST_CANCELLATION_OBSERVATION_MS);
+      expect(updates).toEqual(firstTerminalUpdates);
+      expect(sessionState.status).toBe('cancelled');
+      expect(supervisor.getState().status).toBe('running');
+
+      supervisor.submitTask('Cancel between deltas.');
+      await waitForCondition(
+        () =>
+          sessionState.status === 'running' &&
+          sessionState.turns.length === 2 &&
+          sessionState.turns[1]?.assistantText === 'Mock response: ',
+        3000,
+        'second session did not expose its first delta',
+      );
+      expect(supervisor.cancelSession()).toBe(true);
+      await waitForCondition(
+        () => sessionState.status === 'cancelled',
+        3000,
+        'second session did not acknowledge cancellation',
+      );
+      expect(sessionState.turns[1]).toMatchObject({
+        status: 'cancelled',
+        assistantText: 'Mock response: ',
+        lastSequence: 3,
+      });
+      const secondTerminalUpdates = [...updates];
+      await delay(POST_CANCELLATION_OBSERVATION_MS);
+      expect(updates).toEqual(secondTerminalUpdates);
+      expect(sessionState.status).toBe('cancelled');
+      expect(supervisor.getState().status).toBe('running');
+      expect(updates.filter((update) => update.startsWith('session.cancelled'))).toEqual([
+        'session.cancelled:2',
+        'session.cancelled:3',
+      ]);
+      expect(sessionState.status).not.toBe('protocol-failed');
+      expect(readdirSync(workspace)).toEqual([]);
+    } finally {
+      unsubscribe();
+      await supervisor.stop();
+      rmSync(workspace, {recursive: true, force: true});
+    }
+
+    expect(supervisor.getState().status).toBe('stopped');
+  }, 15_000);
+
+  it('stops and reaps genuine uv and Python processes during active session work', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'cah-real-active-stop-workspace-'));
+    let uvPid: number | undefined;
+    let pythonPid: number | undefined;
+    const spawnProcess = (request: RuntimeLaunchRequest): ChildProcessWithoutNullStreams => {
+      const child = spawn(request.command, [...request.arguments], {
+        cwd: request.options.cwd,
+        detached: request.options.detached,
+        env: request.options.env,
+        shell: request.options.shell,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      uvPid = child.pid;
+      return child;
+    };
+    const supervisor = new PythonRuntimeSupervisor(
+      {repositoryRoot, workspace},
+      {spawnProcess, gracePeriodMs: 2500, terminatePeriodMs: 2000},
+    );
+    let sessionState = INITIAL_SESSION_STATE;
+    const unsubscribe = supervisor.subscribeToSessionUpdates((update) => {
+      sessionState = reduceSessionState(sessionState, update);
+    });
+
+    try {
+      await withTimeout(supervisor.start(), 5000, 'runtime did not become ready for active stop');
+      expect(uvPid).toBeDefined();
+      if (uvPid === undefined) {
+        throw new Error('uv spawned without a process ID.');
+      }
+      pythonPid = await findRuntimeProcess(uvPid);
+
+      supervisor.submitTask('Remain active while the application exits.');
+      await waitForCondition(
+        () => sessionState.status === 'running',
+        3000,
+        'session never became active before stop',
+      );
+      expect(sessionState.turns.at(-1)).toMatchObject({
+        status: 'running',
+        assistantCompleted: false,
+      });
+
+      const stopping = supervisor.stop();
+      expect(supervisor.getState().status).toBe('stopping');
+      await withTimeout(stopping, 6000, 'active runtime cleanup did not finish');
+
+      expect(supervisor.getState().status).toBe('stopped');
+      expect(existsSync(`/proc/${uvPid}`)).toBe(false);
+      expect(existsSync(`/proc/${pythonPid}`)).toBe(false);
+      expect(readdirSync(workspace)).toEqual([]);
+    } finally {
+      unsubscribe();
+      if (supervisor.getState().status !== 'stopped') {
+        await supervisor.stop();
+      }
+      rmSync(workspace, {recursive: true, force: true});
+    }
+  }, 12_000);
 
   it('renders every genuine mocked delta before completion and accepts a second task', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-render-workspace-'));
@@ -238,7 +385,7 @@ describe('real Node to uv to Python boundary', () => {
       terminal.stdin.write('\r');
       await waitForCondition(
         () => frames.some((frame) => frame.includes('Session status: completed')),
-        5000,
+        7000,
         'first rendered session did not complete',
       );
 
@@ -285,7 +432,7 @@ describe('real Node to uv to Python boundary', () => {
               (frame.match(/Mock response:/gu)?.length ?? 0) === 2 &&
               frame.includes('Session status: completed'),
           ),
-        5000,
+        7000,
         'second rendered session did not complete',
       );
       expect(readdirSync(workspace)).toEqual([]);
@@ -299,7 +446,7 @@ describe('real Node to uv to Python boundary', () => {
     }
 
     expect(supervisor.getState().status).toBe('stopped');
-  }, 10_000);
+  }, 15_000);
 });
 
 async function findRuntimeProcess(uvPid: number): Promise<number> {

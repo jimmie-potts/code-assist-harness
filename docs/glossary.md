@@ -23,8 +23,20 @@ presentation events; the completed assistant message is recorded separately.
 
 ## Cancellation
 
-A requested, first-class lifecycle outcome that stops active work and prevents another costly
-operation. Successful cancellation ends in the `cancelled` terminal state rather than `failed`.
+A first-class lifecycle operation that begins with a request and, when it wins the terminal race,
+ends with an authoritative acknowledgement. The request alone does not prove work stopped.
+Successful cancellation prevents later session output and ends in `cancelled` rather than `failed`.
+
+## Cancellation acknowledgement
+
+The authoritative `session.cancelled` event emitted after Python accepts cancellation and prevents
+later session output. It is correlated to the winning cancel command and is distinct from the
+TUI's local `cancelling` projection.
+
+## Cancellation request
+
+A `session.cancel` command expressing the intent to stop one named active session. It may lose to
+completion, and repeating it must not create another terminal event.
 
 ## Capability
 
@@ -130,8 +142,9 @@ rejected explicitly instead of being interpreted optimistically.
 ## Provider
 
 An adapter that accepts harness-level model requests and emits provider-neutral stream events.
-Provider SDK objects and raw responses remain inside the adapter. The deterministic fake is a
-provider; OpenAI will be the first real provider adapter.
+Provider SDK objects and raw responses remain inside the adapter. The planned deterministic fake
+will implement the same port; OpenAI will be the first real provider adapter. The current M0
+`MockSession` is a runtime fixture, not a provider.
 
 ## Reducer
 

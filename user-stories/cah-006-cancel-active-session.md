@@ -1,6 +1,6 @@
 # CAH-006 - Cancel an active session
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-005
 - **Lesson:** [Session cancellation](../docs/lessons/cah-006-session-cancellation.md)
@@ -55,3 +55,30 @@ idempotency, cleanup, and terminal-event invariant. Document the key binding and
 - Provider-operation cancellation; CAH-020 and CAH-021 apply the established lifecycle to providers.
 - Tool or subprocess cancellation.
 - Persisted cancellation records before CAH-011.
+
+## Completion evidence
+
+- `src/code_assist_harness/mock_session.py` gives each `MockSession` a cooperative cancellation
+  event and one state lock. `request_cancellation` serializes the winning request with delta and
+  completion writes; cancellation interrupts a blocked checkpoint, stops later assistant output,
+  and emits one `session.cancelled` correlated to the cancel command.
+- `src/code_assist_harness/runtime.py` retains the active session object beside its task, routes only
+  a matching `session.cancel`, reports recoverable `session_mismatch` or `session_not_active` for
+  invalid targets, and treats repeat or recent-terminal requests as harmless no-ops.
+- `tui/src/runtime-supervisor.ts` sends at most one validated cancellation command after
+  `session.started`; `tui/src/session-state.ts` projects `cancelling` without inventing an outcome and
+  accepts whichever valid Python terminal event wins; `tui/src/app.tsx` binds Escape while leaving
+  Ctrl+C as application exit.
+- `tests/test_runtime.py` deterministically proves cancellation before the first delta, between
+  deltas, repeated requests, wrong-session rejection, late-request idempotency, and completion
+  winning while its terminal write is in progress.
+- `tui/test/session-state.test.ts`, `tui/test/app.test.tsx`, and
+  `tui/test/runtime-supervisor.test.ts` cover pending, cancelled, completion-wins, repeated-key, and
+  fail-closed cancellation paths.
+- `tui/test/runtime-boundary.test.ts` cancels genuine sessions before the first delta and between
+  later deltas across Node, `uv`, and Python, observes beyond the remaining mock cadence to reject
+  delayed post-terminal events, then proves active-session shutdown reaps both child processes and
+  leaves the workspace unchanged.
+- The [verified lesson](../docs/lessons/cah-006-session-cancellation.md) and its linked visual
+  companion trace the request/acknowledgement distinction, race invariant, failure paths, and
+  production expansion.
