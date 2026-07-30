@@ -87,6 +87,18 @@
       "path": "valid/event-runtime-error.ndjson"
     }
   ],
+  "teaching_scenarios": [
+    {
+      "id": "walking-skeleton-success",
+      "command_path": "scenarios/walking-skeleton-success.commands.ndjson",
+      "event_path": "scenarios/walking-skeleton-success.events.ndjson"
+    },
+    {
+      "id": "walking-skeleton-cancel",
+      "command_path": "scenarios/walking-skeleton-cancel.commands.ndjson",
+      "event_path": "scenarios/walking-skeleton-cancel.events.ndjson"
+    }
+  ],
   "invalid": [
     {
       "id": "malformed-json",

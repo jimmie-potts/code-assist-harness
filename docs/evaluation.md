@@ -1,8 +1,9 @@
 # Evaluation
 
-> Status: proposed evaluation-runner design. CAH-005 and CAH-006 already provide deterministic
-> streamed-completion and cancellation evidence in unit and real-boundary tests; filesystem-backed
-> `evals/` scenarios are not implemented yet.
+> Status: proposed evaluation-runner design. CAH-005 and CAH-006 provide deterministic
+> streamed-completion and cancellation evidence in unit and real-boundary tests, and CAH-009 binds
+> normalized teaching tapes to that evidence. Filesystem-backed `evals/` scenarios are not
+> implemented yet.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -56,7 +57,10 @@ distinction and fail closed on conflicting terminal events. `tui/test/runtime-bo
 sends cancellation through the genuine Node-to-`uv`-to-Python process tree before the first delta
 and between later deltas, rejects delayed post-terminal output, and verifies active shutdown reaps
 the process tree. `tui/test/app.test.tsx` separately drives Escape through the Ink binding. These
-are regression gates, not yet a serialized `evals/` scenario or metric report.
+are regression gates, not yet a serialized `evals/` scenario or metric report. CAH-009 adds
+documentation fixtures rather than an evaluation runner: both language suites validate the guide's
+NDJSON, while the real-boundary test compares the normalized session tapes without treating
+timestamps as ordering evidence. See the [walking-skeleton guide](walking-skeleton.md).
 
 ## Assertion layers
 

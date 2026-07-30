@@ -34,7 +34,7 @@ capability it represents so the lesson remains useful if the vendor changes.
 | 5 | CAH-004 | [Protocol version 1](cah-004-protocol-v1.md) | Done |
 | 6 | CAH-005 | [Mocked streaming session](cah-005-mocked-streaming-session.md) | Done |
 | 7 | CAH-006 | [Session cancellation](cah-006-session-cancellation.md) | Done |
-| 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Planned |
+| 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Done |
 | 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Planned |
 | 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Planned |
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Planned |

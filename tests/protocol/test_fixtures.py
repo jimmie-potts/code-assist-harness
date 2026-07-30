@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from code_assist_harness.protocol import (
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "protocol" / "fixtures" / "v1"
 MANIFEST = json.loads((FIXTURE_ROOT / "manifest.json").read_text(encoding="utf-8"))
+WALKING_SKELETON_GUIDE = Path(__file__).resolve().parents[2] / "docs" / "walking-skeleton.md"
 
 
 @pytest.mark.parametrize("case", MANIFEST["valid"], ids=lambda case: case["id"])
@@ -33,6 +35,46 @@ def test_shared_valid_fixture(case: dict[str, Any]) -> None:
 
     assert not isinstance(result, ProtocolParseFailure)
     assert result.type == case["type"]
+
+
+@pytest.mark.parametrize("scenario", MANIFEST["teaching_scenarios"], ids=lambda case: case["id"])
+@pytest.mark.parametrize(
+    ("direction", "path_key"),
+    [("command", "command_path"), ("event", "event_path")],
+)
+def test_teaching_scenario_validates_every_physical_line(
+    scenario: dict[str, Any], direction: str, path_key: str
+) -> None:
+    fixture = (FIXTURE_ROOT / scenario[path_key]).read_bytes()
+
+    assert fixture.endswith(b"\n")
+    assert b"\r" not in fixture
+    lines = fixture.removesuffix(b"\n").split(b"\n")
+    assert lines
+
+    parser = parse_command_line if direction == "command" else parse_event_line
+    results = [parser(line) for line in lines]
+
+    assert all(not isinstance(result, ProtocolParseFailure) for result in results)
+
+
+def test_walking_skeleton_guide_ndjson_blocks_match_teaching_scenarios_exactly() -> None:
+    guide = WALKING_SKELETON_GUIDE.read_text(encoding="utf-8")
+    documented_blocks = re.findall(r"```ndjson\n(.*?)```", guide, flags=re.DOTALL)
+    documented_fixture_blocks = re.findall(
+        r"<!-- fixture: ([^\n]+) -->\n```ndjson\n(.*?)```", guide, flags=re.DOTALL
+    )
+    fixture_blocks = [
+        (
+            scenario[path_key],
+            (FIXTURE_ROOT / scenario[path_key]).read_text(encoding="utf-8"),
+        )
+        for scenario in MANIFEST["teaching_scenarios"]
+        for path_key in ("command_path", "event_path")
+    ]
+
+    assert [block for _path, block in documented_fixture_blocks] == documented_blocks
+    assert documented_fixture_blocks == fixture_blocks
 
 
 @pytest.mark.parametrize("case", MANIFEST["invalid"], ids=lambda case: case["id"])

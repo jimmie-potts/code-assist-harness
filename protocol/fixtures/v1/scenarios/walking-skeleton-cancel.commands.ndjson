@@ -1,0 +1,2 @@
+{"protocol_version":1,"type":"session.start","command_id":"cmd_walk_cancel_start_001","timestamp":"2026-07-30T14:01:00.000Z","payload":{"task":"Cancel before output."}}
+{"protocol_version":1,"type":"session.cancel","command_id":"cmd_walk_cancel_001","timestamp":"2026-07-30T14:01:00.200Z","payload":{"session_id":"ses_mock_1"}}

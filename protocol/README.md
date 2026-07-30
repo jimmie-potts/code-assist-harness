@@ -72,9 +72,10 @@ or meaning, identifier rule, or sequencing rule requires a new protocol version.
 
 ## Consuming the manifest
 
-Each manifest entry identifies a fixture relative to `fixtures/v1/`, its direction, and its
-expected result. `ndjson_line` files contain one candidate physical line including its terminating
-newline. `ndjson_stream` files deliberately exercise framing across the complete byte stream.
+Each entry in the manifest's `valid` and `invalid` sections identifies a fixture relative to
+`fixtures/v1/`, its direction, and its expected result. `ndjson_line` files contain one candidate
+physical line including its terminating newline. `ndjson_stream` files deliberately exercise
+framing across the complete byte stream.
 
 For a valid entry, a contract test must verify framing, parse the JSON, validate the declared
 direction, and confirm the resulting discriminator. For an invalid entry, it must verify the named
@@ -82,3 +83,25 @@ classification rather than accepting failure for an earlier, unrelated reason. T
 `invalid_framing` fixture terminates one otherwise-valid command with `\r\n` instead of `\n`.
 Readers reject that byte-level violation before JSON parsing. Two concatenated objects on an
 LF-terminated line remain `malformed_json`; readers do not need a custom structural JSON scanner.
+
+## Walking-skeleton teaching scenarios
+
+The manifest's `teaching_scenarios` section groups the exact examples reproduced by the
+[walking-skeleton guide](../docs/walking-skeleton.md):
+
+- `scenarios/walking-skeleton-success.commands.ndjson` and
+  `scenarios/walking-skeleton-success.events.ndjson` contain one successful start command and its
+  six-event mocked response;
+- `scenarios/walking-skeleton-cancel.commands.ndjson` and
+  `scenarios/walking-skeleton-cancel.events.ndjson` contain an addressable start, its cancellation
+  request, and the shortened two-event result.
+
+Commands and events remain in separate files because stdin and stdout are distinct streams, not one
+combined chronological log. The timestamps are stable teaching values: the real-boundary test
+normalizes only the runtime-generated timestamps before comparison. Message types, IDs,
+correlations, session-local sequences, and payloads must match the implemented path exactly. Python
+and TypeScript tests frame and validate every scenario line and verify that the guide reproduces the
+four files without drift.
+
+These scenarios are documentation evidence, not a new protocol definition or the future `evals/`
+scenario format. The boundary validators remain authoritative, and CAH-009 adds no runtime behavior.

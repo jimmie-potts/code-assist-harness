@@ -1,0 +1,6 @@
+{"protocol_version":1,"type":"session.started","session_id":"ses_mock_1","sequence":1,"timestamp":"2026-07-30T14:00:00.100Z","correlation_id":"cmd_walk_success_001","payload":{}}
+{"protocol_version":1,"type":"assistant.delta","session_id":"ses_mock_1","sequence":2,"timestamp":"2026-07-30T14:00:00.600Z","correlation_id":"cmd_walk_success_001","payload":{"text":"Mock response: "}}
+{"protocol_version":1,"type":"assistant.delta","session_id":"ses_mock_1","sequence":3,"timestamp":"2026-07-30T14:00:01.100Z","correlation_id":"cmd_walk_success_001","payload":{"text":"the task crossed the process boundary "}}
+{"protocol_version":1,"type":"assistant.delta","session_id":"ses_mock_1","sequence":4,"timestamp":"2026-07-30T14:00:01.600Z","correlation_id":"cmd_walk_success_001","payload":{"text":"and streamed back successfully."}}
+{"protocol_version":1,"type":"assistant.completed","session_id":"ses_mock_1","sequence":5,"timestamp":"2026-07-30T14:00:01.601Z","correlation_id":"cmd_walk_success_001","payload":{"text":"Mock response: the task crossed the process boundary and streamed back successfully."}}
+{"protocol_version":1,"type":"session.completed","session_id":"ses_mock_1","sequence":6,"timestamp":"2026-07-30T14:00:01.602Z","correlation_id":"cmd_walk_success_001","payload":{}}
