@@ -27,11 +27,11 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001, CAH-008, CAH-002, CAH-003, and CAH-004 are **Done**: the architecture baseline,
-documentation standard, Ink shell, supervised Python process, and protocol version 1 boundary are
-implemented and validated. CAH-005 is the next dependency-ready unit. Readiness works, but task
-submission, mocked streaming, provider, workspace read, tool, policy, transcript, and agent behavior
-remain unimplemented.
+CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, and CAH-005 are **Done**: the architecture baseline,
+documentation standard, Ink shell, supervised Python process, protocol version 1 boundary, and
+deterministic mocked-session slice are implemented and validated. CAH-006 is the next
+dependency-ready unit. Task submission and streaming now work; cancellation, provider, workspace
+read, tool, policy, transcript, and agent behavior remain unimplemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -42,7 +42,7 @@ remain unimplemented.
 | 3 | [CAH-002: Bootstrap the Ink application](cah-002-bootstrap-ink-application.md) | [Ink application shell](../docs/lessons/cah-002-ink-application-shell.md) | M0 | Done | CAH-001, CAH-008 |
 | 4 | [CAH-003: Start and supervise the Python runtime](cah-003-supervise-python-runtime.md) | [Python runtime supervision](../docs/lessons/cah-003-python-runtime-supervision.md) | M0 | Done | CAH-002 |
 | 5 | [CAH-004: Define protocol version 1](cah-004-define-protocol-v1.md) | [Protocol version 1](../docs/lessons/cah-004-protocol-v1.md) | M0 | Done | CAH-003 |
-| 6 | [CAH-005: Stream a mocked session end to end](cah-005-stream-mocked-session.md) | [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md) | M0 | Planned | CAH-002, CAH-003, CAH-004 |
+| 6 | [CAH-005: Stream a mocked session end to end](cah-005-stream-mocked-session.md) | [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md) | M0 | Done | CAH-002, CAH-003, CAH-004 |
 | 7 | [CAH-006: Cancel an active session](cah-006-cancel-active-session.md) | [Session cancellation](../docs/lessons/cah-006-session-cancellation.md) | M0 | Planned | CAH-005 |
 | 8 | [CAH-009: Document the first end-to-end execution](cah-009-document-walking-skeleton.md) | [Walking-skeleton guide](../docs/lessons/cah-009-walking-skeleton-guide.md) | M0 | Planned | CAH-006 |
 | 9 | [CAH-007: Establish repository-wide checks](cah-007-establish-repository-checks.md) | [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md) | M0 | Planned | CAH-009 |
@@ -75,3 +75,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-16 CAH-004 protocol version 1](notes/2026-07-16-cah-004-protocol-v1.md) records the
   strict wire contract, failure taxonomy, readiness policy, fixture parity, and ordered-writer
   evidence.
+- [2026-07-30 CAH-005 mocked streaming session](notes/2026-07-30-cah-005-mocked-streaming-session.md)
+  records the fixed event tape, reducer boundary, scheduling seam, real-process evidence, and work
+  deliberately left to cancellation.

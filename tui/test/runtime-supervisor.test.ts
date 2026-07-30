@@ -28,6 +28,9 @@ const COMMAND_TIMESTAMP = '2026-07-16T13:00:00.000Z';
 const EVENT_TIMESTAMP = '2026-07-16T13:00:00.100Z';
 const INITIALIZATION_COMMAND_ID = 'cmd_initialize_001';
 const SHUTDOWN_COMMAND_ID = 'cmd_shutdown_001';
+const SESSION_COMMAND_ID = 'cmd_session_001';
+const SECOND_SESSION_COMMAND_ID = 'cmd_session_002';
+const SESSION_ID = 'ses_stream_001';
 
 class FakeChild extends EventEmitter {
   public readonly stdin = new PassThrough();
@@ -134,6 +137,38 @@ function sessionStartedEventLine(): string {
     sequence: 1,
     timestamp: EVENT_TIMESTAMP,
     payload: {},
+  })}\n`;
+}
+
+function sessionStartCommandLine(commandId: string, task: string): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type: 'session.start',
+    command_id: commandId,
+    timestamp: COMMAND_TIMESTAMP,
+    payload: {task},
+  })}\n`;
+}
+
+function sessionEventLine(
+  type:
+    | 'session.started'
+    | 'assistant.delta'
+    | 'assistant.completed'
+    | 'session.completed'
+    | 'session.cancelled',
+  sequence: number,
+  payload: Record<string, string>,
+  options: {readonly commandId?: string; readonly sessionId?: string} = {},
+): string {
+  return `${JSON.stringify({
+    protocol_version: 1,
+    type,
+    session_id: options.sessionId ?? SESSION_ID,
+    sequence,
+    timestamp: EVENT_TIMESTAMP,
+    correlation_id: options.commandId ?? SESSION_COMMAND_ID,
+    payload,
   })}\n`;
 }
 
@@ -546,6 +581,195 @@ describe('PythonRuntimeSupervisor', () => {
     });
     const state = supervisor.getState();
     expect(state.status === 'protocol-failed' ? state.message : '').not.toContain('hidden-value');
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('writes one validated task and publishes two complete session tapes without restarting', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      SECOND_SESSION_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    const updates: string[] = [];
+    supervisor.subscribeToSessionUpdates((update) => {
+      updates.push(
+        update.type === 'task.submitted'
+          ? `${update.type}:${update.commandId}`
+          : `${update.event.type}:${update.event.session_id}:${update.event.sequence}`,
+      );
+    });
+    await startReady(child, supervisor);
+
+    const firstCommand = nextInputLine(child);
+    expect(supervisor.submitTask('Explain streaming.')).toBe(SESSION_COMMAND_ID);
+    expect(await firstCommand).toBe(
+      sessionStartCommandLine(SESSION_COMMAND_ID, 'Explain streaming.'),
+    );
+    for (const line of [
+      sessionEventLine('session.started', 1, {}),
+      sessionEventLine('assistant.delta', 2, {text: 'Mock '}),
+      sessionEventLine('assistant.delta', 3, {text: 'response '}),
+      sessionEventLine('assistant.delta', 4, {text: 'streams.'}),
+      sessionEventLine('assistant.completed', 5, {text: 'Mock response streams.'}),
+      sessionEventLine('session.completed', 6, {}),
+    ]) {
+      child.stdout.write(line);
+    }
+    expect(supervisor.getState().status).toBe('running');
+
+    const secondCommand = nextInputLine(child);
+    expect(supervisor.submitTask('Run again.')).toBe(SECOND_SESSION_COMMAND_ID);
+    expect(await secondCommand).toBe(sessionStartCommandLine(SECOND_SESSION_COMMAND_ID, 'Run again.'));
+    const secondSession = 'ses_stream_002';
+    for (const line of [
+      sessionEventLine('session.started', 1, {}, {
+        commandId: SECOND_SESSION_COMMAND_ID,
+        sessionId: secondSession,
+      }),
+      sessionEventLine('assistant.delta', 2, {text: 'Second '}, {
+        commandId: SECOND_SESSION_COMMAND_ID,
+        sessionId: secondSession,
+      }),
+      sessionEventLine('assistant.delta', 3, {text: 'mock '}, {
+        commandId: SECOND_SESSION_COMMAND_ID,
+        sessionId: secondSession,
+      }),
+      sessionEventLine('assistant.delta', 4, {text: 'response.'}, {
+        commandId: SECOND_SESSION_COMMAND_ID,
+        sessionId: secondSession,
+      }),
+      sessionEventLine('assistant.completed', 5, {text: 'Second mock response.'}, {
+        commandId: SECOND_SESSION_COMMAND_ID,
+        sessionId: secondSession,
+      }),
+      sessionEventLine('session.completed', 6, {}, {
+        commandId: SECOND_SESSION_COMMAND_ID,
+        sessionId: secondSession,
+      }),
+    ]) {
+      child.stdout.write(line);
+    }
+
+    expect(updates).toEqual([
+      `task.submitted:${SESSION_COMMAND_ID}`,
+      `session.started:${SESSION_ID}:1`,
+      `assistant.delta:${SESSION_ID}:2`,
+      `assistant.delta:${SESSION_ID}:3`,
+      `assistant.delta:${SESSION_ID}:4`,
+      `assistant.completed:${SESSION_ID}:5`,
+      `session.completed:${SESSION_ID}:6`,
+      `task.submitted:${SECOND_SESSION_COMMAND_ID}`,
+      `session.started:${secondSession}:1`,
+      `assistant.delta:${secondSession}:2`,
+      `assistant.delta:${secondSession}:3`,
+      `assistant.delta:${secondSession}:4`,
+      `assistant.completed:${secondSession}:5`,
+      `session.completed:${secondSession}:6`,
+    ]);
+    expect(supervisor.getState().status).toBe('running');
+
+    await closeOnInputEnd(child, supervisor);
+  });
+
+  it.each([
+    {
+      name: 'wrong correlation',
+      line: sessionEventLine('session.started', 1, {}, {commandId: 'cmd_wrong'}),
+      expected: 'did not correlate',
+    },
+    {
+      name: 'session ID mismatch',
+      line: sessionEventLine('assistant.delta', 2, {text: 'bad'}, {sessionId: 'ses_wrong'}),
+      expected: 'did not belong',
+      begin: true,
+    },
+    {
+      name: 'sequence gap',
+      line: sessionEventLine('assistant.delta', 3, {text: 'bad'}),
+      expected: 'next session sequence',
+      begin: true,
+    },
+    {
+      name: 'completion text mismatch',
+      line: sessionEventLine('assistant.completed', 3, {text: 'different'}),
+      expected: 'exactly confirm',
+      begin: true,
+      delta: true,
+    },
+    {
+      name: 'early terminal event',
+      line: sessionEventLine('session.completed', 2, {}),
+      expected: 'before assistant completion',
+      begin: true,
+    },
+    {
+      name: 'terminal type outside the CAH-005 tape',
+      line: sessionEventLine('session.cancelled', 2, {}),
+      expected: 'unexpected session.cancelled',
+      begin: true,
+    },
+  ])('fails closed before projecting a session event with $name', async ({line, expected, begin, delta}) => {
+    const child = new FakeChild();
+    const commandIds = [INITIALIZATION_COMMAND_ID, SESSION_COMMAND_ID];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? SHUTDOWN_COMMAND_ID,
+    });
+    const updates: string[] = [];
+    supervisor.subscribeToSessionUpdates((update) => updates.push(update.type));
+    await startReady(child, supervisor);
+    const taskLine = nextInputLine(child);
+    supervisor.submitTask('Test invalid events.');
+    await taskLine;
+    if (begin === true) {
+      child.stdout.write(sessionEventLine('session.started', 1, {}));
+    }
+    if (delta === true) {
+      child.stdout.write(sessionEventLine('assistant.delta', 2, {text: 'accepted'}));
+    }
+
+    child.stdout.write(line);
+
+    expect(supervisor.getState()).toMatchObject({
+      status: 'protocol-failed',
+      code: 'unexpected_event',
+      message: expect.stringContaining(expected),
+    });
+    expect(child.stdin.writableEnded).toBe(true);
+    expect(updates.at(-1)).not.toBe('protocol-failed');
+    child.close(0);
+    await supervisor.stop();
+  });
+
+  it('rejects whitespace and concurrent submission before writing, then fails safely on write loss', async () => {
+    const child = new FakeChild();
+    const commandIds = [INITIALIZATION_COMMAND_ID, SESSION_COMMAND_ID];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? SHUTDOWN_COMMAND_ID,
+    });
+    await startReady(child, supervisor);
+    const write = vi.spyOn(child.stdin, 'write');
+
+    expect(() => supervisor.submitTask('   ')).toThrow('non-empty task');
+    expect(write).not.toHaveBeenCalled();
+
+    child.stdin.end();
+    expect(supervisor.submitTask('Accepted before the lost pipe is observed.')).toBe(
+      SESSION_COMMAND_ID,
+    );
+    expect(() => supervisor.submitTask('Concurrent task')).toThrow('active session');
+    await vi.waitFor(() => {
+      expect(supervisor.getState()).toMatchObject({
+        status: 'protocol-failed',
+        code: 'command_write_failed',
+      });
+    });
+
     child.close(0);
     await supervisor.stop();
   });

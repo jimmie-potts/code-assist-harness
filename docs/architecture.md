@@ -19,10 +19,12 @@ protocol, tool, or executor implementation.
 CAH-001 superseded the scaffold's description of LangChain as the project's foundation. CAH-002
 added the npm-managed Ink shell, WSL-aware launcher, Node pin, and TypeScript checks. CAH-003 added
 the minimal Python entry point, canonical single-workspace selection, and Node child-process
-supervision. CAH-004 gives those pipes a strict protocol version 1 contract, cross-language
-fixtures, bounded readers, ordered event writes, and a validated readiness handshake. Provider,
-tool, workspace-read, policy, transcript, session streaming, and agent behavior remain target
-architecture.
+supervision. CAH-004 gave those pipes a strict protocol version 1 contract, cross-language fixtures,
+bounded readers, ordered event writes, and a validated readiness handshake. CAH-005 now connects
+editable Ink input to a deterministic Python session: three delayed deltas are reduced and rendered
+before exact assistant and session completion, and a second session runs with a new ID and sequence
+reset. Cancellation, provider, tool, workspace-read, policy, transcript, and agent behavior remain
+target architecture; CAH-006 is the next dependency-ready unit.
 
 ## Product boundary
 
@@ -122,6 +124,22 @@ before requested shutdown, including exit code zero, becomes a visible failure; 
 not restart the runtime. Parent `SIGHUP` and `SIGTERM` handlers unmount Ink and route through the
 same asynchronous cleanup while preserving conventional signal exit codes.
 
+After readiness, the implemented M0 session path is:
+
+```text
+Ink input -> PythonRuntimeSupervisor.submitTask -> session.start NDJSON
+  -> runtime.run_runtime -> MockSessionRunner -> OrderedEventWriter
+  -> six validated session events -> supervisor event-tape validation
+  -> reduceSessionState -> App conversation and status rendering
+```
+
+The supervisor publishes the local submission before writing the command, so even an immediate
+`session.started` cannot arrive before the projection knows its correlation ID. Python owns the
+active-session decision and authoritative event tape. The TUI also blocks whitespace and overlap
+for immediate feedback, but the runtime independently rejects them as `invalid_task` and
+`session_active`. Normal shutdown drains the bounded mock; user-requested cancellation is not yet
+implemented.
+
 The implemented Node project uses npm, commits `package-lock.json`, pins Node 22.22.1, and enforces
 the Ink-compatible range `>=22.13.0 <23`. Python remains at version 3.12 and is managed with `uv`;
 dependency-resolution changes commit `uv.lock`.
@@ -149,18 +167,17 @@ The implemented Python boundary is separated from later domain subsystems:
 
 ```text
 src/code_assist_harness/
-├── runtime.py          Async command loop, initialization, and shutdown
+├── runtime.py          Async command loop, initialization, mock-task ownership, and shutdown
+├── mock_session.py     Fixed response, three scheduling checkpoints, and six-event lifecycle
 ├── protocol/
 │   ├── models.py       Strict Pydantic v2 wire models
 │   ├── codec.py        Two-stage parsing and safe serialization
 │   └── streams.py      Bounded readers and ordered event writer
-├── core/              Agent loop, session state, events, and limits
-├── context/           Instructions, retrieval, provenance, and budgets
-├── providers/         Provider-neutral port, deterministic fake, OpenAI adapter
-├── tools/             Definitions, registry, filesystem, editing, subprocess
-├── safety/            Policy, approvals, workspace and path enforcement
-└── persistence/       Append-only transcripts and redaction
+└── __init__.py         Intentional package surface
 ```
+
+Future `core/`, `context/`, `providers/`, `tools/`, `safety/`, and `persistence/` paths remain
+conceptual and will be introduced only by their owning stories.
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 
@@ -175,9 +192,10 @@ tui/
 │   ├── protocol-stream.ts
 │   ├── runtime-diagnostics.ts
 │   ├── runtime-supervisor.ts
+│   ├── session-state.ts
 │   ├── run-application.tsx
 │   └── app.tsx
-└── test/              Render, protocol, launcher, runtime, and lifecycle tests
+└── test/              Render, reducer, protocol, launcher, runtime, and lifecycle tests
 ```
 
 `scripts/run-tui` resolves and validates both the Node and npm executable paths, rejecting Windows
@@ -187,7 +205,9 @@ forwards `--workspace` as separate arguments. `cli.ts` repeats Node validation, 
 workspace, and creates `PythonRuntimeSupervisor`. `run-application.tsx` projects supervisor state
 into `app.tsx`, routes `SIGHUP` and `SIGTERM` through Ink unmount, and guarantees cleanup after every
 exit path. `protocol.ts` validates hand-maintained Zod wire shapes and `protocol-stream.ts` owns byte
-framing; later stories add session-state reduction separately from components.
+framing. `session-state.ts` is the pure conversation projection for the CAH-005 event tape;
+`runtime-supervisor.ts` validates that tape before publishing updates, while `app.tsx` owns only the
+draft and visible feedback.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. Schema generation is deferred until contract drift
@@ -217,9 +237,11 @@ makes a live model or network request.
 The Python runtime creates one `asyncio` event loop and arms its stdin file-descriptor reader for one
 bounded chunk at a time. `CommandLineReader` validates each completed line independently, while
 `OrderedEventWriter` holds one lock across sequence allocation, validation, serialization, and sink
-completion. Later units add provider operations, tool supervision, cancellation, and deadlines to
-the same loop. Small, bounded filesystem operations may run directly; blocking work moves to a
-worker thread when needed.
+completion. CAH-005 runs the accepted mock in one child task so the command reader remains available
+to reject an overlapping `session.start` and receive `runtime.shutdown`. Shutdown waits for the
+fixed three-delta task to complete. Later units add provider operations, tool supervision,
+cancellation, and deadlines to the same loop. Small, bounded filesystem operations may run
+directly; blocking work moves to a worker thread when needed.
 
 Cancellation is a lifecycle operation rather than an exception leaked to the TUI. It is checked
 before each costly operation, propagates to the active provider or tool, stops further deltas, and

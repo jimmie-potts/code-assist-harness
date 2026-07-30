@@ -24,10 +24,11 @@ library.
 Evaluation starts with deterministic M0 scenarios. M4 expands evaluation rather than introducing
 it for the first time.
 
-CAH-004 completes the first trustworthy M0 process contract: Ink and Python now exchange strict,
-versioned NDJSON through bounded readers, prove agreement with shared fixtures, and enter `running`
-only after correlated readiness. CAH-005 is the next dependency-ready unit and will use that
-contract to stream a deterministic mocked session through the real boundary.
+CAH-005 completes the first task-to-response M0 slice: Ink sends a validated task through the real
+Node-to-`uv`-to-Python boundary, Python emits a fixed three-delta response, and the TUI renders each
+validated event while preserving correlation and session-local order. Two consecutive sessions run
+without restarting or changing the selected workspace. CAH-006 is the next dependency-ready unit
+and will add an authoritative cancellation lifecycle to this active-session path.
 
 ## Epic backlog
 

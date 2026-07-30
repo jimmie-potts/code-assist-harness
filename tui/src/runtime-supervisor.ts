@@ -18,6 +18,13 @@ import {
   type ProtocolLineResult,
 } from './protocol-stream.js';
 import {RuntimeDiagnostics} from './runtime-diagnostics.js';
+import {
+  INITIAL_SESSION_STATE,
+  reduceSessionState,
+  type SessionEvent,
+  type SessionState,
+  type SessionUpdate,
+} from './session-state.js';
 
 const DEFAULT_GRACE_PERIOD_MS = 1000;
 const DEFAULT_TERMINATE_PERIOD_MS = 1000;
@@ -54,6 +61,7 @@ export type RuntimeProtocolFailureCode =
   | ProtocolParseErrorCode
   | ProtocolLineErrorCode
   | 'unexpected_event'
+  | 'command_write_failed'
   | 'readiness_mismatch'
   | 'readiness_timeout';
 
@@ -77,6 +85,10 @@ export interface RuntimeSupervisor {
   getState(): RuntimeState;
   /** Observe state transitions; returns an unsubscribe function. */
   subscribe(listener: (state: RuntimeState) => void): () => void;
+  /** Observe accepted local submissions and validated session events in projection order. */
+  subscribeToSessionUpdates(listener: (update: SessionUpdate) => void): () => void;
+  /** Validate and send one task while the runtime is ready and no session is active. */
+  submitTask(task: string): string;
   /** Start this supervisor's only child at most once. */
   start(): Promise<void>;
   /** Stop and reap the child; repeated calls share the same cleanup. */
@@ -117,6 +129,15 @@ export class RuntimeLaunchPreparationError extends Error {
   public constructor(message: string) {
     super(message);
     this.name = 'RuntimeLaunchPreparationError';
+  }
+}
+
+/** A safe local rejection raised before an invalid task can reach the protocol stream. */
+export class SessionSubmissionError extends Error {
+  /** Create an understandable submission failure suitable for the input region. */
+  public constructor(message: string) {
+    super(message);
+    this.name = 'SessionSubmissionError';
   }
 }
 
@@ -215,6 +236,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
   readonly #eventReader = new NdjsonLineReader(MAX_PROTOCOL_LINE_BYTES);
   readonly #workspace: string;
   readonly #listeners = new Set<(state: RuntimeState) => void>();
+  readonly #sessionListeners = new Set<(update: SessionUpdate) => void>();
   readonly #closed: Promise<void>;
   #resolveClosed: () => void = () => undefined;
   #state: RuntimeState;
@@ -229,6 +251,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
   #failureShutdownRequested = false;
   #initializationCommandId: string | undefined;
   #readinessTimer: NodeJS.Timeout | undefined;
+  #sessionValidationState: SessionState = INITIAL_SESSION_STATE;
 
   /** Create a supervisor fixed to one canonical workspace. */
   public constructor(
@@ -269,6 +292,69 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     return () => {
       this.#listeners.delete(listener);
     };
+  }
+
+  /** Observe accepted submissions and session events after local semantic validation. */
+  public subscribeToSessionUpdates(listener: (update: SessionUpdate) => void): () => void {
+    this.#sessionListeners.add(listener);
+    return () => {
+      this.#sessionListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Send one `session.start` command and synchronously announce its local projection update.
+   *
+   * Whitespace-only input, an unavailable runtime, and concurrent work are rejected before bytes
+   * are written. The local update is published before the asynchronous write so a very fast child
+   * can never deliver `session.started` before the projection knows the causing command.
+   *
+   * @param task - Exact user task; surrounding whitespace is preserved when non-empty.
+   * @returns The unique command ID written in the protocol envelope.
+   * @throws SessionSubmissionError When the runtime cannot legally accept a new task.
+   */
+  public submitTask(task: string): string {
+    if (task.trim().length === 0) {
+      throw new SessionSubmissionError('Enter a non-empty task before submitting.');
+    }
+    if (this.#state.status !== 'running') {
+      throw new SessionSubmissionError('Wait for the Python runtime to become ready.');
+    }
+    if (
+      this.#sessionValidationState.status === 'starting' ||
+      this.#sessionValidationState.status === 'running'
+    ) {
+      throw new SessionSubmissionError('Wait for the active session to complete.');
+    }
+
+    const commandId = this.#createCommandId();
+    const update: SessionUpdate = {type: 'task.submitted', commandId, task};
+    // The supervisor validates only the active tape; conversation history remains solely in the
+    // application projection that consumes the published updates.
+    const validationState =
+      this.#sessionValidationState.status === 'completed'
+        ? INITIAL_SESSION_STATE
+        : this.#sessionValidationState;
+    const nextState = reduceSessionState(validationState, update);
+    if (nextState.status === 'protocol-failed') {
+      throw new SessionSubmissionError('The task could not enter a valid local session state.');
+    }
+    this.#sessionValidationState = nextState;
+    this.#publishSessionUpdate(update);
+
+    void this.#writeCommand({
+      protocol_version: PROTOCOL_VERSION,
+      type: 'session.start',
+      command_id: commandId,
+      timestamp: this.#now(),
+      payload: {task},
+    }).catch(() => {
+      this.#transitionToProtocolFailure(
+        'command_write_failed',
+        'The task could not be written to the Python runtime.',
+      );
+    });
+    return commandId;
   }
 
   /** Start this supervisor's single child and settle after protocol readiness or startup failure. */
@@ -495,6 +581,10 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
 
   #acceptEvent(event: ProtocolEvent): void {
     if (this.#state.status === 'running') {
+      if (isSessionEvent(event)) {
+        this.#acceptSessionEvent(event);
+        return;
+      }
       const reportedCode = event.type === 'runtime.error' ? event.payload.code : undefined;
       const reportedMessage =
         event.type === 'runtime.error'
@@ -553,6 +643,20 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     this.#clearReadinessTimer();
     this.#transition({status: 'running', workspace: this.#requestWorkspace()});
     this.#settleStart();
+  }
+
+  #acceptSessionEvent(event: SessionEvent): void {
+    const update: SessionUpdate = {type: 'event.received', event};
+    const nextState = reduceSessionState(this.#sessionValidationState, update);
+    if (nextState.status === 'protocol-failed') {
+      this.#transitionToProtocolFailure(
+        'unexpected_event',
+        nextState.protocolFailure ?? 'Python runtime sent an invalid session event transition.',
+      );
+      return;
+    }
+    this.#sessionValidationState = nextState;
+    this.#publishSessionUpdate(update);
   }
 
   #transitionToProtocolFailure(code: RuntimeProtocolFailureCode, message: string): void {
@@ -629,12 +733,27 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     }
   }
 
+  #publishSessionUpdate(update: SessionUpdate): void {
+    for (const listener of this.#sessionListeners) {
+      listener(update);
+    }
+  }
+
   #markClosed(): void {
     if (!this.#didClose) {
       this.#didClose = true;
       this.#resolveClosed();
     }
   }
+}
+
+function isSessionEvent(event: ProtocolEvent): event is SessionEvent {
+  return (
+    event.type === 'session.started' ||
+    event.type === 'assistant.delta' ||
+    event.type === 'assistant.completed' ||
+    event.type === 'session.completed'
+  );
 }
 
 function spawnRuntimeProcess(request: RuntimeLaunchRequest): ChildProcessWithoutNullStreams {

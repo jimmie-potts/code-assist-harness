@@ -1,6 +1,6 @@
 # CAH-005 - Stream a mocked session end to end
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-002, CAH-003, CAH-004
 - **Lesson:** [Mocked streaming session](../docs/lessons/cah-005-mocked-streaming-session.md)
@@ -31,8 +31,8 @@
 8. After completion, a second non-empty task can run with a distinct session ID and sequence starting
    according to the documented session rules.
 9. Empty or whitespace-only input does not start a session and yields understandable UI feedback.
-10. No model, network, filesystem mutation, transcript persistence, tool, or subprocess execution
-    occurs.
+10. No model, network, filesystem mutation, transcript persistence, tool call, or agent/tool
+    subprocess execution occurs beyond the supervised Node-to-Python runtime child.
 11. An integration test runs the real npm/Node to `uv`/Python boundary with deterministic mocked
     runtime behavior.
 12. The visible streaming states have reducer and/or rendering coverage.
@@ -56,3 +56,24 @@ runtime mode. Add the end-to-end development command and describe visible status
 - Provider interfaces, prompts, tools, approvals, and workspace inspection.
 - Cancellation, which is introduced by CAH-006.
 - Durable transcripts or event replay.
+
+## Completion evidence
+
+- `src/code_assist_harness/mock_session.py` emits one fixed six-event lifecycle with three
+  scheduling checkpoints and the exact completed text `Mock response: the task crossed the process
+  boundary and streamed back successfully.`
+- `src/code_assist_harness/runtime.py` accepts one non-empty task after readiness, rejects
+  whitespace with recoverable `invalid_task`, rejects overlap with recoverable `session_active`,
+  and drains accepted mock work before shutdown.
+- `tui/src/runtime-supervisor.ts` creates correlated commands and validates the active event tape;
+  `tui/src/session-state.ts` purely reduces identity, correlation, sequence, accumulation, and
+  completion invariants; `tui/src/app.tsx` preserves the draft while background events render.
+- `tests/test_runtime.py` covers observable checkpoints, exact ordering and accumulation,
+  whitespace and overlap failures, shutdown draining, and a second process session.
+- `tui/test/session-state.test.ts`, `tui/test/app.test.tsx`, and
+  `tui/test/runtime-supervisor.test.ts` cover reducer, rendering, submission, and fail-closed paths.
+- `tui/test/runtime-boundary.test.ts` exercises the real Node-to-`uv`-to-Python process boundary,
+  observes all three intermediate accumulations, completes two distinct sessions with sequences
+  `1..6`, verifies the target workspace remains unchanged, and reaps both processes.
+- The [verified lesson](../docs/lessons/cah-005-mocked-streaming-session.md) and its linked visual
+  companion record the implemented path, trade-offs, failure scenarios, and evidence.

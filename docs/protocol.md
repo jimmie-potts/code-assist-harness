@@ -1,8 +1,8 @@
 # Process Protocol
 
-> Status: CAH-004 implements protocol version 1 schemas, bounded readers, ordered Python event
-> writes, shared fixtures, and the `runtime.initialize` / `runtime.ready` readiness handshake.
-> Session streaming remains CAH-005 work.
+> Status: CAH-005 implements protocol version 1 readiness plus one deterministic mocked session.
+> Commands and events cross the real Node-to-`uv`-to-Python boundary; cancellation remains CAH-006
+> work.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -127,12 +127,12 @@ controls. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the
 
 All objects are strict: undeclared envelope or payload fields are invalid.
 
-| Command | Payload | Implemented behavior in CAH-004 |
+| Command | Payload | Implemented behavior through CAH-005 |
 | --- | --- | --- |
 | `runtime.initialize` | `workspace: non-empty string` | Compare with the supervised canonical workspace and emit readiness or a terminal initialization error. |
-| `session.start` | `task: non-empty string` | Validate, then report `command_unavailable` until CAH-005. |
+| `session.start` | `task: non-empty string` | After readiness, start the deterministic mock when trimmed task text is non-empty and no session is active. |
 | `session.cancel` | `session_id: ses_…` | Validate, then report `command_unavailable` until CAH-006. |
-| `runtime.shutdown` | Empty object | End the runtime cleanly, even before initialization. |
+| `runtime.shutdown` | Empty object | End cleanly; an accepted mock session is drained before exit. |
 
 | Event | Scope | Payload |
 | --- | --- | --- |
@@ -166,35 +166,50 @@ is deferred until contract drift becomes a demonstrated maintenance problem.
 An unsupported version is rejected before interpreting its version-specific fields. Malformed JSON,
 numeric overflow, an invalid envelope, an unknown command type, or an invalid known payload becomes
 a safe `runtime.error`; the Python reader continues at the next physical line. The error never
-copies the raw line or validator internals. The TUI uses a stricter authority boundary: an unknown
-or malformed event becomes a visible, classified protocol failure, closes command input, and never
-enters trusted state.
+copies the raw line or validator internals. After readiness, Python also returns recoverable
+`invalid_task` for a whitespace-only task and recoverable `session_active` for an overlapping task,
+both correlated to the rejected command. The Ink submission path blocks these two cases locally,
+so those runtime errors protect direct or future protocol callers rather than define normal UI
+flow. The TUI uses a stricter authority boundary: an unknown, malformed, or semantically invalid
+event becomes a visible, classified protocol failure, closes command input, and never enters
+trusted state.
 
 ## Lifecycle and cancellation
 
-The target MVP supports one workspace per runtime process and at most one active session. After
-CAH-004 and CAH-005, a normal mocked session is expected to follow this order:
+The target MVP supports one workspace per runtime process and at most one active session. CAH-005
+implements this exact mocked session tape:
 
 ```text
 Ink                      Python
  | runtime.initialize ---> |
  | <----- runtime.ready     |
  | session.start ---------> |
- | <----- session.started   |
- | <----- assistant.delta   |
- | <----- assistant.delta   |
- | <----- assistant.completed
- | <----- session.completed |
+ | <----- session.started   | sequence 1
+ | <----- assistant.delta   | sequence 2: "Mock response: "
+ | <----- assistant.delta   | sequence 3: "the task crossed the process boundary "
+ | <----- assistant.delta   | sequence 4: "and streamed back successfully."
+ | <----- assistant.completed | sequence 5: exact accumulated text
+ | <----- session.completed | sequence 6
 ```
 
-Cancellation is a request, not an immediate state rewrite in the TUI. Ink sends `session.cancel`,
-Python cancels active work, and Python emits exactly one terminal session event. If completion won
-the race before cancellation was processed, the existing completion remains authoritative.
-Repeated cancellation must be harmless.
+`session.started` has sequence 1. Every event in the six-event tape carries the `session.start`
+command ID as `correlation_id` and the same Python-owned session ID. The complete text is exactly
+`Mock response: the task crossed the process boundary and streamed back successfully.` A later
+accepted task receives a distinct session ID, while its independent session-local sequence starts
+again at 1 and ends at 6. The three deltas are separated by short scheduling checkpoints so the TUI
+can render the accumulations before `assistant.completed` arrives.
 
-`runtime.shutdown` is implemented for the idle CAH-004 runtime. Python stops reading commands and
-exits after prior ordered writes have completed. Later session work will define how active work is
-cancelled or flushed. EOF remains a cleanup fallback, and an unrequested child exit remains visible.
+CAH-006 must treat cancellation as a request, not an immediate state rewrite in the TUI. Ink will
+send `session.cancel`, Python will cancel active work, and Python will emit exactly one terminal
+session event. If completion wins the race before cancellation is processed, the existing
+completion remains authoritative. Repeated cancellation must be harmless.
+
+`session.cancel` is still unavailable and Ctrl+C still exits the application rather than cancelling
+only a task. `runtime.shutdown` and command-pipe EOF stop new command processing but drain an already
+accepted CAH-005 mock through `session.completed` before Python exits. This bounded mock-specific
+choice prevents a successful accepted session from disappearing during normal application cleanup;
+CAH-006 will define how user cancellation interrupts active work and wins or loses a race with
+completion. An unrequested child exit remains visible.
 
 ## Compatibility rules
 
@@ -216,6 +231,16 @@ This story is complete: both boundaries validate the envelope and selected paylo
 pass in both languages, the ordered writer owns sequence assignment, unsupported versions and bad
 lines fail safely, and the real supervisor reaches `running` only through correlated readiness.
 
+### CAH-005 — Stream a mocked session end to end
+
+> As a user, I want to submit a task and see a mocked agent response arrive incrementally so that
+> the complete UI/runtime boundary is proven.
+
+This story is complete: the TUI submits and projects a deterministic session, Python emits the
+documented six-event tape, and the real-boundary test observes three intermediate accumulations and
+two consecutive sessions. Beyond the supervised Node-to-Python runtime child, the mock performs no
+provider, network, workspace, tool, agent subprocess, or transcript operation.
+
 ### CAH-006 — Cancel an active session
 
 > As a user, I want to cancel a running session so that I retain control over long or incorrect
@@ -229,5 +254,6 @@ and exactly one terminal event is emitted.
 > As a learner, I want the implemented walking skeleton traced across both processes so that I can
 > connect the protocol design to observable behavior.
 
-This page describes the target contract. CAH-009 must update it with the exact implemented sequence
-and link that sequence to the real Node–Python integration test.
+This page records the exact CAH-005 mock tape. CAH-009 must extend the walking-skeleton guide through
+CAH-006 cancellation and trace the sequence to concrete functions and tests as a learner-focused
+execution narrative.
