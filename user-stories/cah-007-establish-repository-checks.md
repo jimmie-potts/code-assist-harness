@@ -53,18 +53,20 @@
 - The first stage uses `uv sync --check --locked --offline` to reject a missing or drifted Python
   environment, every Python tool invocation uses `--no-sync`, and ambient uv project/environment/
   interpreter and isolated-run selectors are removed before validation.
-- A Node compatibility stage reuses the TUI's `>=22.13.0 <23` assertion before the labeled TUI npm
-  stages.
-- The clean gate passed 150 Python tests across core, fixture, and repository-policy stages, plus 159
+- A Node compatibility stage reuses the TUI's `>=22.13.0 <23` assertion before the npm-backed
+  repository policy and all labeled TUI npm stages.
+- The clean gate passed 159 Python tests across core, fixture, and repository-policy stages, plus 159
   TypeScript tests across core, fixture, and real Node-Python integration stages.
 - Script tests prove exact order, offline settings, network-guard preloads, uv-selector and credential
   removal, Node compatibility, labels, and nonzero propagation. Four restored transient probes
   stopped at Python tests, Python fixtures, TUI tests, and the real integration layer respectively.
-- Repository policy tests validate local Markdown targets and anchors, the complete TUI package-lock
-  graph, the top-level Python/Node runtime guards, and the current M0 Python/TypeScript source-network
-  denylist, including synthetic failure cases. The lock test rejects a missing transitive entry
-  without reading or changing `node_modules`. The real Python child retains the runtime supervisor's
-  ambient-selector sanitization and is covered by source policy rather than `PYTHONPATH` injection.
+- Repository policy tests use Git-aware discovery to validate tracked and new nonignored Markdown
+  targets and anchors, the complete TUI package-lock graph, the top-level Python/Node runtime guards,
+  and the current M0 Python/TypeScript source-network denylist, including bare and global `fetch`
+  spellings and synthetic failure cases. Ignored local environments remain outside the scan. The
+  lock test rejects a missing transitive entry without reading or changing `node_modules`. The real
+  Python child retains the runtime supervisor's ambient-selector sanitization and is covered by
+  source policy rather than `PYTHONPATH` injection.
 - [The Linux workflow](../.github/workflows/check.yml) pins its Ubuntu image, Python/Node version
   files, uv release, and action commits; installs through `uv sync --locked` and `npm ci`; and invokes
   the same repository script. Remote workflow status remains pull-request evidence rather than a

@@ -91,11 +91,11 @@ def test_check_runs_every_layer_without_credentials_or_runtime_selectors(tmp_pat
             "--ignore=tests/test_repository_policy.py|unset|true"
         ),
         ("uv|run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py|unset|true"),
+        "node|--import=tsx src/check-node-version.ts|unset|true",
         (
             "uv|run --offline --frozen --no-sync pytest tests/test_check_script.py "
             "tests/test_repository_policy.py|unset|true"
         ),
-        "node|--import=tsx src/check-node-version.ts|unset|true",
         "npm|--offline --prefix tui run typecheck|unset|true",
         "npm|--offline --prefix tui run lint|unset|true",
         (
@@ -154,11 +154,17 @@ def test_check_stops_at_first_failed_layer(tmp_path: Path) -> None:
         (
             "uv run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py",
             "Protocol fixtures: Python",
-            "Repository policy",
+            "Node runtime compatibility",
         ),
         (
             "node --import=tsx src/check-node-version.ts",
             "Node runtime compatibility",
+            "Repository policy",
+        ),
+        (
+            "uv run --offline --frozen --no-sync pytest tests/test_check_script.py "
+            "tests/test_repository_policy.py",
+            "Repository policy",
             "TUI typecheck",
         ),
         (

@@ -217,7 +217,8 @@ paths even when a Linux-looking symlink hides them, then rejects unsupported Nod
 npm and its TypeScript loader run. It preserves the caller's canonical launch directory and
 forwards `--workspace` as separate arguments. `cli.ts` repeats Node validation, resolves one
 workspace, and creates `PythonRuntimeSupervisor`. The canonical repository gate invokes
-`check-node-version.ts` before its first TUI npm stage, reusing the same supported-range assertion.
+`check-node-version.ts` before every npm-backed policy or TUI stage, reusing the same supported-range
+assertion.
 `run-application.tsx` projects supervisor state into `app.tsx`, routes `SIGHUP` and `SIGTERM` through
 Ink unmount, and guarantees cleanup after every exit path. `protocol.ts` validates hand-maintained
 Zod wire shapes and `protocol-stream.ts` owns byte framing. `session-state.ts` is the pure

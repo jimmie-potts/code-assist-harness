@@ -20,7 +20,6 @@ PRODUCTION_SOURCE_ROOTS = (
 )
 PYTHON_NETWORK_GUARD = REPOSITORY_ROOT / "tests" / "network_guard"
 NODE_NETWORK_GUARD = REPOSITORY_ROOT / "scripts" / "deny-network.mjs"
-IGNORED_DIRECTORY_NAMES = frozenset({".git", ".venv", "coverage", "dist", "node_modules"})
 
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)|!\[[^]]*]\(([^)]+)\)")
 MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
@@ -62,8 +61,13 @@ TYPESCRIPT_NETWORK_MODULES = frozenset(
 TYPESCRIPT_IMPORT = re.compile(
     r"(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)['\"]([^'\"]+)['\"]"
 )
+TYPESCRIPT_FETCH_CALL = re.compile(
+    r"(?<![\w.$])(?:fetch|(?:globalThis|window)\s*"
+    r"(?:\??\.\s*fetch|(?:\?\.\s*)?\[\s*(?:\"fetch\"|'fetch'|`fetch`)\s*\]))"
+    r"\s*(?:\?\.\s*)?\("
+)
 TYPESCRIPT_NETWORK_CALLS = (
-    ("fetch", re.compile(r"(?<![\w.])fetch\s*\(")),
+    ("fetch", TYPESCRIPT_FETCH_CALL),
     ("WebSocket", re.compile(r"\bnew\s+WebSocket\s*\(")),
     ("network request", re.compile(r"\b(?:http|https)\.(?:get|request)\s*\(")),
     ("network connection", re.compile(r"\b(?:net|tls)\.(?:connect|createConnection)\s*\(")),
@@ -82,17 +86,62 @@ def _is_denied_typescript_module(module: str) -> bool:
     )
 
 
-def _files_under(roots: Iterable[Path], suffixes: set[str]) -> list[Path]:
-    files: list[Path] = []
+def _repository_files(
+    roots: Iterable[Path],
+    suffixes: set[str],
+    *,
+    repository_root: Path = REPOSITORY_ROOT,
+) -> list[Path]:
+    """Return tracked and nonignored untracked policy inputs from Git.
+
+    Git remains the source of truth for ignored local environments and generated artifacts, while
+    ``--others`` keeps new, unstaged source and documentation inside the pre-commit gate.
+    """
+    git = shutil.which("git")
+    if git is None:
+        raise AssertionError("git is required to discover repository policy inputs")
+
+    resolved_repository_root = repository_root.resolve()
+    pathspecs: list[str] = []
     for root in roots:
-        candidates = (root,) if root.is_file() else root.rglob("*")
-        files.extend(
-            path
-            for path in candidates
-            if path.is_file()
-            and path.suffix in suffixes
-            and not IGNORED_DIRECTORY_NAMES.intersection(path.parts)
-        )
+        try:
+            relative_root = root.resolve().relative_to(resolved_repository_root)
+        except ValueError as error:
+            raise AssertionError(f"policy root escapes the repository: {root}") from error
+        pathspecs.append(relative_root.as_posix())
+
+    result = subprocess.run(
+        [
+            git,
+            "-C",
+            str(resolved_repository_root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            *pathspecs,
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        diagnostic = os.fsdecode(result.stderr).strip() or "unknown Git error"
+        raise AssertionError(f"git could not discover repository policy inputs: {diagnostic}")
+
+    files: list[Path] = []
+    for encoded_path in result.stdout.split(b"\0"):
+        if not encoded_path:
+            continue
+        path = resolved_repository_root / os.fsdecode(encoded_path)
+        if not path.is_file() or path.suffix not in suffixes:
+            continue
+        try:
+            path.resolve().relative_to(resolved_repository_root)
+        except ValueError as error:
+            raise AssertionError(f"policy input escapes the repository: {path}") from error
+        files.append(path)
     return sorted(files)
 
 
@@ -239,7 +288,7 @@ def _run_npm_lock_graph_check(directory: Path) -> subprocess.CompletedProcess[st
 def test_internal_markdown_links_resolve() -> None:
     broken = {
         str(path.relative_to(REPOSITORY_ROOT)): failures
-        for path in _files_under(MARKDOWN_ROOTS, {".md"})
+        for path in _repository_files(MARKDOWN_ROOTS, {".md"})
         if (failures := _broken_markdown_links(path))
     }
 
@@ -248,7 +297,7 @@ def test_internal_markdown_links_resolve() -> None:
 
 def test_m0_has_static_and_runtime_network_guards() -> None:
     violations: list[str] = []
-    for path in _files_under(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):
+    for path in _repository_files(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):
         if path.suffix == ".py":
             violations.extend(_python_network_violations(path))
         else:
@@ -375,6 +424,10 @@ def test_python_network_policy_rejects_synthetic_source(
     [
         ("import 'node:https';\n", "network module 'node:https'"),
         ("const response = await fetch('https://example.test');\n", "fetch"),
+        ("const response = await globalThis.fetch('https://example.test');\n", "fetch"),
+        ("const response = await window.fetch('https://example.test');\n", "fetch"),
+        ("const response = await globalThis?.fetch?.('https://example.test');\n", "fetch"),
+        ("const response = await window?.['fetch']?.('https://example.test');\n", "fetch"),
     ],
 )
 def test_typescript_network_policy_rejects_synthetic_source(
@@ -384,6 +437,50 @@ def test_typescript_network_policy_rejects_synthetic_source(
     path.write_text(source, encoding="utf-8")
 
     assert expected in _typescript_network_violations(path)[0]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const response = await client.fetch('/local-cache');\n",
+        "const response = await client?.fetch?.('/local-cache');\n",
+        "const response = await client['fetch']('/local-cache');\n",
+    ],
+)
+def test_typescript_network_policy_does_not_treat_arbitrary_members_as_global_fetch(
+    tmp_path: Path, source: str
+) -> None:
+    path = tmp_path / "local-client.ts"
+    path.write_text(source, encoding="utf-8")
+
+    assert _typescript_network_violations(path) == []
+
+
+def test_repository_file_discovery_respects_git_ignore_rules(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run([git, "init", "--quiet"], cwd=tmp_path, check=True)
+
+    (tmp_path / ".gitignore").write_text("venv/\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("[New guide](docs/new.md)\n", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "new.md").write_text("# New guide\n", encoding="utf-8")
+    ignored = tmp_path / "venv"
+    ignored.mkdir()
+    (ignored / "bad.md").write_text("[Broken](missing.md)\n", encoding="utf-8")
+    subprocess.run([git, "add", ".gitignore", "README.md"], cwd=tmp_path, check=True)
+
+    discovered = _repository_files((tmp_path,), {".md"}, repository_root=tmp_path)
+    relative_paths = {path.relative_to(tmp_path).as_posix() for path in discovered}
+    broken = {
+        path.relative_to(tmp_path).as_posix(): failures
+        for path in discovered
+        if (failures := _broken_markdown_links(path, repository_root=tmp_path))
+    }
+
+    assert relative_paths == {"README.md", "docs/new.md"}
+    assert broken == {}
 
 
 def test_markdown_policy_rejects_synthetic_missing_target_and_heading(tmp_path: Path) -> None:

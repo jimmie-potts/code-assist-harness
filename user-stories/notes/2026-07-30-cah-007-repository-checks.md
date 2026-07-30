@@ -19,8 +19,8 @@ The script labels and runs these 12 stages in order:
 3. Python format.
 4. Python tests.
 5. Protocol fixtures: Python.
-6. Repository policy: check script, documentation links, locks, and network.
-7. Node runtime compatibility.
+6. Node runtime compatibility.
+7. Repository policy: check script, documentation links, locks, and network.
 8. TUI typecheck.
 9. TUI lint.
 10. TUI tests.
@@ -49,20 +49,23 @@ prepared-interpreter contract; the current child is instead covered by the produ
 
 `tests/test_repository_policy.py` adds defense in depth:
 
-- local Markdown file targets and Markdown heading anchors must resolve;
+- Git-tracked and new nonignored Markdown file targets and heading anchors must resolve, while local
+  environments, caches, and other ignored artifacts remain outside the scan;
 - the package-lock v3 root package must match `tui/package.json` name, version, direct dependency,
   development dependency, and engine metadata;
 - `npm ls --package-lock-only --all` must accept the complete graph from temporary manifest copies,
   while a synthetic missing transitive entry must be rejected without creating `node_modules`; and
 - current M0 production files under `src/code_assist_harness` and `tui/src` may not import or call a
-  reviewed denylist of Python and TypeScript network capabilities; and
+  reviewed denylist of Python and TypeScript network capabilities, including bare and static
+  `globalThis`/`window` fetch forms; and
 - focused subprocess probes prove the Python and Node guards reject TCP, UDP, fetch, and
   external-DNS attempts with the expected diagnostic; Node returns a deterministic loopback result
   for local/IP-literal lookups required by Vite without calling the system resolver.
 
-Synthetic missing-link, Python-network, and TypeScript-network cases prove those detectors can fail.
-External URL availability is intentionally not checked. The process guards and source denylist do not
-constrain separately launched native clients and are not described as an operating-system sandbox.
+Synthetic missing-link, ignored-directory, Python-network, and TypeScript-network cases prove the
+detectors' positive and negative boundaries. External URL availability is intentionally not checked.
+The process guards and source denylist do not constrain separately launched native clients and are
+not described as an operating-system sandbox.
 
 An attempted repository-local `npm ci --ignore-scripts --dry-run --offline` lock stage was discarded.
 npm removed the prepared `node_modules` tree before simulating installation, so it violated the
@@ -74,12 +77,13 @@ that side effect, and CI's actual `npm ci` remains the clean lockfile-install pr
 `tests/test_check_script.py` uses temporary `uv`, `node`, and `npm` stubs to verify exact command
 order, the non-mutating uv environment/no-sync flags, removal of six inherited uv selectors,
 offline settings, process-guard preloads, removal of an inherited `OPENAI_API_KEY`, layer labels, the
-success footer, and fail-fast propagation. Seven tests cover the script contract, including exit-code
-23 injections for Python, Python fixtures, Node compatibility, TUI tests, and Node-Python
-integration.
+success footer, and fail-fast propagation. Eight tests cover the script contract, including exit-code
+23 injections for Python, Python fixtures, Node compatibility, repository policy, TUI tests, and
+Node-Python integration.
 
-The Node stage runs before the labeled TUI npm stages from the `tui/` directory and reuses
-`assertSupportedNodeVersion(process.versions.node)`. This keeps the canonical local gate on the same
+The Node stage runs before every npm-backed check from the `tui/` directory and reuses
+`assertSupportedNodeVersion(process.versions.node)`. That includes repository policy's complete
+lock-graph validation as well as the labeled TUI stages. This keeps the canonical local gate on the same
 `>=22.13.0 <23` contract as the interactive bootstrap without duplicating semver logic or requiring
 the exact pinned patch release.
 
@@ -114,13 +118,13 @@ The final clean `./scripts/check` completed all 12 stages and printed
 - Python lockfile/environment check, Ruff lint/docstrings, and Ruff formatting passed.
 - Python core tests: 105 passed.
 - Python protocol fixtures: 30 passed.
-- Check-script and repository-policy tests: 15 passed.
+- Check-script and repository-policy tests: 24 passed.
 - Python and Node TCP, UDP, fetch, and external-DNS probes were rejected by the preloaded guards.
 - TUI type checking and ESLint passed.
 - TUI core tests: 126 passed.
 - TypeScript protocol fixtures: 29 passed.
 - Real Node-Python boundary tests: 4 passed.
-- Total Python evidence: 150 tests; total TUI evidence: 159 tests.
+- Total Python evidence: 159 tests; total TUI evidence: 159 tests.
 - `git diff --check` passed.
 
 The 10-slide visual companion uses a playful quality-machine/conductor motif, a rail-line stage map,

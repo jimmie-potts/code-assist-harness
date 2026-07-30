@@ -66,8 +66,8 @@ scripts/check
   -> uv run --offline --frozen --no-sync ruff format --check .
   -> Python tests
   -> Protocol fixtures: Python
-  -> Repository policy: check script, Markdown links/anchors, TUI lock, and network
   -> Node runtime compatibility: reuse the TUI's supported-range assertion
+  -> Repository policy: check script, Markdown links/anchors, TUI lock, and network
   -> npm --offline --prefix tui run typecheck
   -> npm --offline --prefix tui run lint
   -> TUI tests
@@ -81,9 +81,9 @@ Linux CI -> locked installs -> invoke the same ./scripts/check
 | --- | --- | --- |
 | Required check list | [`scripts/check`](../../scripts/check) | One reviewed, fail-fast source defines the gate from any working directory. |
 | Python-specific behavior | Python tools/config | Focused commands remain independently runnable. |
-| TUI-specific behavior | Shared Node-range assertion and npm scripts | Unsupported runtimes fail before TUI npm checks; type, lint, and test failures retain attribution. |
+| TUI-specific behavior | Shared Node-range assertion and npm scripts | Unsupported runtimes fail before every npm-backed policy or TUI check; type, lint, and test failures retain attribution. |
 | Cross-language behavior | Shared fixtures and integration tests | Both implementations and the real process seam run. |
-| Documentation and offline policy | [`test_repository_policy.py`](../../tests/test_repository_policy.py) | Local links/anchors resolve, the complete TUI lock graph is valid, top-level process guards reject common network APIs, and current production source contains no denylisted network capability. |
+| Documentation and offline policy | [`test_repository_policy.py`](../../tests/test_repository_policy.py) | Git-tracked and nonignored new files have resolvable local links/anchors, the complete TUI lock graph is valid, top-level process guards reject common network APIs, and current production source contains no denylisted network capability. |
 | Script contract | [`test_check_script.py`](../../tests/test_check_script.py) | Exact order, environment-check and no-sync flags, uv-selector and credential removal, Node compatibility, network-guard preloads, labels, and fail-fast propagation remain tested. |
 | CI environment | [Linux workflow](../../.github/workflows/check.yml) | Pinned Ubuntu, Python, Node, uv, action SHAs, and lockfile installs precede the canonical gate. |
 
@@ -93,12 +93,12 @@ missing or drifted prepared environment without changing it, and every later `uv
 `--no-sync`. Before those commands, the script clears `UV_PROJECT`, `UV_PROJECT_ENVIRONMENT`,
 `UV_PYTHON`, `UV_WORKING_DIR`, `UV_NO_PROJECT`, and `UV_ISOLATED`; otherwise an inherited setting
 could redirect or disable project-based validation or replace `.venv` with an ephemeral environment.
-Before the first labeled TUI npm stage, a tiny TypeScript entry point reuses
-`assertSupportedNodeVersion` so the local gate enforces the same `>=22.13.0 <23` contract as the TUI.
-The first nonzero command stops the run and remains the process exit status. CI adds checkout, pinned
-runtime setup, npm caching, `uv sync --locked`, and `npm ci`, but it does not copy the gate's command
-list into YAML. The TUI currently configures independent type-check, lint, and test scripts; it has no
-separate formatter or format-check stage.
+Before the repository policy's npm lock-graph check or any TUI npm stage, a tiny TypeScript entry
+point reuses `assertSupportedNodeVersion` so the local gate enforces the same `>=22.13.0 <23`
+contract as the TUI. The first nonzero command stops the run and remains the process exit status. CI
+adds checkout, pinned runtime setup, npm caching, `uv sync --locked`, and `npm ci`, but it does not
+copy the gate's command list into YAML. The TUI currently configures independent type-check, lint,
+and test scripts; it has no separate formatter or format-check stage.
 
 Default validation excludes live-provider smoke tests. The script removes common OpenAI, Azure
 OpenAI, Anthropic, and Google credentials, sets uv and npm offline modes, and uses the prepared local
@@ -121,17 +121,25 @@ performs the authoritative clean `npm ci` install. An attempted repository-local
 check was rejected because it removed the prepared `node_modules` tree even in dry-run mode; a
 validation command must not mutate the environment it is about to test.
 
+Policy input discovery delegates to `git ls-files --cached --others --exclude-standard`. Tracked
+files and new nonignored files are checked before commit, while `.venv`, `venv`, caches, build output,
+and future ignored artifacts do not create false documentation or source-policy failures. The
+TypeScript denylist recognizes bare `fetch` plus static `globalThis` and `window` forms, including
+optional chaining and static computed properties. It deliberately does not treat every arbitrary
+object method named `fetch` as the browser global; aliases and dynamic property construction remain
+outside this lightweight regex policy.
+
 ## Practical walkthrough
 
 1. Prepare dependencies once with `uv sync --dev` and `npm --prefix tui ci`.
 2. Run `./scripts/check` from the repository root or invoke its absolute path from another directory.
 3. Observe the Python lock/environment, lint/docstring, format, and test headings in order.
-4. Observe the separate Python unit, Python protocol-fixture, and repository-policy headings. The
-   policy stage owns script behavior, Markdown links/anchors, the complete package-lock graph, and
-   current production-source network checks.
-5. Observe Node runtime compatibility before the TUI type-check, lint, unit-test,
-   TypeScript-fixture, and Node-Python-integration headings. The final stage launches the genuine
-   `uv`/Python child.
+4. Observe Node runtime compatibility immediately after the Python protocol fixtures. It fails before
+   repository policy can invoke npm and before any TUI npm stage.
+5. Observe the repository-policy, TUI type-check, lint, unit-test, TypeScript-fixture, and
+   Node-Python-integration headings. Policy owns script behavior, Git-aware Markdown links/anchors,
+   the complete package-lock graph, and current production-source network checks. The final stage
+   launches the genuine `uv`/Python child.
 6. Run focused pytest, Ruff, or npm scripts while iterating, then return to the canonical gate before
    declaring the unit complete.
 7. Inspect `.github/workflows/check.yml`: installation belongs in CI setup, and the final step calls
@@ -139,9 +147,9 @@ validation command must not mutate the environment it is about to test.
 8. Study `test_check_script.py`, which substitutes bounded `uv`, `node`, and `npm` stubs to prove
    exact order, offline settings, uv-selector and credential removal, runtime compatibility,
    network-guard preloads, labels, success, and first-failure propagation.
-9. Study the synthetic missing-transitive, broken-link, and Python/TypeScript network-policy cases.
-   Each proves its detector can fail, rather than merely observing that today's source happens to
-   pass.
+9. Study the synthetic missing-transitive, broken-link, ignored-directory, and Python/TypeScript
+   network-policy cases, including global `fetch` spellings. They prove both positive detection and
+   important exclusions instead of merely observing that today's source happens to pass.
 10. Render and inspect the linked visual lesson and run its overflow test before accepting it as unit
     evidence.
 
@@ -154,8 +162,9 @@ validation command must not mutate the environment it is about to test.
 | Pipeline masks an exit code | A later command makes the run green | `set -eu` and script contract | Injected stub failure returns its nonzero status and later commands never run. |
 | Ambient uv selectors redirect the gate | Python checks inspect another project, environment, or interpreter | Script environment boundary | Poisoned selectors are absent from every stubbed stage. |
 | Lockfile or prepared Python environment drifts | Local and CI checks could exercise different dependencies | Install and policy layers | uv performs a non-mutating environment check; npm validates the complete lock graph; CI uses `npm ci`. |
-| Unsupported Node runs local TUI checks | Local green uses a runtime that CI and users reject | Node compatibility stage | The shared range assertion runs before npm; its injected failure prevents TUI type checking. |
-| Network capability enters M0 source or top-level tests | Default checks could reach an external service | Process guards and repository policy | Python/Node TCP, UDP, fetch, and external-DNS probes fail; synthetic sources prove denylisted APIs are rejected. |
+| Unsupported Node reaches an npm-backed check | Local green uses a runtime that CI and users reject | Node compatibility stage | The shared range assertion runs before repository policy and TUI npm; its injected failure prevents either from starting. |
+| Network capability enters M0 source or top-level tests | Default checks could reach an external service | Process guards and repository policy | Python/Node TCP, UDP, fetch, and external-DNS probes fail; synthetic bare and global `fetch` sources prove denylisted APIs are rejected. |
+| An ignored environment contains Markdown or source files | Local artifacts create failures that CI cannot reproduce | Git-aware policy discovery | A temporary Git repository proves tracked and new nonignored docs are included while `venv/` is excluded. |
 | A local Markdown link or anchor breaks | Learning material becomes unnavigable | Repository policy | Synthetic missing target/heading test proves link checking fails. |
 | Integration is mocked in one language | Contract seam is untested | TUI test tier | Final stage launches the genuine uv/Python child. |
 | Visual deck clips or misstates evidence | The learning companion becomes misleading | Presentation QA | Every slide is rendered, inspected, and overflow-tested. |
@@ -225,6 +234,8 @@ central management.
 - Cross-language fixtures and a real process test are first-class checks.
 - Offline flags, removed credentials, process guards, and a source denylist are complementary
   controls, not an operating-system sandbox.
+- Git ignore rules are the policy scan boundary; tracked and new nonignored work still enters the
+  gate.
 - A useful check does not mutate the prepared environment or leave bytecode sidecars in source paths.
 - More CI infrastructure is warranted by measured scale, governance, or duration—not by default.
 

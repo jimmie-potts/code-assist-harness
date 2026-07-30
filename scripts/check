@@ -55,13 +55,13 @@ run_check \
     'Protocol fixtures: Python' \
     uv run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py
 run_check \
-    'Repository policy: check script, documentation links, locks, and network' \
-    uv run --offline --frozen --no-sync pytest \
-    tests/test_check_script.py tests/test_repository_policy.py
-run_check \
     'Node runtime compatibility' \
     sh -c 'cd "$1" && exec node --import=tsx src/check-node-version.ts' \
     sh "$repository_root/tui"
+run_check \
+    'Repository policy: check script, documentation links, locks, and network' \
+    uv run --offline --frozen --no-sync pytest \
+    tests/test_check_script.py tests/test_repository_policy.py
 run_check 'TUI typecheck' npm --offline --prefix tui run typecheck
 run_check 'TUI lint' npm --offline --prefix tui run lint
 run_check \

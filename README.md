@@ -117,11 +117,12 @@ Run the canonical non-live gate from any directory:
 From the repository root, the usual form is `./scripts/check`. Setup and validation are deliberately
 separate: the gate does not install or update dependencies. It checks the Python lock and prepared
 environment, runs Python lint/docstring rules and formatting, then labels Python unit tests, Python
-protocol fixtures, and repository policy separately. It then checks the active Node runtime against
-the TUI's supported range before labeling TUI type checking, lint, unit tests, TypeScript protocol
-fixtures, and the real Node-to-`uv`-to-Python integration as distinct stages. Repository policy
-covers local documentation links and anchors, the complete TUI lock graph, and the M0
-production-source network guard.
+protocol fixtures, and Node compatibility separately. The Node stage runs before repository policy,
+whose complete-lock-graph check invokes npm, and before every TUI npm stage. The gate then labels
+repository policy, TUI type checking, lint, unit tests, TypeScript protocol fixtures, and the real
+Node-to-`uv`-to-Python integration as distinct stages. Repository policy uses Git's tracked and
+nonignored untracked files to check local documentation links and anchors, the complete TUI lock
+graph, and the M0 production-source network guard.
 
 The script verifies the Python environment with `uv sync --check --locked --offline`, runs Python
 tools with `uv run --offline --frozen --no-sync`, and uses npm offline mode. It sets `TMPDIR=/tmp`,

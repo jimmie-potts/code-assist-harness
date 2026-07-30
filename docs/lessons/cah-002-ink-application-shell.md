@@ -68,7 +68,7 @@ supported `>=22.13.0 <23` range and the pinned 22.22.1 release.
 loader. [`cli.ts`](../../tui/src/cli.ts) therefore imports `run-application.tsx` only after the
 runtime is accepted, so an unsupported runtime cannot enter Ink's render path. The canonical
 repository gate uses [`check-node-version.ts`](../../tui/src/check-node-version.ts) to run the same
-assertion before its first TUI npm stage.
+assertion before every npm-backed repository-policy or TUI stage.
 
 ### The launcher owns pre-Node WSL failures
 
