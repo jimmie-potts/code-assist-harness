@@ -68,17 +68,18 @@ def test_check_runs_every_layer_offline_without_provider_credentials(tmp_path: P
 
     assert result.returncode == 0
     assert ["|".join(fields[:4]) for fields in command_fields] == [
-        "uv|lock --check --offline|unset|true",
-        "uv|run --offline --frozen ruff check .|unset|true",
-        "uv|run --offline --frozen ruff format --check .|unset|true",
+        "uv|sync --check --locked --offline|unset|true",
+        "uv|run --offline --frozen --no-sync ruff check .|unset|true",
+        "uv|run --offline --frozen --no-sync ruff format --check .|unset|true",
         (
-            "uv|run --offline --frozen pytest --ignore=tests/protocol/test_fixtures.py "
+            "uv|run --offline --frozen --no-sync pytest "
+            "--ignore=tests/protocol/test_fixtures.py "
             "--ignore=tests/test_check_script.py "
             "--ignore=tests/test_repository_policy.py|unset|true"
         ),
-        "uv|run --offline --frozen pytest tests/protocol/test_fixtures.py|unset|true",
+        ("uv|run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py|unset|true"),
         (
-            "uv|run --offline --frozen pytest tests/test_check_script.py "
+            "uv|run --offline --frozen --no-sync pytest tests/test_check_script.py "
             "tests/test_repository_policy.py|unset|true"
         ),
         "npm|--offline --prefix tui run typecheck|unset|true",
@@ -97,6 +98,7 @@ def test_check_runs_every_layer_offline_without_provider_credentials(tmp_path: P
         f'--import="{REPOSITORY_ROOT / "scripts" / "deny-network.mjs"}"'
     }
     assert {fields[6] for fields in command_fields} == {"1"}
+    assert "==> Python lockfile and environment" in result.stdout
     assert "==> Python lint and docstrings" in result.stdout
     assert "==> Node-Python integration" in result.stdout
     assert result.stdout.rstrip().endswith("All repository checks passed.")
@@ -105,14 +107,14 @@ def test_check_runs_every_layer_offline_without_provider_credentials(tmp_path: P
 def test_check_stops_at_first_failed_layer(tmp_path: Path) -> None:
     result, commands = _run_check_with_stubs(
         tmp_path,
-        fail_command="uv run --offline --frozen ruff format --check .",
+        fail_command="uv run --offline --frozen --no-sync ruff format --check .",
     )
 
     assert result.returncode == 23
     assert ["|".join(command.split("|", maxsplit=5)[:4]) for command in commands] == [
-        "uv|lock --check --offline|unset|true",
-        "uv|run --offline --frozen ruff check .|unset|true",
-        "uv|run --offline --frozen ruff format --check .|unset|true",
+        "uv|sync --check --locked --offline|unset|true",
+        "uv|run --offline --frozen --no-sync ruff check .|unset|true",
+        "uv|run --offline --frozen --no-sync ruff format --check .|unset|true",
     ]
     assert "==> Python format" in result.stdout
     assert "==> Python tests" not in result.stdout
@@ -123,13 +125,14 @@ def test_check_stops_at_first_failed_layer(tmp_path: Path) -> None:
     ("failing_command", "label", "next_label"),
     [
         (
-            "uv run --offline --frozen pytest --ignore=tests/protocol/test_fixtures.py "
+            "uv run --offline --frozen --no-sync pytest "
+            "--ignore=tests/protocol/test_fixtures.py "
             "--ignore=tests/test_check_script.py --ignore=tests/test_repository_policy.py",
             "Python tests",
             "Protocol fixtures: Python",
         ),
         (
-            "uv run --offline --frozen pytest tests/protocol/test_fixtures.py",
+            "uv run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py",
             "Protocol fixtures: Python",
             "Repository policy",
         ),

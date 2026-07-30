@@ -14,7 +14,7 @@ working directory.
 
 The script labels and runs these 11 stages in order:
 
-1. Python lockfile.
+1. Python lockfile and environment.
 2. Python lint and docstrings.
 3. Python format.
 4. Python tests.
@@ -34,9 +34,10 @@ remain available for iteration; a completed unit returns to `./scripts/check`.
 
 Dependency preparation remains separate: developers use `uv sync --dev` and `npm --prefix tui ci`,
 while CI uses `uv sync --locked` and `npm ci`. The gate consumes those installed environments. It
-sets uv and npm offline modes, uses `uv run --offline --frozen`, sets `TMPDIR=/tmp`, suppresses Python
-bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic, and Google provider credentials
-before any constituent command.
+sets uv and npm offline modes, verifies the prepared environment with
+`uv sync --check --locked --offline`, and uses `uv run --offline --frozen --no-sync`. It also sets
+`TMPDIR=/tmp`, suppresses Python bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic,
+and Google provider credentials before any constituent command.
 It also points `PYTHONPATH` at a `sitecustomize.py` socket guard and preloads the Node network guard
 through `NODE_OPTIONS`, so the top-level check processes reject common network client attempts. The
 runtime supervisor intentionally removes `PYTHONPATH` from its real Python child to preserve the
@@ -46,7 +47,9 @@ prepared-interpreter contract; the current child is instead covered by the produ
 
 - local Markdown file targets and Markdown heading anchors must resolve;
 - the package-lock v3 root package must match `tui/package.json` name, version, direct dependency,
-  development dependency, and engine metadata; and
+  development dependency, and engine metadata;
+- `npm ls --package-lock-only --all` must accept the complete graph from temporary manifest copies,
+  while a synthetic missing transitive entry must be rejected without creating `node_modules`; and
 - current M0 production files under `src/code_assist_harness` and `tui/src` may not import or call a
   reviewed denylist of Python and TypeScript network capabilities; and
 - focused subprocess probes prove the Python and Node guards reject TCP, UDP, fetch, and
@@ -57,17 +60,18 @@ Synthetic missing-link, Python-network, and TypeScript-network cases prove those
 External URL availability is intentionally not checked. The process guards and source denylist do not
 constrain separately launched native clients and are not described as an operating-system sandbox.
 
-An attempted `npm ci --ignore-scripts --dry-run --offline` lock stage was discarded. npm removed the
-prepared `node_modules` tree before simulating installation, so it violated the non-mutating gate
-contract. Metadata parity provides a local fast check, and CI's actual `npm ci` remains the clean
-lockfile-install proof.
+An attempted repository-local `npm ci --ignore-scripts --dry-run --offline` lock stage was discarded.
+npm removed the prepared `node_modules` tree before simulating installation, so it violated the
+non-mutating gate contract. The temporary-copy `npm ls` graph check provides the local proof without
+that side effect, and CI's actual `npm ci` remains the clean lockfile-install proof.
 
 ## Script and failure evidence
 
-`tests/test_check_script.py` uses temporary `uv` and `npm` stubs to verify exact command order,
-offline settings, process-guard preloads, removal of an inherited `OPENAI_API_KEY`, layer labels, the
-success footer, and fail-fast propagation. Six tests cover the script contract, including exit-code
-23 injections for Python, Python fixtures, TUI tests, and Node-Python integration.
+`tests/test_check_script.py` uses temporary `uv` and `npm` stubs to verify exact command order, the
+non-mutating uv environment/no-sync flags, offline settings, process-guard preloads, removal of an
+inherited `OPENAI_API_KEY`, layer labels, the success footer, and fail-fast propagation. Six tests
+cover the script contract, including exit-code 23 injections for Python, Python fixtures, TUI tests,
+and Node-Python integration.
 
 The story's separate transient probes also ran through the genuine gate and were restored after each
 result:
@@ -97,7 +101,7 @@ pull-request run and is not inferred from local execution.
 The final clean `./scripts/check` completed all 11 stages and printed
 `All repository checks passed.` Evidence was:
 
-- Python lockfile, Ruff lint/docstrings, and Ruff formatting passed.
+- Python lockfile/environment check, Ruff lint/docstrings, and Ruff formatting passed.
 - Python core tests: 105 passed.
 - Python protocol fixtures: 30 passed.
 - Check-script and repository-policy tests: 14 passed.

@@ -61,9 +61,9 @@ its output identifies Python, TUI, protocol, documentation, or integration as th
 scripts/check
   -> resolve repository root; unset provider credentials; force offline modes
   -> preload guards into top-level Python and Node checks
-  -> uv lock --check --offline
-  -> uv run --offline --frozen ruff check .
-  -> uv run --offline --frozen ruff format --check .
+  -> uv sync --check --locked --offline
+  -> uv run --offline --frozen --no-sync ruff check .
+  -> uv run --offline --frozen --no-sync ruff format --check .
   -> Python tests
   -> Protocol fixtures: Python
   -> Repository policy: check script, Markdown links/anchors, TUI lock, and network
@@ -82,16 +82,17 @@ Linux CI -> locked installs -> invoke the same ./scripts/check
 | Python-specific behavior | Python tools/config | Focused commands remain independently runnable. |
 | TUI-specific behavior | npm scripts | Type, lint, and test failures retain attribution. |
 | Cross-language behavior | Shared fixtures and integration tests | Both implementations and the real process seam run. |
-| Documentation and offline policy | [`test_repository_policy.py`](../../tests/test_repository_policy.py) | Local links/anchors resolve, top-level process guards reject common network APIs, and current production source contains no denylisted network capability. |
-| Script contract | [`test_check_script.py`](../../tests/test_check_script.py) | Exact order, offline flags, network-guard preloads, credential removal, labels, and fail-fast propagation remain tested. |
+| Documentation and offline policy | [`test_repository_policy.py`](../../tests/test_repository_policy.py) | Local links/anchors resolve, the complete TUI lock graph is valid, top-level process guards reject common network APIs, and current production source contains no denylisted network capability. |
+| Script contract | [`test_check_script.py`](../../tests/test_check_script.py) | Exact order, environment-check and no-sync flags, network-guard preloads, credential removal, labels, and fail-fast propagation remain tested. |
 | CI environment | [Linux workflow](../../.github/workflows/check.yml) | Pinned Ubuntu, Python, Node, uv, action SHAs, and lockfile installs precede the canonical gate. |
 
 The script uses `set -eu`, changes to its own repository root, suppresses Python bytecode writes,
-labels each layer, and executes checks sequentially. The first nonzero command stops the run and
-remains the process exit status. CI adds
-checkout, pinned runtime setup, npm caching, `uv sync --locked`, and `npm ci`, but it does not copy the
-gate's command list into YAML. The TUI currently configures independent type-check, lint, and test
-scripts; it has no separate formatter or format-check stage.
+labels each layer, and executes checks sequentially. `uv sync --check --locked --offline` rejects a
+missing or drifted prepared environment without changing it, and every later `uv run` adds
+`--no-sync`. The first nonzero command stops the run and remains the process exit status. CI adds
+checkout, pinned runtime setup, npm caching, `uv sync --locked`, and `npm ci`, but it does not copy
+the gate's command list into YAML. The TUI currently configures independent type-check, lint, and
+test scripts; it has no separate formatter or format-check stage.
 
 Default validation excludes live-provider smoke tests. The script removes common OpenAI, Azure
 OpenAI, Anthropic, and Google credentials, sets uv and npm offline modes, and uses the prepared local
@@ -106,19 +107,22 @@ that rejects known Python/TypeScript network imports and calls in M0 production 
 are deliberately narrow: they are useful defense in depth, not an operating-system sandbox for
 separately launched native executables.
 
-The Python lock is checked directly by uv. The TUI package/lock metadata is compared by repository
-policy tests, while CI performs the authoritative clean `npm ci` install. An attempted local
-`npm ci --dry-run` lock check was rejected because npm removed the prepared `node_modules` tree even
-in dry-run mode; a validation command must not mutate the environment it is about to test.
+The Python lock and prepared environment are checked directly by uv. Repository policy compares the
+TUI's root package metadata and runs `npm ls --package-lock-only --all` against temporary manifest
+copies, proving that the complete dependency graph is internally valid without consulting or
+changing `node_modules`. A synthetic missing transitive entry proves the check can fail. CI still
+performs the authoritative clean `npm ci` install. An attempted repository-local `npm ci --dry-run`
+check was rejected because it removed the prepared `node_modules` tree even in dry-run mode; a
+validation command must not mutate the environment it is about to test.
 
 ## Practical walkthrough
 
 1. Prepare dependencies once with `uv sync --dev` and `npm --prefix tui ci`.
 2. Run `./scripts/check` from the repository root or invoke its absolute path from another directory.
-3. Observe the Python lock, lint/docstring, format, and test headings in order.
+3. Observe the Python lock/environment, lint/docstring, format, and test headings in order.
 4. Observe the separate Python unit, Python protocol-fixture, and repository-policy headings. The
-   policy stage owns script behavior, Markdown links/anchors, package-lock metadata, and current
-   production-source network checks.
+   policy stage owns script behavior, Markdown links/anchors, the complete package-lock graph, and
+   current production-source network checks.
 5. Observe the TUI type-check, lint, unit-test, TypeScript-fixture, and Node-Python-integration
    headings. The final stage launches the genuine `uv`/Python child.
 6. Run focused pytest, Ruff, or npm scripts while iterating, then return to the canonical gate before
@@ -128,8 +132,9 @@ in dry-run mode; a validation command must not mutate the environment it is abou
 8. Study `test_check_script.py`, which substitutes bounded `uv` and `npm` stubs to prove exact order,
    offline settings, network-guard preloads, credential removal, labels, success, and first-failure
    propagation.
-9. Study the synthetic broken-link and Python/TypeScript network-policy cases. Each proves the policy
-   detector can fail, rather than merely observing that today's source happens to pass.
+9. Study the synthetic missing-transitive, broken-link, and Python/TypeScript network-policy cases.
+   Each proves its detector can fail, rather than merely observing that today's source happens to
+   pass.
 10. Render and inspect the linked visual lesson and run its overflow test before accepting it as unit
     evidence.
 
@@ -140,7 +145,7 @@ in dry-run mode; a validation command must not mutate the environment it is abou
 | TUI tests are omitted | Python is green while UI regresses | Script contract | Stub test compares the exact command sequence, including `npm test`. |
 | CI duplicates commands | Local passes, CI uses stale flags | Workflow design | Workflow's final step calls `./scripts/check`. |
 | Pipeline masks an exit code | A later command makes the run green | `set -eu` and script contract | Injected stub failure returns its nonzero status and later commands never run. |
-| Lockfile drifts | CI resolves different dependencies | Install and policy layers | uv checks its lock; npm metadata parity is tested; CI uses `npm ci`. |
+| Lockfile or prepared Python environment drifts | Local and CI checks could exercise different dependencies | Install and policy layers | uv performs a non-mutating environment check; npm validates the complete lock graph; CI uses `npm ci`. |
 | Network capability enters M0 source or top-level tests | Default checks could reach an external service | Process guards and repository policy | Python/Node TCP, UDP, fetch, and external-DNS probes fail; synthetic sources prove denylisted APIs are rejected. |
 | A local Markdown link or anchor breaks | Learning material becomes unnavigable | Repository policy | Synthetic missing target/heading test proves link checking fails. |
 | Integration is mocked in one language | Contract seam is untested | TUI test tier | Final stage launches the genuine uv/Python child. |

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+TUI_ROOT = REPOSITORY_ROOT / "tui"
 MARKDOWN_ROOTS = (REPOSITORY_ROOT,)
 PRODUCTION_SOURCE_ROOTS = (
     REPOSITORY_ROOT / "src" / "code_assist_harness",
@@ -210,6 +211,31 @@ def _typescript_network_violations(path: Path) -> list[str]:
     return violations
 
 
+def _run_npm_lock_graph_check(directory: Path) -> subprocess.CompletedProcess[str]:
+    """Validate an npm package-lock graph without installing or updating dependencies."""
+    npm = shutil.which("npm")
+    if npm is None:
+        raise AssertionError("npm is required to validate tui/package-lock.json")
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "NPM_CONFIG_AUDIT": "false",
+            "NPM_CONFIG_FUND": "false",
+            "NPM_CONFIG_OFFLINE": "true",
+            "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+        }
+    )
+    return subprocess.run(
+        [npm, "ls", "--all", "--package-lock-only", "--offline", "--ignore-scripts", "--json"],
+        capture_output=True,
+        check=False,
+        cwd=directory,
+        env=environment,
+        text=True,
+    )
+
+
 def test_internal_markdown_links_resolve() -> None:
     broken = {
         str(path.relative_to(REPOSITORY_ROOT)): failures
@@ -286,14 +312,43 @@ def test_m0_has_static_and_runtime_network_guards() -> None:
     assert local_lookup.stdout.strip() == "127.0.0.1"
 
 
-def test_tui_lockfile_matches_direct_package_contract() -> None:
-    package = json.loads((REPOSITORY_ROOT / "tui" / "package.json").read_text(encoding="utf-8"))
-    lock = json.loads((REPOSITORY_ROOT / "tui" / "package-lock.json").read_text(encoding="utf-8"))
+def test_tui_lockfile_matches_package_contract_and_complete_graph(tmp_path: Path) -> None:
+    package_path = TUI_ROOT / "package.json"
+    lock_path = TUI_ROOT / "package-lock.json"
+    package = json.loads(package_path.read_text(encoding="utf-8"))
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
     locked_package = lock["packages"][""]
 
     assert lock["lockfileVersion"] == 3
     for field in ("name", "version", "dependencies", "devDependencies", "engines"):
         assert locked_package[field] == package[field]
+
+    valid_directory = tmp_path / "valid"
+    valid_directory.mkdir()
+    shutil.copy2(package_path, valid_directory / package_path.name)
+    shutil.copy2(lock_path, valid_directory / lock_path.name)
+    result = _run_npm_lock_graph_check(valid_directory)
+
+    assert result.returncode == 0, result.stderr
+    assert (valid_directory / package_path.name).read_bytes() == package_path.read_bytes()
+    assert (valid_directory / lock_path.name).read_bytes() == lock_path.read_bytes()
+    assert not (valid_directory / "node_modules").exists()
+
+    broken_directory = tmp_path / "missing-transitive"
+    broken_directory.mkdir()
+    shutil.copy2(package_path, broken_directory / package_path.name)
+    broken_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    removed = broken_lock["packages"].pop("node_modules/@alcalzone/ansi-tokenize")
+    assert removed["version"] == "0.3.0"
+    (broken_directory / lock_path.name).write_text(
+        f"{json.dumps(broken_lock, indent=2)}\n", encoding="utf-8"
+    )
+
+    broken_result = _run_npm_lock_graph_check(broken_directory)
+    broken_report = json.loads(broken_result.stdout)
+    assert broken_result.returncode != 0
+    assert any("@alcalzone/ansi-tokenize" in problem for problem in broken_report["problems"])
+    assert not (broken_directory / "node_modules").exists()
 
 
 @pytest.mark.parametrize(

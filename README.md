@@ -115,21 +115,22 @@ Run the canonical non-live gate from any directory:
 ```
 
 From the repository root, the usual form is `./scripts/check`. Setup and validation are deliberately
-separate: the gate does not install or update dependencies. It checks both lockfiles, runs Python
-lint/docstring rules and formatting, then labels Python unit tests, Python protocol fixtures, and
-repository policy separately. It next labels TUI type checking, lint, unit tests, TypeScript protocol
-fixtures, and the real Node-to-`uv`-to-Python integration as distinct stages. Repository policy covers
-local documentation links and anchors, package/lock metadata, and the M0 production-source network
-guard.
+separate: the gate does not install or update dependencies. It checks the Python lock and prepared
+environment, runs Python lint/docstring rules and formatting, then labels Python unit tests, Python
+protocol fixtures, and repository policy separately. It next labels TUI type checking, lint, unit
+tests, TypeScript protocol fixtures, and the real Node-to-`uv`-to-Python integration as distinct
+stages. Repository policy covers local documentation links and anchors, the complete TUI lock graph,
+and the M0 production-source network guard.
 
-The script uses `uv --offline --frozen` and npm offline mode, sets `TMPDIR=/tmp`, suppresses Python
-bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic, and Google provider credentials
-from its child environment. The
-top-level Python and Node checks preload guards that reject common socket/network client entry
-points. The runtime supervisor deliberately strips ambient Python selectors, including `PYTHONPATH`,
-before its real Python child; that current child remains covered by source-policy tests that reject
-known network modules and request APIs in production paths. These are intentionally small M0
-controls, not a general-purpose network sandbox for arbitrary native executables.
+The script verifies the Python environment with `uv sync --check --locked --offline`, runs Python
+tools with `uv run --offline --frozen --no-sync`, and uses npm offline mode. It sets `TMPDIR=/tmp`,
+suppresses Python bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic, and Google
+provider credentials from its child environment. The top-level Python and Node checks preload guards
+that reject common socket/network client entry points. The runtime supervisor deliberately strips
+ambient Python selectors, including `PYTHONPATH`, before its real Python child; that current child
+remains covered by source-policy tests that reject known network modules and request APIs in
+production paths. These are intentionally small M0 controls, not a general-purpose network sandbox
+for arbitrary native executables.
 
 `uv sync --dev` is required before launch. The runtime supervisor verifies that `.venv/pyvenv.cfg`
 and an executable `.venv/bin/python` already exist before it invokes `uv`; an unprepared checkout
@@ -231,9 +232,9 @@ local packages and do not require a model, credentials, or network access.
 
 `uv build` remains available as a focused packaging check, but the M0 gate does not build or publish
 an artifact. If `./scripts/check` fails, its `==>` heading identifies the first failing layer. A
-lockfile failure means setup metadata drifted; documentation, TUI-lock, or network-policy failures
-belong to the repository-policy stage; and the final `Node-Python integration` stage owns the real
-process boundary.
+Python lock/environment failure means setup is missing or drifted; documentation, TUI lock-graph, or
+network-policy failures belong to the repository-policy stage; and the final `Node-Python
+integration` stage owns the real process boundary.
 
 The `Repository checks` GitHub Actions workflow runs on pull requests and pushes to `main` using
 Ubuntu 24.04, Python from `.python-version`, Node from `.node-version`, and uv 0.11.28. It installs

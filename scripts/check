@@ -14,7 +14,8 @@ unset AZURE_OPENAI_API_KEY AZURE_OPENAI_AD_TOKEN AZURE_OPENAI_ENDPOINT
 unset ANTHROPIC_API_KEY GOOGLE_API_KEY GEMINI_API_KEY
 
 # Keep dependency resolution offline. Setup is a separate, lockfile-driven step (`uv sync --dev`
-# and `npm --prefix tui ci`); this command consumes that prepared environment.
+# and `npm --prefix tui ci`); the first stage verifies that prepared Python environment without
+# changing it, and every later Python tool invocation explicitly disables synchronization.
 export UV_OFFLINE=1
 export NPM_CONFIG_OFFLINE=true
 export TMPDIR=/tmp
@@ -37,21 +38,22 @@ run_check() {
     "$@"
 }
 
-run_check 'Python lockfile' uv lock --check --offline
-run_check 'Python lint and docstrings' uv run --offline --frozen ruff check .
-run_check 'Python format' uv run --offline --frozen ruff format --check .
+run_check 'Python lockfile and environment' uv sync --check --locked --offline
+run_check 'Python lint and docstrings' uv run --offline --frozen --no-sync ruff check .
+run_check 'Python format' uv run --offline --frozen --no-sync ruff format --check .
 run_check \
     'Python tests' \
-    uv run --offline --frozen pytest \
+    uv run --offline --frozen --no-sync pytest \
     --ignore=tests/protocol/test_fixtures.py \
     --ignore=tests/test_check_script.py \
     --ignore=tests/test_repository_policy.py
 run_check \
     'Protocol fixtures: Python' \
-    uv run --offline --frozen pytest tests/protocol/test_fixtures.py
+    uv run --offline --frozen --no-sync pytest tests/protocol/test_fixtures.py
 run_check \
     'Repository policy: check script, documentation links, locks, and network' \
-    uv run --offline --frozen pytest tests/test_check_script.py tests/test_repository_policy.py
+    uv run --offline --frozen --no-sync pytest \
+    tests/test_check_script.py tests/test_repository_policy.py
 run_check 'TUI typecheck' npm --offline --prefix tui run typecheck
 run_check 'TUI lint' npm --offline --prefix tui run lint
 run_check \
