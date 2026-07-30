@@ -26,9 +26,10 @@ before exact assistant and session completion, and a second session runs with a 
 reset. CAH-006 adds Escape-driven cooperative cancellation: the TUI sends one addressable request,
 Python serializes cancellation against assistant and terminal writes, and exactly one cancelled or
 completed outcome wins. CAH-009 records that implemented path in a fixture-backed
-[walking-skeleton guide](walking-skeleton.md), without adding runtime behavior. Provider, tool,
-workspace-read, policy, transcript, and agent behavior remain target architecture; CAH-007 is the
-next dependency-ready unit.
+[walking-skeleton guide](walking-skeleton.md), without adding runtime behavior. CAH-007 adds the
+offline `./scripts/check` gate and lockfile-driven Linux workflow that run the complete M0 evidence
+through one developer/CI entry point. Provider, tool, workspace-read, policy, transcript, and agent
+behavior remain target architecture; CAH-010 is the next dependency-ready unit.
 
 ## Product boundary
 
@@ -359,7 +360,18 @@ Tests mirror source responsibilities and use fake providers, temporary workspace
 fixtures, and fake approval decisions. Behavioral work includes a happy path and a meaningful
 failure path. Python checks include pytest, Ruff linting, formatting, and public-docstring rules.
 TypeScript checks include type checking, linting, and tests; visible Ink changes include a render
-or reducer test. No default test or evaluation makes a network request.
+or reducer test. `./scripts/check` is the canonical fail-fast gate for those layers, protocol
+fixtures, local documentation links and anchors, top-level Python/Node process-network guards,
+current M0 source-network policy, and the genuine Node-to-Python boundary. The real Python child
+retains its runtime-selector sanitization and therefore relies on the source policy rather than the
+ambient `PYTHONPATH` guard. CI installs from both committed locks and invokes the same command. No
+default test or evaluation makes a network request; the guards are defense in depth rather than an
+operating-system sandbox for native subprocesses.
+
+CAH-007 and each unit completed going forward link a visual lesson under `docs/lessons/assets/`.
+This prospective rule does not change the evidence contract of units that were already Done. The
+PowerPoint is rendered and inspected slide by slide and overflow-tested; visual flair remains
+subordinate to accurate architecture, status, evidence, legibility, and caveats.
 
 ## Delivery sequence
 

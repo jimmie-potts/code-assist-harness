@@ -19,10 +19,12 @@ Pydantic and Zod validate strict, hand-maintained wire contracts on both sides; 
 contain malformed lines; shared fixtures prove cross-language parity; and real
 Node-to-`uv`-to-Python tests prove streaming, cancellation, repeated sessions, and process cleanup.
 The application does **not** yet run an agent loop, read the workspace, or integrate with OpenAI.
-CAH-009 now documents that first end-to-end execution in the
+CAH-009 documents that first end-to-end execution in the
 [walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
 are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
-is the next dependency-ready unit and will establish one repository-wide non-live check command.
+adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
+evidence. CAH-010 is the next dependency-ready unit; provider, workspace-read, tool, policy,
+transcript, and agent behavior remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -97,7 +99,7 @@ An OpenAI API key is not needed for the walking skeleton or default tests. A fut
 adapter will read `OPENAI_API_KEY` from the environment; credentials and `.env` files must never be
 committed.
 
-## Current setup and checks
+## Setup, launch, and checks
 
 Install the Python scaffold and the locked TUI dependencies:
 
@@ -105,6 +107,29 @@ Install the Python scaffold and the locked TUI dependencies:
 uv sync --dev
 npm --prefix tui ci
 ```
+
+Run the canonical non-live gate from any directory:
+
+```bash
+/path/to/code-assist-harness/scripts/check
+```
+
+From the repository root, the usual form is `./scripts/check`. Setup and validation are deliberately
+separate: the gate does not install or update dependencies. It checks both lockfiles, runs Python
+lint/docstring rules and formatting, then labels Python unit tests, Python protocol fixtures, and
+repository policy separately. It next labels TUI type checking, lint, unit tests, TypeScript protocol
+fixtures, and the real Node-to-`uv`-to-Python integration as distinct stages. Repository policy covers
+local documentation links and anchors, package/lock metadata, and the M0 production-source network
+guard.
+
+The script uses `uv --offline --frozen` and npm offline mode, sets `TMPDIR=/tmp`, suppresses Python
+bytecode writes, and removes common OpenAI, Azure OpenAI, Anthropic, and Google provider credentials
+from its child environment. The
+top-level Python and Node checks preload guards that reject common socket/network client entry
+points. The runtime supervisor deliberately strips ambient Python selectors, including `PYTHONPATH`,
+before its real Python child; that current child remains covered by source-policy tests that reject
+known network modules and request APIs in production paths. These are intentionally small M0
+controls, not a general-purpose network sandbox for arbitrary native executables.
 
 `uv sync --dev` is required before launch. The runtime supervisor verifies that `.venv/pyvenv.cfg`
 and an executable `.venv/bin/python` already exist before it invokes `uv`; an unprepared checkout
@@ -177,13 +202,12 @@ Startup troubleshooting:
   malformed, mismatched, and timed-out readiness messages never enter trusted TUI state; the
   supervisor closes command input and reaps the child during normal cleanup.
 
-Run the current Python checks and build:
+Run focused Python checks while iterating:
 
 ```bash
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-uv build
 ```
 
 Run the TUI checks individually or together:
@@ -205,8 +229,16 @@ The TUI start and test scripts set `TMPDIR=/tmp`. This avoids a WSL environment 
 when inherited `TEMP` and `TMP` values named a missing Windows directory. The checks use installed
 local packages and do not require a model, credentials, or network access.
 
-CAH-007 will add one repository-wide command covering Python, TypeScript, protocol-contract, and
-integration checks without making network requests.
+`uv build` remains available as a focused packaging check, but the M0 gate does not build or publish
+an artifact. If `./scripts/check` fails, its `==>` heading identifies the first failing layer. A
+lockfile failure means setup metadata drifted; documentation, TUI-lock, or network-policy failures
+belong to the repository-policy stage; and the final `Node-Python integration` stage owns the real
+process boundary.
+
+The `Repository checks` GitHub Actions workflow runs on pull requests and pushes to `main` using
+Ubuntu 24.04, Python from `.python-version`, Node from `.node-version`, and uv 0.11.28. It installs
+with `uv sync --locked` and `npm ci`, then invokes the same `./scripts/check` command rather than
+duplicating its check list in workflow YAML.
 
 ## Current and planned project layout
 
@@ -215,6 +247,7 @@ src/code_assist_harness/  Current runtime and Pydantic protocol boundary; future
 tests/                    Current Python tests mirroring source modules
 tui/                      Current supervised Ink app, Zod protocol boundary, metadata, and tests
 scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
+scripts/check             Canonical offline repository validation gate
 protocol/                 Current reviewed cross-language NDJSON and walking-skeleton fixtures
 evals/                    Planned deterministic scenario fixtures
 docs/                     Architecture and learning documentation
@@ -239,6 +272,8 @@ planned and are introduced only by the story that needs them.
 - [Safety model](docs/safety-model.md)
 - [Evaluation](docs/evaluation.md)
 - [Unit lessons](docs/lessons/README.md)
+- [CAH-007 repository-check lesson](docs/lessons/cah-007-repository-checks.md)
+- [CAH-007 visual lesson](docs/lessons/assets/cah-007-repository-checks.pptx)
 - [User-story backlog](user-stories/README.md)
 
 Documentation is part of the product. Public Python APIs use Google-style docstrings, meaningful

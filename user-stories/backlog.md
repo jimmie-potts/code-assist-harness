@@ -30,7 +30,9 @@ validated event while preserving correlation and session-local order. CAH-006 ma
 cancellable: Escape sends one addressable request, Python cooperatively selects either cancellation
 or prior completion, and the TUI waits for the authoritative terminal event. CAH-009 turns that
 verified walking skeleton into a fixture-backed learner guide without changing production behavior.
-CAH-007 is the next dependency-ready unit and will establish one repository-wide non-live check.
+CAH-007 closes M0 with one offline `./scripts/check` gate and lockfile-driven Linux workflow for every
+current Python, TypeScript, protocol, policy, documentation, and real-boundary layer. CAH-010 is the
+next dependency-ready unit and begins the reusable M1 session-state model.
 
 ## Epic backlog
 
@@ -49,7 +51,7 @@ introduced.
 - Stream a deterministic mocked session and support clean cancellation.
 - Establish one repository-wide, non-live validation workflow.
 
-Implementation-ready stories: CAH-001 through CAH-009.
+All implementation-ready M0 stories, CAH-001 through CAH-009, are complete.
 
 ### E1 - Session, state, and event model
 

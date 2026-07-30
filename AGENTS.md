@@ -19,12 +19,13 @@ Python application code belongs in `src/code_assist_harness/`. Keep modules focu
 intentional package APIs from `__init__.py`. Python tests live in `tests/` and mirror the source area
 they cover.
 
-The planned TypeScript application belongs in `tui/`, with source in `tui/src/` and tests in
+The TypeScript application lives in `tui/`, with source in `tui/src/` and tests in
 `tui/test/`. Shared cross-language fixtures belong in `protocol/fixtures/`; do not make either
 language's generated output the unreviewed source of truth during the first implementation.
 Evaluation scenarios belong in `evals/`. Architecture guidance belongs in `docs/`, accepted
 decisions in `docs/adr/`, unit learning companions in `docs/lessons/`, and dependency-ordered
-delivery work in `user-stories/`.
+delivery work in `user-stories/`. Visual lessons for CAH-007 and all newly completed units going
+forward belong in `docs/lessons/assets/` as linked PowerPoint files.
 
 Do not add empty planned directories. Introduce a path with the story that first uses it. Project
 metadata, Python dependencies, and tool settings are defined in `pyproject.toml`; commit `uv.lock`
@@ -42,9 +43,12 @@ The current Python scaffold supports:
 - `uv run ruff format --check .` to verify formatting; use `uv run ruff format .` to apply it.
 - `uv build` to create ignored distributions under `dist/`.
 
-When `tui/` is added, expose npm scripts for type checking, linting, and tests. CAH-007 must provide
-one documented repository-wide command that runs all non-live Python, TypeScript, protocol, and
-integration checks. Default checks must not require OpenAI credentials or network access.
+The canonical repository-wide gate is `./scripts/check`. It runs the locked Python and TUI checks,
+including both protocol implementations, the real process boundary, documentation policy, top-level
+Python/Node process guards, and network-source policy for the sanitized Python child. It uses
+installed dependencies without making a live-provider or other network request. Keep the focused
+Python commands above and the TUI's independent type-check, lint, and test scripts available for
+local iteration; focused checks do not replace `./scripts/check` before a unit is marked complete.
 
 ## Python Style and Documentation
 
@@ -122,6 +126,14 @@ Every implementation-ready story, including documentation-only work, must keep i
 consistent with the story status and delivered evidence. The additional behavioral checks below
 apply when the story changes executable behavior.
 
+CAH-007 and every unit completed going forward include a linked visual lesson deck under
+`docs/lessons/assets/`, named for the story ID and topic. This prospective rule does not retroactively
+change the evidence contract of units that were already Done. Render the PowerPoint slide by slide,
+inspect every rendered image, and run the presentation overflow test before treating the deck as
+evidence. Use visual storytelling, small moments of tasteful fun, and memorable flair where they
+improve learning, but never let a joke, metaphor, or decorative choice weaken technical accuracy,
+status honesty, legibility, or caveats.
+
 A behavioral story is complete only when:
 
 1. Its happy path and a meaningful failure path are tested.
@@ -145,7 +157,8 @@ Follow `docs/lessons/lesson-template.md`. Each lesson includes status metadata, 
 learning objectives, why the unit matters, key concepts, architecture and invariants, a practical
 walkthrough, failure scenarios, a production expansion, a direct local-versus-production
 comparison, trade-offs and graduation signals, exercises, key takeaways, a local glossary, and
-further reading.
+further reading. CAH-007 and lessons completed going forward link a visual PPTX companion and record
+the rendered-slide and overflow validation evidence in the story note.
 
 Production-tool examples are illustrative rather than approved dependencies. Include three to five
 representative tools with official references, describe the capability being compared, and discuss

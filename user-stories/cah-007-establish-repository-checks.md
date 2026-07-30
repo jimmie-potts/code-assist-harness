@@ -1,9 +1,10 @@
 # CAH-007 - Establish repository-wide checks
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-009
 - **Lesson:** [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md)
+- **Visual companion:** [Repository-wide checks](../docs/lessons/assets/cah-007-repository-checks.pptx)
 
 ## User story
 
@@ -44,10 +45,32 @@
 - Intentionally fail one Python, TypeScript, fixture, and integration assertion in separate temporary
   local changes to verify failures propagate; discard those changes before completion.
 
+## Delivered evidence
+
+- `./scripts/check` runs 11 fail-fast labeled stages from any working directory with uv/npm offline,
+  provider credentials removed, top-level Python/Node process-network guards preloaded, and the
+  prepared dependency environments left unchanged.
+- The clean gate passed 149 Python tests across core, fixture, and repository-policy stages, plus 159
+  TypeScript tests across core, fixture, and real Node-Python integration stages.
+- Script tests prove exact order, offline settings, network-guard preloads, credential removal,
+  labels, and nonzero propagation. Four restored transient probes stopped at Python tests, Python
+  fixtures, TUI tests, and the real integration layer respectively.
+- Repository policy tests validate local Markdown targets and anchors, TUI package/lock metadata,
+  the top-level Python/Node runtime guards, and the current M0 Python/TypeScript source-network
+  denylist, including synthetic failure cases. The real Python child retains the runtime supervisor's
+  ambient-selector sanitization and is covered by source policy rather than `PYTHONPATH` injection.
+- [The Linux workflow](../.github/workflows/check.yml) pins its Ubuntu image, Python/Node version
+  files, uv release, and action commits; installs through `uv sync --locked` and `npm ci`; and invokes
+  the same repository script. Remote workflow status remains pull-request evidence rather than a
+  local completion claim.
+- The linked 10-slide visual companion was rendered and inspected slide by slide and passed the
+  presentation overflow test with no overflow detected.
+
 ## Documentation impact
 
-Update README development and CI guidance, `AGENTS.md` validation expectations, and the definition
-of done. Document how to run focused versus full checks and why live-provider tests are excluded.
+README development and CI guidance, `AGENTS.md` validation and visual-lesson expectations, the
+definition of done, architecture/evaluation guidance, the lesson, and the backlog now describe the
+implemented gate. Focused checks remain documented, while live-provider tests remain excluded.
 
 ## Out of scope
 
