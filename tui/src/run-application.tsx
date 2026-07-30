@@ -62,11 +62,13 @@ export async function runApplication(
     const taskSubmission = (task: string): void => {
       supervisor.submitTask(task);
     };
+    const sessionCancellation = (): boolean => supervisor.cancelSession();
     const application = renderApplication(
       <App
         runtimeState={runtimeState}
         sessionState={sessionState}
         onSubmitTask={taskSubmission}
+        onCancelSession={sessionCancellation}
       />,
       {exitOnCtrlC: true},
     );
@@ -76,6 +78,7 @@ export async function runApplication(
           runtimeState={runtimeState}
           sessionState={sessionState}
           onSubmitTask={taskSubmission}
+          onCancelSession={sessionCancellation}
         />,
       );
     };

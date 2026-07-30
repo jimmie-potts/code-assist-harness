@@ -213,6 +213,123 @@ def test_mock_session_runner_assigns_a_new_id_and_sequence_for_a_second_session(
     assert {event.correlation_id for event in second} == {"cmd_second"}
 
 
+def test_mock_session_cancels_before_the_first_delta_and_repeats_idempotently() -> None:
+    async def scenario() -> tuple[list[bytes], str, str]:
+        lines: list[bytes] = []
+        checkpoint_reached = asyncio.Event()
+        blocked_checkpoint = asyncio.Event()
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def checkpoint(_index: int, _delta: str) -> None:
+            checkpoint_reached.set()
+            await blocked_checkpoint.wait()
+
+        session = MockSessionRunner(OrderedEventWriter(sink), checkpoint).create(
+            _session_start("cmd_session")
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(checkpoint_reached.wait(), timeout=1)
+        first_result = await session.request_cancellation("cmd_cancel")
+        repeated_result = await session.request_cancellation("cmd_cancel")
+        await asyncio.wait_for(running, timeout=1)
+        return lines, first_result, repeated_result
+
+    lines, first_result, repeated_result = asyncio.run(scenario())
+    events = _event_lines(b"".join(lines))
+
+    assert first_result == "accepted"
+    assert repeated_result == "already_requested"
+    assert [event.type for event in events] == ["session.started", "session.cancelled"]
+    assert [event.sequence for event in events] == [1, 2]
+    assert [event.correlation_id for event in events] == ["cmd_session", "cmd_cancel"]
+
+
+def test_mock_session_cancels_between_deltas_without_later_assistant_output() -> None:
+    async def scenario() -> list[bytes]:
+        lines: list[bytes] = []
+        reached: asyncio.Queue[int] = asyncio.Queue()
+        releases = [asyncio.Event() for _delta in MOCK_RESPONSE_DELTAS]
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def checkpoint(index: int, _delta: str) -> None:
+            await reached.put(index)
+            await releases[index - 1].wait()
+
+        session = MockSessionRunner(OrderedEventWriter(sink), checkpoint).create(
+            _session_start("cmd_session")
+        )
+        running = asyncio.create_task(session.run())
+        assert await asyncio.wait_for(reached.get(), timeout=1) == 1
+        releases[0].set()
+        assert await asyncio.wait_for(reached.get(), timeout=1) == 2
+        assert await session.request_cancellation("cmd_cancel") == "accepted"
+        await asyncio.wait_for(running, timeout=1)
+        return lines
+
+    events = _event_lines(b"".join(asyncio.run(scenario())))
+
+    assert [event.type for event in events] == [
+        "session.started",
+        "assistant.delta",
+        "session.cancelled",
+    ]
+    assert [event.sequence for event in events] == [1, 2, 3]
+    assert [event.correlation_id for event in events] == [
+        "cmd_session",
+        "cmd_session",
+        "cmd_cancel",
+    ]
+    assert events[1].payload.text == MOCK_RESPONSE_DELTAS[0]
+
+
+def test_mock_session_completion_write_wins_a_concurrent_cancellation_race() -> None:
+    async def scenario() -> tuple[list[bytes], str, bool]:
+        lines: list[bytes] = []
+        terminal_write_started = asyncio.Event()
+        release_terminal_write = asyncio.Event()
+
+        async def sink(line: bytes) -> None:
+            if b'"type":"session.completed"' in line:
+                terminal_write_started.set()
+                await release_terminal_write.wait()
+            lines.append(line)
+
+        async def immediate_checkpoint(_index: int, _delta: str) -> None:
+            return
+
+        session = MockSessionRunner(OrderedEventWriter(sink), immediate_checkpoint).create(
+            _session_start("cmd_session")
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(terminal_write_started.wait(), timeout=1)
+        cancelling = asyncio.create_task(session.request_cancellation("cmd_cancel"))
+        await asyncio.sleep(0)
+        cancellation_waited_for_terminal_write = not cancelling.done()
+        release_terminal_write.set()
+        await asyncio.wait_for(running, timeout=1)
+        cancellation_result = await asyncio.wait_for(cancelling, timeout=1)
+        return lines, cancellation_result, cancellation_waited_for_terminal_write
+
+    lines, cancellation_result, cancellation_waited = asyncio.run(scenario())
+    events = _event_lines(b"".join(lines))
+
+    assert cancellation_waited is True
+    assert cancellation_result == "terminal"
+    assert [event.type for event in events] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert sum(event.type in {"session.completed", "session.cancelled"} for event in events) == 1
+
+
 def test_runtime_streams_one_session_then_drains_it_before_shutdown(tmp_path: Path) -> None:
     input_bytes = b"".join(
         [
@@ -341,6 +458,11 @@ def test_runtime_accepts_a_second_session_after_the_first_completes(tmp_path: Pa
         process.stdin.write(
             b"".join(
                 [
+                    _command(
+                        "session.cancel",
+                        "cmd_late_cancel",
+                        {"session_id": "ses_mock_1"},
+                    ),
                     _command("session.start", "cmd_second", {"task": "Second task"}),
                     _command("runtime.shutdown", "cmd_shutdown", {}),
                 ]
@@ -382,6 +504,108 @@ def test_runtime_accepts_a_second_session_after_the_first_completes(tmp_path: Pa
     assert [event.sequence for event in second_events] == [1, 2, 3, 4, 5, 6]
     assert {event.session_id for event in second_events} == {"ses_mock_2"}
     assert {event.correlation_id for event in second_events} == {"cmd_second"}
+
+
+def test_runtime_routes_cancellation_and_rejects_a_wrong_active_session(tmp_path: Path) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-m", "code_assist_harness.runtime", "--workspace", str(tmp_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    observed: list[Event] = []
+    try:
+        process.stdin.write(
+            b"".join(
+                [
+                    _command(
+                        "runtime.initialize",
+                        "cmd_initialize",
+                        {"workspace": str(tmp_path.resolve())},
+                    ),
+                    _command("session.start", "cmd_session", {"task": "Cancel this task"}),
+                ]
+            )
+        )
+        process.stdin.flush()
+        observed.extend([_read_process_event(process), _read_process_event(process)])
+
+        process.stdin.write(
+            b"".join(
+                [
+                    _command(
+                        "session.cancel",
+                        "cmd_wrong_cancel",
+                        {"session_id": "ses_wrong"},
+                    ),
+                    _command(
+                        "session.cancel",
+                        "cmd_cancel",
+                        {"session_id": "ses_mock_1"},
+                    ),
+                ]
+            )
+        )
+        process.stdin.flush()
+        observed.extend([_read_process_event(process), _read_process_event(process)])
+
+        process.stdin.write(
+            b"".join(
+                [
+                    _command(
+                        "session.cancel",
+                        "cmd_late_cancel",
+                        {"session_id": "ses_mock_1"},
+                    ),
+                    _command("session.start", "cmd_second", {"task": "Run after cancellation"}),
+                    _command("runtime.shutdown", "cmd_shutdown", {}),
+                ]
+            )
+        )
+        process.stdin.flush()
+        process.stdin.close()
+        process.stdin = None
+        process.wait(timeout=5)
+        remaining = _event_lines(process.stdout.read())
+        stderr = process.stderr.read()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0
+    assert stderr == b""
+    assert [event.type for event in observed] == [
+        "runtime.ready",
+        "session.started",
+        "runtime.error",
+        "session.cancelled",
+    ]
+    mismatch = observed[2]
+    assert mismatch.type == "runtime.error"
+    assert mismatch.payload.code == "session_mismatch"
+    assert mismatch.payload.recoverable is True
+    assert mismatch.correlation_id == "cmd_wrong_cancel"
+    cancelled = observed[3]
+    assert cancelled.type == "session.cancelled"
+    assert cancelled.session_id == "ses_mock_1"
+    assert cancelled.sequence == 2
+    assert cancelled.correlation_id == "cmd_cancel"
+    assert [event.type for event in remaining] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert {event.session_id for event in remaining} == {"ses_mock_2"}
+    assert {event.correlation_id for event in remaining} == {"cmd_second"}
 
 
 @pytest.mark.parametrize(
@@ -431,14 +655,14 @@ def test_runtime_contains_bad_lines_and_processes_later_valid_commands(tmp_path:
         "cmd_initialize",
         {"workspace": str(tmp_path.resolve())},
     )
-    unavailable = _command("session.cancel", "cmd_session", {"session_id": "ses_mock_1"})
+    inactive = _command("session.cancel", "cmd_session", {"session_id": "ses_mock_1"})
     shutdown = _command("runtime.shutdown", "cmd_shutdown", {})
 
     completed = _run_runtime(
         "--workspace",
         str(tmp_path),
         input_bytes=b"".join(
-            [malformed, unsupported, unknown, invalid_payload, initialize, unavailable, shutdown]
+            [malformed, unsupported, unknown, invalid_payload, initialize, inactive, shutdown]
         ),
     )
     events = _stdout_events(completed)
@@ -458,7 +682,7 @@ def test_runtime_contains_bad_lines_and_processes_later_valid_commands(tmp_path:
         "unsupported_version",
         "unknown_type",
         "invalid_payload",
-        "command_unavailable",
+        "session_not_active",
     ]
     assert events[4].correlation_id == "cmd_initialize"
     assert events[5].correlation_id == "cmd_session"

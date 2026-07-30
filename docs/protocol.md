@@ -1,8 +1,7 @@
 # Process Protocol
 
-> Status: CAH-005 implements protocol version 1 readiness plus one deterministic mocked session.
-> Commands and events cross the real Node-to-`uv`-to-Python boundary; cancellation remains CAH-006
-> work.
+> Status: CAH-006 implements protocol version 1 readiness, deterministic mocked streaming, and
+> cooperative session cancellation across the real Node-to-`uv`-to-Python boundary.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -127,11 +126,11 @@ controls. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the
 
 All objects are strict: undeclared envelope or payload fields are invalid.
 
-| Command | Payload | Implemented behavior through CAH-005 |
+| Command | Payload | Implemented behavior through CAH-006 |
 | --- | --- | --- |
 | `runtime.initialize` | `workspace: non-empty string` | Compare with the supervised canonical workspace and emit readiness or a terminal initialization error. |
 | `session.start` | `task: non-empty string` | After readiness, start the deterministic mock when trimmed task text is non-empty and no session is active. |
-| `session.cancel` | `session_id: ses_…` | Validate, then report `command_unavailable` until CAH-006. |
+| `session.cancel` | `session_id: ses_…` | Request cooperative cancellation for the matching active mock; repeated or recent-terminal requests are harmless. |
 | `runtime.shutdown` | Empty object | End cleanly; an accepted mock session is drained before exit. |
 
 | Event | Scope | Payload |
@@ -176,10 +175,17 @@ phantom session, writes no bytes, and leaves the runtime available. The TUI uses
 boundary: an unknown, malformed, or semantically invalid event becomes a visible, classified
 protocol failure, closes command input, and never enters trusted state.
 
+A cancel command for the wrong currently active session produces recoverable `session_mismatch`.
+When no session is active, a command naming neither the most recent terminal session nor an active
+session produces recoverable `session_not_active`. A repeated request for the active session and a
+late request for the most recent terminal session deliberately emit no response: they are
+idempotent no-ops, not new lifecycle facts. The TUI prevents those normal repeat and late cases
+locally by writing at most one cancellation command while a session is addressable.
+
 ## Lifecycle and cancellation
 
-The target MVP supports one workspace per runtime process and at most one active session. CAH-005
-implements this exact mocked session tape:
+The target MVP supports one workspace per runtime process and at most one active session. The
+successful mocked session tape is:
 
 ```text
 Ink                      Python
@@ -198,20 +204,41 @@ Ink                      Python
 command ID as `correlation_id` and the same Python-owned session ID. The complete text is exactly
 `Mock response: the task crossed the process boundary and streamed back successfully.` A later
 accepted task receives a distinct session ID, while its independent session-local sequence starts
-again at 1 and ends at 6. The three deltas are separated by short scheduling checkpoints so the TUI
-can render the accumulations before `assistant.completed` arrives.
+again at 1 and ends at 6. The three deltas are separated by 500 ms scheduling checkpoints so the TUI
+can render the accumulations and a user can request cancellation before completion.
 
-CAH-006 must treat cancellation as a request, not an immediate state rewrite in the TUI. Ink will
-send `session.cancel`, Python will cancel active work, and Python will emit exactly one terminal
-session event. If completion wins the race before cancellation is processed, the existing
-completion remains authoritative. Repeated cancellation must be harmless.
+Cancellation is a request, not an immediate state rewrite. Escape is enabled only after
+`session.started` has supplied the Python-owned session ID. The supervisor publishes a local
+`cancel.requested` update before writing one validated `session.cancel`; the TUI shows `cancelling`
+but waits for Python's terminal fact. Normal deltas and completion remain correlated to
+`session.start`. If cancellation wins, `session.cancelled` is instead correlated to the winning
+cancel command:
 
-`session.cancel` is still unavailable and Ctrl+C still exits the application rather than cancelling
-only a task. `runtime.shutdown` and command-pipe EOF stop new command processing but drain an already
-accepted CAH-005 mock through `session.completed` before Python exits. This bounded mock-specific
-choice prevents a successful accepted session from disappearing during normal application cleanup;
-CAH-006 will define how user cancellation interrupts active work and wins or loses a race with
-completion. An unrequested child exit remains visible.
+```text
+Ink                          Python
+ | session.start ------------> |
+ | <------- session.started    | sequence 1, correlation: start command
+ | session.cancel -----------> |
+ | <------ session.cancelled   | sequence 2, correlation: cancel command
+```
+
+If one delta was already accepted before the request, it remains in the tape and
+`session.cancelled` receives the next sequence. A delta whose write was already in flight may also
+arrive while the local TUI shows `cancelling`; the acknowledgement, rather than the keypress, marks
+when cancellation became authoritative. Once Python accepts cancellation, it prevents later
+assistant output and emits exactly one terminal event.
+
+Completion and cancellation share one serialized terminal-selection boundary in `MockSession`.
+If cancellation obtains that boundary first, the shortened tape ends in `session.cancelled`. If
+assistant completion has obtained it first, Python finishes the normal six-event tape and the
+waiting or late cancellation has no effect. The first valid terminal outcome therefore wins and a
+session never emits both `session.completed` and `session.cancelled`.
+
+Ctrl+C exits the application; it does not invoke `session.cancel`. `runtime.shutdown` and
+command-pipe EOF stop new command processing but drain an already accepted bounded mock before
+Python exits. The Node supervisor retains bounded `SIGTERM`/`SIGKILL` process-group fallbacks and
+waits for child close, so exit during work cannot leave the supervised process tree running. An
+unrequested child exit remains visible.
 
 ## Compatibility rules
 
@@ -248,14 +275,15 @@ provider, network, workspace, tool, agent subprocess, or transcript operation.
 > As a user, I want to cancel a running session so that I retain control over long or incorrect
 > operations.
 
-Complete this story when cancellation before, during, and after streaming has deterministic tests
-and exactly one terminal event is emitted.
+This story is complete: Python tests control checkpoints before and between deltas and serialize a
+cancel request against a blocked completion write; reducer, supervisor, rendering, and real-boundary
+tests cover pending cancellation, authoritative cancellation, completion winning, idempotent
+requests, and process cleanup. Exactly one Python terminal event remains authoritative.
 
 ### CAH-009 — Document the first end-to-end execution
 
 > As a learner, I want the implemented walking skeleton traced across both processes so that I can
 > connect the protocol design to observable behavior.
 
-This page records the exact CAH-005 mock tape. CAH-009 must extend the walking-skeleton guide through
-CAH-006 cancellation and trace the sequence to concrete functions and tests as a learner-focused
-execution narrative.
+This page records both the successful and cancelled mock tapes. CAH-009 must turn them into a
+learner-focused execution narrative that traces concrete functions, ownership boundaries, and tests.

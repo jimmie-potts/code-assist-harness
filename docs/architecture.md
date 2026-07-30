@@ -23,8 +23,10 @@ supervision. CAH-004 gave those pipes a strict protocol version 1 contract, cros
 bounded readers, ordered event writes, and a validated readiness handshake. CAH-005 now connects
 editable Ink input to a deterministic Python session: three delayed deltas are reduced and rendered
 before exact assistant and session completion, and a second session runs with a new ID and sequence
-reset. Cancellation, provider, tool, workspace-read, policy, transcript, and agent behavior remain
-target architecture; CAH-006 is the next dependency-ready unit.
+reset. CAH-006 adds Escape-driven cooperative cancellation: the TUI sends one addressable request,
+Python serializes cancellation against assistant and terminal writes, and exactly one cancelled or
+completed outcome wins. Provider, tool, workspace-read, policy, transcript, and agent behavior
+remain target architecture; CAH-009 is the next dependency-ready unit.
 
 ## Product boundary
 
@@ -128,17 +130,23 @@ After readiness, the implemented M0 session path is:
 
 ```text
 Ink input -> PythonRuntimeSupervisor.submitTask -> session.start NDJSON
-  -> runtime.run_runtime -> MockSessionRunner -> OrderedEventWriter
-  -> six validated session events -> supervisor event-tape validation
+  -> runtime.run_runtime -> MockSessionRunner creates MockSession -> OrderedEventWriter
+  -> completed six-event tape or shortened cancelled tape -> supervisor validation
   -> reduceSessionState -> App conversation and status rendering
+
+Escape while running -> PythonRuntimeSupervisor.cancelSession -> session.cancel NDJSON
+  -> MockSession.request_cancellation -> cooperative checkpoint wake-up
+  -> session.cancelled if cancellation wins, or session.completed if completion already won
 ```
 
 The supervisor publishes the local submission before writing the command, so even an immediate
 `session.started` cannot arrive before the projection knows its correlation ID. Python owns the
 active-session decision and authoritative event tape. The TUI also blocks whitespace and overlap
 for immediate feedback, but the runtime independently rejects them as `invalid_task` and
-`session_active`. Normal shutdown drains the bounded mock; user-requested cancellation is not yet
-implemented.
+`session_active`. After `session.started` exposes a session ID, the supervisor can publish one local
+`cancel.requested` update and send one validated `session.cancel`. That local update projects
+`cancelling`; only a terminal Python event projects `cancelled` or `completed`. Normal shutdown
+still drains the bounded mock, while user-requested cancellation wakes its current checkpoint.
 
 The implemented Node project uses npm, commits `package-lock.json`, pins Node 22.22.1, and enforces
 the Ink-compatible range `>=22.13.0 <23`. Python remains at version 3.12 and is managed with `uv`;
@@ -167,8 +175,8 @@ The implemented Python boundary is separated from later domain subsystems:
 
 ```text
 src/code_assist_harness/
-├── runtime.py          Async command loop, initialization, mock-task ownership, and shutdown
-├── mock_session.py     Fixed response, three scheduling checkpoints, and six-event lifecycle
+├── runtime.py          Command loop, active-session routing, cancellation, and shutdown
+├── mock_session.py     Fixed response, cooperative checkpoints, and terminal selection
 ├── protocol/
 │   ├── models.py       Strict Pydantic v2 wire models
 │   ├── codec.py        Two-stage parsing and safe serialization
@@ -205,9 +213,9 @@ forwards `--workspace` as separate arguments. `cli.ts` repeats Node validation, 
 workspace, and creates `PythonRuntimeSupervisor`. `run-application.tsx` projects supervisor state
 into `app.tsx`, routes `SIGHUP` and `SIGTERM` through Ink unmount, and guarantees cleanup after every
 exit path. `protocol.ts` validates hand-maintained Zod wire shapes and `protocol-stream.ts` owns byte
-framing. `session-state.ts` is the pure conversation projection for the CAH-005 event tape;
-`runtime-supervisor.ts` validates that tape before publishing updates, while `app.tsx` owns only the
-draft and visible feedback.
+framing. `session-state.ts` is the pure conversation and cancelling-state projection;
+`runtime-supervisor.ts` validates each tape, writes at most one cancellation command, and publishes
+updates, while `app.tsx` owns only the draft, Escape binding, and visible feedback.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. Schema generation is deferred until contract drift
@@ -228,25 +236,35 @@ The explicit loop performs these bounded steps:
 8. Emit exactly one completed, cancelled, or failed terminal event.
 
 At most one provider operation is active for a session. OpenAI will be the first real adapter and
-will target the Responses API, but OpenAI SDK objects remain inside that adapter. A deterministic
-fake provider drives unit tests and the first model-free vertical slice. Default validation never
-makes a live model or network request.
+will target the Responses API, but OpenAI SDK objects remain inside that adapter. CAH-020 will add a
+deterministic fake provider for loop tests; the current M0 `MockSession` is a runtime fixture rather
+than a provider. Default validation never makes a live model or network request.
 
 ## Concurrency and cancellation
 
 The Python runtime creates one `asyncio` event loop and arms its stdin file-descriptor reader for one
 bounded chunk at a time. `CommandLineReader` validates each completed line independently, while
 `OrderedEventWriter` holds one lock across sequence allocation, validation, serialization, and sink
-completion. CAH-005 runs the accepted mock in one child task so the command reader remains available
-to reject an overlapping `session.start` and receive `runtime.shutdown`. Shutdown waits for the
-fixed three-delta task to complete. Later units add provider operations, tool supervision,
-cancellation, and deadlines to the same loop. Small, bounded filesystem operations may run
-directly; blocking work moves to a worker thread when needed.
+completion. The accepted mock runs in one child task so the command reader remains available for an
+overlapping `session.start`, `session.cancel`, or `runtime.shutdown`. Shutdown waits for the bounded
+three-delta task; later units add provider operations, tool supervision, and deadlines to the same
+loop. Small, bounded filesystem operations may run directly; blocking work moves to a worker thread
+when needed.
 
-Cancellation is a lifecycle operation rather than an exception leaked to the TUI. It is checked
-before each costly operation, propagates to the active provider or tool, stops further deltas, and
-ends the session with one `session.cancelled` event. Repeated cancellation is harmless. An ordered
-writer preserves monotonic session sequence numbers even when internal tasks finish concurrently.
+CAH-006 implements mock cancellation as a lifecycle operation rather than an exception leaked to the
+TUI. Each `MockSession` owns an `asyncio.Event` and a state lock. A matching request selects
+`cancelled` while holding that lock and wakes any blocked checkpoint. Delta writes, assistant
+completion, and terminal selection use the same lock, so a request cannot become accepted in the
+middle of a write: no assistant event follows accepted cancellation. Conversely, completion marks
+its outcome before its terminal write finishes, so a waiting cancellation observes that completion
+already won and cannot add a second terminal event.
+
+The first accepted cancel command correlates `session.cancelled`; normal stream and completion
+events remain correlated to `session.start`. Repeated requests for the active session and late
+requests for its most recent terminal ID are harmless no-ops. A wrong active ID produces recoverable
+`session_mismatch`; an unrelated inactive ID produces recoverable `session_not_active`. Provider,
+tool, and subprocess cancellation remain future work. An ordered writer preserves monotonic session
+sequence numbers even when internal tasks finish concurrently.
 
 ## Protocol boundary
 
@@ -345,7 +363,7 @@ The architecture is delivered as vertical slices rather than as disconnected sub
 
 | Milestone | Slice | Observable result |
 | --- | --- | --- |
-| M0 | Mock runtime through the real Node–Python boundary | Tasks and streamed fake events cross the protocol. |
+| M0 | Mock runtime through the real Node–Python boundary | Tasks stream, cancel, and terminate authoritatively across the protocol. |
 | M1 | Explicit loop with fake and OpenAI providers | One bounded model conversation can complete or cancel. |
 | M2 | Repository context and native read tools | The agent can inspect, explain, and form grounded plans. |
 | M3 | Approval, edit, subprocess, and diff workflow | Approved changes and validation are controlled and auditable. |

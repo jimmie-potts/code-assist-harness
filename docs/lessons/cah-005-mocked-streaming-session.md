@@ -51,8 +51,9 @@ agent output.
 answers “which request caused this?” while a session sequence answers “what happened next?”
 
 **Deterministic mock:** `MOCK_RESPONSE_DELTAS` defines three fragments, and `MockSessionRunner`
-invokes an injectable checkpoint before each one. Production uses a 50 ms scheduling delay; Python
-tests replace it with events they can hold and release. This is not the M1 fake provider.
+injects a checkpoint into each `MockSession` before a fragment. The interactive path now uses a
+500 ms scheduling delay so CAH-006 cancellation is discoverable; Python tests replace it with
+events they can hold and release. This is not the M1 fake provider.
 
 **Projection:** `PythonRuntimeSupervisor` validates the active event tape, then
 `reduceSessionState` accumulates immutable visible state. Python remains the authority for session
@@ -63,7 +64,7 @@ lifecycle; React components do not decide completion.
 ```text
 App editable draft
    -> submitTask encodes session.start, publishes task.submitted, then writes the exact line
-   -> run_runtime validates task and starts one MockSessionRunner child task
+   -> run_runtime validates task and starts one MockSession child task
    -> OrderedEventWriter emits started, 3 deltas, assistant completion, session completion
    -> supervisor validates correlation/identity/sequence before publishing each update
    -> reduceSessionState accumulates; runApplication rerenders App immediately
@@ -91,10 +92,10 @@ add a broker or production telemetry stack.
 2. `PythonRuntimeSupervisor.submitTask` creates a command ID and encodes the complete
    `session.start` line before changing projection state. Once the command fits the wire contract,
    it publishes `task.submitted` before any child response can race it and writes that exact line.
-3. `run_runtime` independently strips the task for validity, rejects overlap, and starts one
-   `MockSessionRunner` child task while continuing to read commands.
-4. `MockSessionRunner` assigns `ses_mock_1`, emits `session.started` at sequence 1, then emits
-   `MOCK_RESPONSE_DELTAS` at sequences 2, 3, and 4.
+3. `run_runtime` independently strips the task for validity, rejects overlap, asks
+   `MockSessionRunner` to create one `MockSession`, and starts it while continuing to read commands.
+4. `MockSessionRunner` assigns `ses_mock_1`; that session emits `session.started` at sequence 1,
+   then emits `MOCK_RESPONSE_DELTAS` at sequences 2, 3, and 4.
 5. It emits exact `assistant.completed` at sequence 5 and one `session.completed` at sequence 6;
    every event carries the start command ID as its correlation ID.
 6. The supervisor runs each parsed event through the same reducer invariants before publishing it.
@@ -103,8 +104,9 @@ add a broker or production telemetry stack.
    three partial strings and proves a draft typed mid-stream survives those rerenders.
 8. Once complete, another task gets `ses_mock_2` and a fresh `1..6` sequence without restarting
    Node or Python.
-9. On shutdown or stdin EOF, Python waits for an accepted bounded mock to finish. CAH-006—not
-   Ctrl+C or local state—will define how active work is interrupted.
+9. On shutdown or stdin EOF, Python still waits for an accepted bounded mock to finish. CAH-006 now
+   handles user-requested interruption separately through `session.cancel` and an authoritative
+   Python terminal event; Ctrl+C remains whole-application exit.
 
 The strongest evidence observes more than the final screen. `tests/test_runtime.py` holds and
 releases each injectable checkpoint. `tui/test/runtime-boundary.test.ts` launches the genuine
@@ -191,12 +193,13 @@ operational cost. Publishing `task.submitted` before the command write was neces
 fast-child correlation race, but publication can occur only after the exact command has passed
 encoding and byte-limit validation. This ordering prevents both an early child event and a phantom
 local session caused by invalid user input. A pure reducer also gave the supervisor and renderer one
-transition contract, but CAH-005 deliberately recognizes only the successful mock tape;
-cancellation and failure terminal events must expand it later. Injectable checkpoints made Python
-timing evidence strong, while the genuine process test still uses short polling because OS process
-discovery and pipe delivery are external scheduling boundaries. Draining a fixed 150 ms mock
-simplifies shutdown, but is not suitable for an unbounded provider call; CAH-006 must replace that
-assumption with an authoritative cancellation outcome.
+transition contract. CAH-006 subsequently expanded it with `cancelling` and `cancelled` while
+preserving normal completion during the pending race; failure terminal behavior remains later work.
+Injectable checkpoints made Python timing evidence strong, while the genuine process test still uses
+short polling because OS process discovery and pipe delivery are external scheduling boundaries.
+The interactive mock now lasts up to 1.5 seconds, remains bounded for shutdown draining, and can be
+interrupted through the authoritative CAH-006 cancellation lifecycle. An unbounded provider call
+will still require propagation, deadlines, and forced-cleanup policy.
 
 A broker improves durability and horizontal decoupling but introduces delivery semantics, schema
 governance, retention, security, and failure modes that obscure the M0 lesson. Graduate when
@@ -219,7 +222,7 @@ elsewhere.
 - Correlation identifies causality, while sequence numbers establish session order.
 - A second session gets a new identity and its own sequence; history is projection state, not wire
   sequence continuation.
-- Draining the bounded mock is shutdown behavior, not cancellation; CAH-006 owns interruption.
+- Draining the bounded mock is shutdown behavior; CAH-006 now owns user-requested interruption.
 - The local pipe is the right learning boundary until durability or multi-host scale is demonstrated.
 
 ## Glossary

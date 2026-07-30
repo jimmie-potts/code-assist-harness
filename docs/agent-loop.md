@@ -1,6 +1,7 @@
 # Agent Loop
 
-> Status: proposed design. No model-backed agent loop is implemented yet.
+> Status: proposed model-loop design. CAH-006 verifies its session-cancellation and
+> exactly-one-terminal precursor with the deterministic mock; no model-backed loop exists yet.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -49,6 +50,12 @@ The single event writer is an important invariant: multiple async producers may 
 events, but only one task assigns final sequence numbers and writes protocol lines. This prevents
 interleaving and makes transcript replay deterministic.
 
+The current M0 precursor uses that same event loop without pretending to be an agent loop.
+`run_runtime` keeps reading commands while one `MockSession` task streams. The session owns a
+cooperative cancellation event and serializes delta writes, completion, and cancellation through
+one state lock. This proves request routing and terminal selection before provider and tool child
+tasks make propagation deeper.
+
 ## Bounded loop
 
 Conceptually, one session follows this algorithm:
@@ -91,10 +98,11 @@ later story and will target the Responses API at the provider boundary.
 
 ## State and terminal outcomes
 
-Initial session states are `idle`, `starting`, `running`, `awaiting_approval`, `cancelling`,
-`completed`, `cancelled`, and `failed`. State will be derived by a pure reducer from validated
-events. Legal transitions are enumerated; an illegal transition creates a structured invariant
-failure.
+The target state set is `idle`, `starting`, `running`, `awaiting_approval`, `cancelling`,
+`completed`, `cancelled`, and `failed`. CAH-006 currently projects `idle`, `starting`, `running`,
+`cancelling`, `completed`, and `cancelled` in the TUI, plus a local fail-closed
+`protocol-failed` state. `awaiting_approval`, domain failure, and the equivalent reusable Python
+reducer remain CAH-010 and later work.
 
 Core invariants are:
 
@@ -105,9 +113,11 @@ Core invariants are:
 - A session emits exactly one of `session.completed`, `session.cancelled`, or `session.failed`.
 - Replaying the same validated event list produces the same visible state.
 
-Cancellation, provider completion, deadlines, and child exit can race. A small terminal-state guard
-must select the first valid outcome and make later completion attempts no-ops or diagnostics. It is
-not safe to rely on every provider or executor stopping immediately after cancellation.
+CAH-006 proves the first cancellation/completion race rule: a `MockSession` lock lets the first
+valid terminal selection win, repeated or recent-terminal requests become no-ops, and the TUI waits
+for Python's event instead of treating a local request as acknowledgement. Provider completion,
+deadlines, tool cleanup, and child exit will reuse or extend that rule. It is not safe to rely on
+every provider or executor stopping immediately after cancellation.
 
 ## Limits and failures
 

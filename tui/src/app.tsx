@@ -6,7 +6,7 @@ import type {ConversationTurn, SessionState} from './session-state.js';
 
 const WAIT_FOR_RUNTIME_FEEDBACK = 'Wait for the Python runtime to become ready.';
 const WAIT_FOR_SESSION_FEEDBACK =
-  'Wait for the active session to complete. Your input has been preserved.';
+  'Wait for the active session to finish. Your input has been preserved.';
 
 /** Runtime projection rendered by the terminal shell. */
 export interface AppProperties {
@@ -16,19 +16,26 @@ export interface AppProperties {
   readonly sessionState: SessionState;
   /** Submit exact non-empty user text through the supervised protocol owner. */
   readonly onSubmitTask: (task: string) => void;
+  /** Request cancellation for the addressable active session; repeated requests are no-ops. */
+  readonly onCancelSession: () => boolean;
 }
 
 /**
  * Render the conversation-first shell and its supervised Python runtime state.
  *
- * Ink owns the editable task buffer and Ctrl+C cleanup. Runtime and session state are projections;
- * the component neither reduces wire events nor decides completion. The submission callback crosses
- * into the supervised protocol owner only after local whitespace validation.
+ * Ink owns the editable task buffer, Escape cancellation request, and Ctrl+C cleanup. Runtime and
+ * session state are projections; the component neither reduces wire events nor decides a terminal
+ * outcome. The callbacks cross into the supervised protocol owner only from eligible visible state.
  *
  * @param properties - Runtime/session projections and the supervised submission callback.
  * @returns The initial title, conversation, task-input, and status regions.
  */
-export function App({runtimeState, sessionState, onSubmitTask}: AppProperties): ReactElement {
+export function App({
+  runtimeState,
+  sessionState,
+  onSubmitTask,
+  onCancelSession,
+}: AppProperties): ReactElement {
   const [draft, setDraft] = useState('');
   const draftRef = useRef('');
   const [inputFeedback, setInputFeedback] = useState<string | undefined>();
@@ -43,13 +50,20 @@ export function App({runtimeState, sessionState, onSubmitTask}: AppProperties): 
     const sessionBecameAvailable =
       inputFeedback === WAIT_FOR_SESSION_FEEDBACK &&
       sessionState.status !== 'starting' &&
-      sessionState.status !== 'running';
+      sessionState.status !== 'running' &&
+      sessionState.status !== 'cancelling';
     if (runtimeBecameReady || sessionBecameAvailable) {
       setInputFeedback(undefined);
     }
   }, [inputFeedback, runtimeState.status, sessionState.status]);
 
   useInput((input, key) => {
+    if (key.escape) {
+      if (runtimeState.status === 'running' && sessionState.status === 'running') {
+        onCancelSession();
+      }
+      return;
+    }
     if (key.return) {
       submitDraft(
         runtimeState,
@@ -66,7 +80,7 @@ export function App({runtimeState, sessionState, onSubmitTask}: AppProperties): 
       setInputFeedback(undefined);
       return;
     }
-    if (key.ctrl || key.meta || key.escape || key.tab) {
+    if (key.ctrl || key.meta || key.tab) {
       return;
     }
     const printable = stripTerminalControls(input);
@@ -103,7 +117,10 @@ export function App({runtimeState, sessionState, onSubmitTask}: AppProperties): 
       </Box>
 
       <Box marginTop={1}>
-        <SessionStatus state={sessionState} />
+        <SessionStatus
+          state={sessionState}
+          canCancel={runtimeState.status === 'running' && sessionState.status === 'running'}
+        />
       </Box>
 
       <Box>
@@ -158,19 +175,44 @@ function assistantText(turn: ConversationTurn): ReactElement | string {
   if (turn.assistantText.length > 0) {
     return turn.assistantText;
   }
-  return <Text dimColor>{turn.status === 'starting' ? 'Starting…' : 'Waiting for response…'}</Text>;
+  switch (turn.status) {
+    case 'starting':
+      return <Text dimColor>Starting…</Text>;
+    case 'running':
+      return <Text dimColor>Waiting for response…</Text>;
+    case 'cancelling':
+      return <Text dimColor>Cancelling…</Text>;
+    case 'cancelled':
+      return <Text dimColor>Cancelled before a response.</Text>;
+    case 'completed':
+      return <Text dimColor>No response text.</Text>;
+  }
 }
 
-function SessionStatus({state}: {readonly state: SessionState}): ReactElement {
+function SessionStatus({
+  state,
+  canCancel,
+}: {
+  readonly state: SessionState;
+  readonly canCancel: boolean;
+}): ReactElement {
   switch (state.status) {
     case 'idle':
       return <Text>Session status: idle · ready for a task</Text>;
     case 'starting':
       return <Text>Session status: starting · waiting for Python</Text>;
     case 'running':
-      return <Text>Session status: running · streaming response</Text>;
+      return (
+        <Text>
+          Session status: running · streaming response{canCancel ? ' · Esc to cancel' : ''}
+        </Text>
+      );
+    case 'cancelling':
+      return <Text color="yellow">Session status: cancelling · waiting for Python</Text>;
     case 'completed':
       return <Text color="green">Session status: completed · ready for another task</Text>;
+    case 'cancelled':
+      return <Text color="yellow">Session status: cancelled · ready for another task</Text>;
     case 'protocol-failed':
       return <Text color="red">Session status: protocol failed · {state.protocolFailure}</Text>;
   }
@@ -192,7 +234,11 @@ function submitDraft(
     setInputFeedback(WAIT_FOR_RUNTIME_FEEDBACK);
     return;
   }
-  if (sessionState.status === 'starting' || sessionState.status === 'running') {
+  if (
+    sessionState.status === 'starting' ||
+    sessionState.status === 'running' ||
+    sessionState.status === 'cancelling'
+  ) {
     setInputFeedback(WAIT_FOR_SESSION_FEEDBACK);
     return;
   }

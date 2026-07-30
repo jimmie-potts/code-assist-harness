@@ -13,6 +13,7 @@ function createSupervisor(): RuntimeSupervisor & {
   readonly start: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly stop: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly submitTask: ReturnType<typeof vi.fn<(task: string) => string>>;
+  readonly cancelSession: ReturnType<typeof vi.fn<() => boolean>>;
   readonly emitSessionUpdate: (update: SessionUpdate) => void;
 } {
   let state: RuntimeState = {status: 'starting', workspace: '/workspace'};
@@ -26,6 +27,7 @@ function createSupervisor(): RuntimeSupervisor & {
   });
   const stop = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const submitTask = vi.fn<(task: string) => string>(() => 'cmd_test_001');
+  const cancelSession = vi.fn<() => boolean>(() => true);
 
   return {
     getState: () => state,
@@ -38,6 +40,7 @@ function createSupervisor(): RuntimeSupervisor & {
       return () => sessionListeners.delete(listener);
     },
     submitTask,
+    cancelSession,
     emitSessionUpdate: (update) => {
       for (const listener of sessionListeners) {
         listener(update);
@@ -61,6 +64,13 @@ describe('runApplication', () => {
     expect(renderApplication).toHaveBeenCalledOnce();
     expect(renderApplication.mock.calls[0]?.[1]).toEqual({exitOnCtrlC: true});
     expect(supervisor.start).toHaveBeenCalledOnce();
+    const root = renderApplication.mock.calls[0]?.[0];
+    expect(root).toBeDefined();
+    if (root !== undefined) {
+      const properties = root.props as {readonly onCancelSession: () => boolean};
+      expect(properties.onCancelSession()).toBe(true);
+    }
+    expect(supervisor.cancelSession).toHaveBeenCalledOnce();
     expect(rerender).toHaveBeenCalledOnce();
     expect(waitUntilExit).toHaveBeenCalledOnce();
     expect(supervisor.stop).toHaveBeenCalledOnce();
