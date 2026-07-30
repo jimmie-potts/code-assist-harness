@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"session.failed","session_id":"ses_failed_001","sequence":2,"timestamp":"2026-07-16T13:00:02.200Z","correlation_id":"cmd_start_002","payload":{"code":"session_failed","message":"The fake session failed."}}

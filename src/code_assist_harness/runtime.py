@@ -6,8 +6,16 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
+
+from .protocol import (
+    CommandLineReader,
+    OrderedEventWriter,
+    ProtocolParseFailure,
+    RuntimeInitializeCommand,
+    RuntimeShutdownCommand,
+)
 
 _READ_CHUNK_SIZE = 64 * 1024
 
@@ -36,7 +44,7 @@ def resolve_workspace(value: str | Path) -> Path:
     try:
         candidate = Path(value).expanduser()
         resolved = candidate.resolve(strict=True)
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, ValueError) as error:
         raise RuntimeConfigurationError(
             f"workspace does not exist or cannot be accessed: {str(value)!r}"
         ) from error
@@ -65,50 +73,71 @@ def _parse_workspace(arguments: Sequence[str]) -> Path:
     return resolve_workspace(workspace_values[0])
 
 
-async def _wait_for_stdin_eof() -> None:
-    """Drain command-pipe bytes until EOF without retaining unimplemented messages."""
+async def _read_stdin_chunks() -> AsyncIterator[bytes]:
+    """Yield bounded stdin chunks without blocking the runtime event loop.
+
+    The file-descriptor reader is armed for one read at a time. It is re-armed only after the
+    consumer requests another chunk, which bounds queued input while protocol errors are written.
+
+    Yields:
+        Raw bytes in process-pipe arrival order until EOF.
+
+    Raises:
+        OSError: If the stdin pipe cannot be read.
+    """
     loop = asyncio.get_running_loop()
     stdin_fd = sys.stdin.fileno()
-    eof: asyncio.Future[None] = loop.create_future()
+    pending: asyncio.Queue[bytes | OSError | None] = asyncio.Queue(maxsize=1)
+    reader_registered = False
 
-    def discard_available_input() -> None:
+    def read_available_input() -> None:
+        nonlocal reader_registered
+        loop.remove_reader(stdin_fd)
+        reader_registered = False
         try:
             data = os.read(stdin_fd, _READ_CHUNK_SIZE)
-        except BlockingIOError:
-            return
         except OSError as error:
-            loop.remove_reader(stdin_fd)
-            if not eof.done():
-                eof.set_exception(error)
+            pending.put_nowait(error)
             return
 
-        if data:
-            return
+        pending.put_nowait(data if data else None)
 
-        loop.remove_reader(stdin_fd)
-        if not eof.done():
-            eof.set_result(None)
-
-    loop.add_reader(stdin_fd, discard_available_input)
     try:
-        await eof
+        while True:
+            loop.add_reader(stdin_fd, read_available_input)
+            reader_registered = True
+            item = await pending.get()
+            if item is None:
+                return
+            if isinstance(item, OSError):
+                raise item
+            yield item
     finally:
-        loop.remove_reader(stdin_fd)
+        if reader_registered:
+            loop.remove_reader(stdin_fd)
+
+
+async def _write_stdout_line(line: bytes) -> None:
+    """Write one already validated bounded event line to protocol stdout."""
+    sys.stdout.buffer.write(line)
+    sys.stdout.buffer.flush()
 
 
 async def run_runtime(workspace: Path) -> None:
-    """Run one harness child until its supervising command pipe closes.
+    """Validate commands and emit ordered protocol events until shutdown or pipe EOF.
 
-    The runtime owns exactly one canonical workspace for its lifetime. This initial
-    implementation deliberately discards stdin bytes because command parsing arrives in CAH-004,
-    and it writes nothing to stdout so that channel remains protocol-only.
+    The runtime owns exactly one canonical workspace for its lifetime. Each physical stdin line is
+    contained independently: malformed input becomes a safe ``runtime.error`` and a later valid
+    line is still processed. Initialization succeeds only when its payload resolves to the same
+    canonical workspace supplied by the supervisor. Session commands validate as protocol v1 but
+    report ``command_unavailable`` until CAH-005 and CAH-006 implement their behavior.
 
     Args:
         workspace: Canonical existing directory owned by this runtime process.
 
     Raises:
         RuntimeConfigurationError: If ``workspace`` is not canonical or is no longer a directory.
-        OSError: If the stdin pipe cannot be monitored or read.
+        OSError: If a protocol pipe cannot be monitored, read, written, or flushed.
 
     Note:
         Cancellation removes the event-loop reader before propagating to the caller.
@@ -123,7 +152,90 @@ async def run_runtime(workspace: Path) -> None:
     if workspace != resolved_workspace or not resolved_workspace.is_dir():
         raise RuntimeConfigurationError("workspace must be a canonical existing directory")
 
-    await _wait_for_stdin_eof()
+    reader = CommandLineReader()
+    writer = OrderedEventWriter(_write_stdout_line)
+    initialized = False
+
+    async for chunk in _read_stdin_chunks():
+        for result in reader.feed(chunk):
+            if isinstance(result, ProtocolParseFailure):
+                await writer.emit_runtime(
+                    "runtime.error",
+                    {
+                        "code": result.code.value,
+                        "message": result.message,
+                        "recoverable": True,
+                    },
+                )
+                continue
+
+            if isinstance(result, RuntimeShutdownCommand):
+                return
+
+            if isinstance(result, RuntimeInitializeCommand):
+                if initialized:
+                    await writer.emit_runtime(
+                        "runtime.error",
+                        {
+                            "code": "already_initialized",
+                            "message": "Runtime initialization has already completed.",
+                            "recoverable": True,
+                        },
+                        correlation_id=result.command_id,
+                    )
+                    continue
+
+                try:
+                    requested_workspace = resolve_workspace(result.payload.workspace)
+                except RuntimeConfigurationError:
+                    requested_workspace = None
+                if requested_workspace != workspace:
+                    await writer.emit_runtime(
+                        "runtime.error",
+                        {
+                            "code": "workspace_mismatch",
+                            "message": (
+                                "Initialization workspace does not match the supervised workspace."
+                            ),
+                            "recoverable": False,
+                        },
+                        correlation_id=result.command_id,
+                    )
+                    return
+
+                initialized = True
+                await writer.emit_runtime(
+                    "runtime.ready",
+                    {"workspace": str(workspace)},
+                    correlation_id=result.command_id,
+                )
+                continue
+
+            error_code = "command_unavailable" if initialized else "not_initialized"
+            error_message = (
+                "Session commands are unavailable until the mocked-session unit is implemented."
+                if initialized
+                else "Runtime initialization must complete before session commands are accepted."
+            )
+            await writer.emit_runtime(
+                "runtime.error",
+                {
+                    "code": error_code,
+                    "message": error_message,
+                    "recoverable": True,
+                },
+                correlation_id=result.command_id,
+            )
+
+    for failure in reader.finish():
+        await writer.emit_runtime(
+            "runtime.error",
+            {
+                "code": failure.code.value,
+                "message": failure.message,
+                "recoverable": True,
+            },
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -137,7 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         and a clean supervising-pipe EOF returns 0.
 
     Side Effects:
-        Writes brief human diagnostics only to stderr. Stdout is reserved for protocol events.
+        Writes validated protocol events to stdout and brief human diagnostics only to stderr.
     """
     arguments = sys.argv[1:] if argv is None else argv
     try:
@@ -147,7 +259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"runtime configuration error: {error}", file=sys.stderr)
         return 2
     except OSError as error:
-        print(f"runtime stdin error: {error}", file=sys.stderr)
+        print(f"runtime pipe error: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         return 130

@@ -44,6 +44,15 @@ describe('App', () => {
     },
     {
       runtimeState: {
+        status: 'protocol-failed' as const,
+        workspace: '/workspace',
+        code: 'unknown_type' as const,
+        message: 'Protocol message type is not supported.',
+      },
+      expected: 'runtime protocol failed (unknown_type)',
+    },
+    {
+      runtimeState: {
         status: 'unexpectedly-exited' as const,
         workspace: '/workspace',
         message: 'Python runtime exited unexpectedly with exit code 7.',
@@ -56,7 +65,8 @@ describe('App', () => {
     try {
       expect(view.lastFrame()).toContain(expected);
       expect(view.lastFrame()).toContain(runtimeState.message);
-      expect(view.lastFrame()).toContain('Ctrl+C to exit');
+      expect(view.lastFrame()).toContain('Ctrl+C');
+      expect(view.lastFrame()).toContain('to exit');
     } finally {
       view.unmount();
     }

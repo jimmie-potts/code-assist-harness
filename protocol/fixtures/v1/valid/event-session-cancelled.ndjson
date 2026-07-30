@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"session.cancelled","session_id":"ses_cancel_001","sequence":2,"timestamp":"2026-07-16T13:00:02.100Z","correlation_id":"cmd_cancel_001","payload":{}}

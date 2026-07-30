@@ -17,10 +17,12 @@ pytest, Ruff, `uv`, and LangChain dependencies. It did not contain an agent, mod
 protocol, tool, or executor implementation.
 
 CAH-001 superseded the scaffold's description of LangChain as the project's foundation. CAH-002
-added the npm-managed Ink shell, WSL-aware launcher, Node pin, and TypeScript checks. CAH-003 now
-adds the minimal Python entry point, canonical single-workspace selection, and Node child-process
-supervision. The physical stdin/stdout/stderr boundary exists, but protocol parsing, readiness,
-provider, tool, workspace-read, policy, transcript, and agent behavior remain target architecture.
+added the npm-managed Ink shell, WSL-aware launcher, Node pin, and TypeScript checks. CAH-003 added
+the minimal Python entry point, canonical single-workspace selection, and Node child-process
+supervision. CAH-004 gives those pipes a strict protocol version 1 contract, cross-language
+fixtures, bounded readers, ordered event writes, and a validated readiness handshake. Provider,
+tool, workspace-read, policy, transcript, session streaming, and agent behavior remain target
+architecture.
 
 ## Product boundary
 
@@ -96,23 +98,29 @@ in the argument array instead. Developers create or refresh the locked environme
 `uv sync --dev`; the preflight proves only that the required environment structure exists, not that
 it is current with `uv.lock`.
 
-The supervisor treats the operating-system spawn event as `running` only for this physical
-boundary. Protocol readiness is not inferred; CAH-004 will replace that temporary boundary with a
-validated readiness event. Node drains and discards stdout without interpreting or displaying it,
-Python drains and discards stdin until EOF, and stderr alone feeds a bounded, sanitized failure
-summary. If the byte-tail bound begins inside a physical line, sanitization drops that leading
-partial line before inspecting the remainder. Recognized separator-delimited and common camel-case
-or concatenated credential names consume their complete physical-line values, so multi-part
-authorization, cookie, and common API-key values cannot remain visible. These are transport
-reservations, not an implemented message protocol.
+The operating-system spawn event now establishes only the physical process. Node writes a validated
+`runtime.initialize` command and remains `starting` until a strictly parsed, correctly correlated
+`runtime.ready` confirms the same canonical workspace. Both byte readers impose a 64-KiB line
+bound, require LF framing, decode UTF-8 strictly, and can resynchronize at the LF after one bad
+physical line. Python uses that recovery capability for command stdin. The TUI deliberately stops
+after the first bad or unexpected stdout event: it enters a visible `protocol-failed` state and
+closes command input rather than trusting any later event. Encoders enforce the same byte bound so
+local writers cannot produce a line the peer must reject.
 
-After Ink reports exit and restores the terminal, the application lifecycle closes stdin so the
-minimal Python loop can end normally. If the child does not close during the grace period, Node
-sends `SIGTERM` and then `SIGKILL` to the detached uv/Python process group. Cleanup resolves only
-after the child `close` event, which proves the wrapper and its pipes were reaped. Any close before
-requested shutdown, including exit code zero, becomes a visible failure; CAH-003 does not restart
-the runtime. Parent `SIGHUP` and `SIGTERM` handlers unmount Ink and route through the same
-asynchronous cleanup while preserving conventional signal exit codes.
+stderr alone feeds a bounded, sanitized failure summary. If the byte-tail bound begins inside a
+physical line, sanitization drops that leading partial line before inspecting the remainder.
+Recognized separator-delimited and common camel-case or concatenated credential names consume their
+complete physical-line values, so multi-part authorization, cookie, and common API-key values
+cannot remain visible.
+
+After Ink reports exit and restores the terminal, the application lifecycle queues a validated
+`runtime.shutdown` command and closes stdin without waiting indefinitely for a write callback. If
+the child does not close during the grace period,
+Node sends `SIGTERM` and then `SIGKILL` to the detached uv/Python process group. Cleanup resolves
+only after the child `close` event, which proves the wrapper and its pipes were reaped. Any close
+before requested shutdown, including exit code zero, becomes a visible failure; the supervisor does
+not restart the runtime. Parent `SIGHUP` and `SIGTERM` handlers unmount Ink and route through the
+same asynchronous cleanup while preserving conventional signal exit codes.
 
 The implemented Node project uses npm, commits `package-lock.json`, pins Node 22.22.1, and enforces
 the Ink-compatible range `>=22.13.0 <23`. Python remains at version 3.12 and is managed with `uv`;
@@ -137,11 +145,15 @@ core without reproducing orchestration and safety behavior.
 
 ## Runtime composition
 
-The target Python package is divided by responsibility. Only `runtime.py` exists today:
+The implemented Python boundary is separated from later domain subsystems:
 
 ```text
 src/code_assist_harness/
-├── runtime.py          Implemented child entry point and stdin-EOF lifetime
+├── runtime.py          Async command loop, initialization, and shutdown
+├── protocol/
+│   ├── models.py       Strict Pydantic v2 wire models
+│   ├── codec.py        Two-stage parsing and safe serialization
+│   └── streams.py      Bounded readers and ordered event writer
 ├── core/              Agent loop, session state, events, and limits
 ├── context/           Instructions, retrieval, provenance, and budgets
 ├── providers/         Provider-neutral port, deterministic fake, OpenAI adapter
@@ -150,7 +162,7 @@ src/code_assist_harness/
 └── persistence/       Append-only transcripts and redaction
 ```
 
-The implemented CAH-003 TypeScript parent is deliberately smaller than the target project:
+The implemented TypeScript parent keeps protocol validation separate from React components:
 
 ```text
 tui/
@@ -159,12 +171,13 @@ tui/
 │   ├── bootstrap.ts
 │   ├── node-version.ts
 │   ├── workspace.ts
+│   ├── protocol.ts
+│   ├── protocol-stream.ts
 │   ├── runtime-diagnostics.ts
 │   ├── runtime-supervisor.ts
 │   ├── run-application.tsx
-│   ├── app.tsx
-│   └── (protocol and state modules arrive in later stories)
-└── test/              Render, bootstrap, launcher, runtime, and lifecycle tests
+│   └── app.tsx
+└── test/              Render, protocol, launcher, runtime, and lifecycle tests
 ```
 
 `scripts/run-tui` resolves and validates both the Node and npm executable paths, rejecting Windows
@@ -173,8 +186,8 @@ npm and its TypeScript loader run. It preserves the caller's canonical launch di
 forwards `--workspace` as separate arguments. `cli.ts` repeats Node validation, resolves one
 workspace, and creates `PythonRuntimeSupervisor`. `run-application.tsx` projects supervisor state
 into `app.tsx`, routes `SIGHUP` and `SIGTERM` through Ink unmount, and guarantees cleanup after every
-exit path. Later TypeScript stories add protocol validation and session-state reduction separately
-from components; empty planned directories are not created early.
+exit path. `protocol.ts` validates hand-maintained Zod wire shapes and `protocol-stream.ts` owns byte
+framing; later stories add session-state reduction separately from components.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. Schema generation is deferred until contract drift
@@ -201,11 +214,12 @@ makes a live model or network request.
 
 ## Concurrency and cancellation
 
-The Python runtime now creates one `asyncio` event loop and uses its stdin file-descriptor reader to
-drain bytes until EOF. CAH-004 will replace that discard behavior with command validation and
-ordered event writing; later units add provider operations, tool supervision, cancellation, and
-deadlines to the same loop. Small, bounded filesystem operations may run directly; blocking work
-moves to a worker thread when needed.
+The Python runtime creates one `asyncio` event loop and arms its stdin file-descriptor reader for one
+bounded chunk at a time. `CommandLineReader` validates each completed line independently, while
+`OrderedEventWriter` holds one lock across sequence allocation, validation, serialization, and sink
+completion. Later units add provider operations, tool supervision, cancellation, and deadlines to
+the same loop. Small, bounded filesystem operations may run directly; blocking work moves to a
+worker thread when needed.
 
 Cancellation is a lifecycle operation rather than an exception leaked to the TUI. It is checked
 before each costly operation, propagates to the active provider or tool, stops further deltas, and
@@ -214,23 +228,24 @@ writer preserves monotonic session sequence numbers even when internal tasks fin
 
 ## Protocol boundary
 
-Commands will travel from Node to Python on child stdin. Events will travel from Python to Node on
-child stdout. CAH-003 has created both pipes and reserves them by discarding bytes rather than
-assigning premature meaning. Human-readable diagnostics already travel on child stderr, where the
-parent bounds and sanitizes failure context. Nothing may log to stdout because CAH-004 will make
-every complete line a validated protocol message.
+Commands travel from Node to Python on child stdin. Events travel from Python to Node on child
+stdout. Human-readable diagnostics travel on child stderr, where the parent bounds and sanitizes
+failure context. Every complete stdout line must therefore be a validated protocol event; raw logs
+and tracebacks are prohibited there.
 
-Protocol version 1 uses one JSON object followed by one newline per message. Commands carry an ID;
-related events carry it as a correlation ID. Session events carry a session ID and a monotonically
-increasing sequence number. Unsupported versions and malformed input become structured protocol
-errors. An unknown event must not crash the TUI.
+Protocol version 1 uses one UTF-8 JSON object followed by one LF per message. Commands carry an ID;
+related events may carry it as a correlation ID. Session events carry a session ID and a positive,
+JavaScript-safe sequence number assigned by the ordered Python writer. Timestamps always use
+millisecond UTC with a literal `Z` and never establish order. Unsupported versions and malformed
+input become safe structured errors. Unknown or malformed events never enter trusted TUI state.
 
-Pydantic v2 validates Python commands, events, tool inputs, and tool results at untrusted
-boundaries. Zod validates protocol input at the TypeScript process boundary. Internal code may use
-dataclasses or ordinary TypeScript types where runtime validation adds no value.
+Pydantic v2 validates incoming commands and outgoing events in Python. Zod validates outgoing
+commands and incoming events in TypeScript. Both implementations first establish JSON, version, and
+common-envelope trust, then select a known strict payload schema. Internal code may use dataclasses
+or ordinary TypeScript types where runtime validation adds no value.
 
-See ADR 0003 for the protocol decision. Detailed message catalogs and examples belong in
-`docs/protocol.md` as the protocol is implemented.
+See ADR 0003 for the protocol decision and `docs/protocol.md` for the implemented catalog,
+compatibility policy, examples, and failure behavior.
 
 ## Tools and safety
 

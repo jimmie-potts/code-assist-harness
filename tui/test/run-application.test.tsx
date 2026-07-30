@@ -65,6 +65,68 @@ describe('runApplication', () => {
     expect(supervisor.stop).toHaveBeenCalledOnce();
   });
 
+  it('stops Python when Ink exits while runtime startup is still pending', async () => {
+    const supervisor = createSupervisor();
+    let resolveStartup = (): void => undefined;
+    supervisor.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStartup = resolve;
+        }),
+    );
+    let resolveExit = (): void => undefined;
+    const waitUntilExit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveExit = resolve;
+        }),
+    );
+    const renderApplication = vi.fn<ApplicationRenderer>(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+    }));
+
+    const running = runApplication(supervisor, renderApplication);
+    await vi.waitFor(() => expect(waitUntilExit).toHaveBeenCalledOnce());
+    resolveExit();
+    await running;
+
+    expect(supervisor.stop).toHaveBeenCalledOnce();
+    resolveStartup();
+  });
+
+  it('preserves an Ink exit failure while runtime startup is still pending', async () => {
+    const supervisor = createSupervisor();
+    let resolveStartup = (): void => undefined;
+    supervisor.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStartup = resolve;
+        }),
+    );
+    let rejectExit: ((error: Error) => void) | undefined;
+    const waitUntilExit = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectExit = reject;
+        }),
+    );
+    const renderApplication = vi.fn<ApplicationRenderer>(() => ({
+      rerender: vi.fn(),
+      unmount: vi.fn(),
+      waitUntilExit,
+    }));
+
+    const running = runApplication(supervisor, renderApplication);
+    await vi.waitFor(() => expect(waitUntilExit).toHaveBeenCalledOnce());
+    rejectExit?.(new Error('Ink failed during startup'));
+
+    await expect(running).rejects.toThrow('Ink failed during startup');
+    expect(supervisor.stop).toHaveBeenCalledOnce();
+    resolveStartup();
+  });
+
   it('keeps cleanup idempotent when rendering fails before spawn', async () => {
     const supervisor = createSupervisor();
     const renderApplication = vi.fn<ApplicationRenderer>(() => {

@@ -1,0 +1,188 @@
+{
+  "protocol_version": 1,
+  "timestamp_format": "YYYY-MM-DDTHH:mm:ss.SSSZ",
+  "valid": [
+    {
+      "id": "command-runtime-initialize",
+      "direction": "command",
+      "type": "runtime.initialize",
+      "format": "ndjson_line",
+      "path": "valid/command-runtime-initialize.ndjson"
+    },
+    {
+      "id": "command-session-start",
+      "direction": "command",
+      "type": "session.start",
+      "format": "ndjson_line",
+      "path": "valid/command-session-start.ndjson"
+    },
+    {
+      "id": "command-session-cancel",
+      "direction": "command",
+      "type": "session.cancel",
+      "format": "ndjson_line",
+      "path": "valid/command-session-cancel.ndjson"
+    },
+    {
+      "id": "command-runtime-shutdown",
+      "direction": "command",
+      "type": "runtime.shutdown",
+      "format": "ndjson_line",
+      "path": "valid/command-runtime-shutdown.ndjson"
+    },
+    {
+      "id": "event-runtime-ready",
+      "direction": "event",
+      "type": "runtime.ready",
+      "format": "ndjson_line",
+      "path": "valid/event-runtime-ready.ndjson"
+    },
+    {
+      "id": "event-session-started",
+      "direction": "event",
+      "type": "session.started",
+      "format": "ndjson_line",
+      "path": "valid/event-session-started.ndjson"
+    },
+    {
+      "id": "event-assistant-delta",
+      "direction": "event",
+      "type": "assistant.delta",
+      "format": "ndjson_line",
+      "path": "valid/event-assistant-delta.ndjson"
+    },
+    {
+      "id": "event-assistant-completed",
+      "direction": "event",
+      "type": "assistant.completed",
+      "format": "ndjson_line",
+      "path": "valid/event-assistant-completed.ndjson"
+    },
+    {
+      "id": "event-session-completed",
+      "direction": "event",
+      "type": "session.completed",
+      "format": "ndjson_line",
+      "path": "valid/event-session-completed.ndjson"
+    },
+    {
+      "id": "event-session-cancelled",
+      "direction": "event",
+      "type": "session.cancelled",
+      "format": "ndjson_line",
+      "path": "valid/event-session-cancelled.ndjson"
+    },
+    {
+      "id": "event-session-failed",
+      "direction": "event",
+      "type": "session.failed",
+      "format": "ndjson_line",
+      "path": "valid/event-session-failed.ndjson"
+    },
+    {
+      "id": "event-runtime-error",
+      "direction": "event",
+      "type": "runtime.error",
+      "format": "ndjson_line",
+      "path": "valid/event-runtime-error.ndjson"
+    }
+  ],
+  "invalid": [
+    {
+      "id": "malformed-json",
+      "direction": "command",
+      "classification": "malformed_json",
+      "reason": "The physical line is not valid JSON.",
+      "format": "ndjson_line",
+      "path": "invalid/malformed-json.ndjson"
+    },
+    {
+      "id": "numeric-overflow",
+      "direction": "command",
+      "classification": "malformed_json",
+      "reason": "The JSON number overflows the finite number range shared with TypeScript.",
+      "format": "ndjson_line",
+      "path": "invalid/numeric-overflow.ndjson"
+    },
+    {
+      "id": "malformed-envelope",
+      "direction": "command",
+      "classification": "malformed_envelope",
+      "reason": "The command envelope omits command_id.",
+      "format": "ndjson_line",
+      "path": "invalid/malformed-envelope.ndjson"
+    },
+    {
+      "id": "unsupported-version",
+      "direction": "command",
+      "classification": "unsupported_version",
+      "reason": "The envelope declares protocol_version 2.",
+      "format": "ndjson_line",
+      "path": "invalid/unsupported-version.ndjson"
+    },
+    {
+      "id": "unknown-type",
+      "direction": "event",
+      "classification": "unknown_type",
+      "reason": "The event discriminator session.paused is not in version 1.",
+      "format": "ndjson_line",
+      "path": "invalid/unknown-type.ndjson"
+    },
+    {
+      "id": "invalid-payload",
+      "direction": "command",
+      "classification": "invalid_payload",
+      "reason": "The session.start task is a number instead of a string.",
+      "format": "ndjson_line",
+      "path": "invalid/invalid-payload.ndjson"
+    },
+    {
+      "id": "unsafe-error-message",
+      "direction": "event",
+      "classification": "invalid_payload",
+      "reason": "A user-visible runtime error message contains a terminal control character.",
+      "format": "ndjson_line",
+      "path": "invalid/unsafe-error-message.ndjson"
+    },
+    {
+      "id": "extra-field",
+      "direction": "event",
+      "classification": "invalid_payload",
+      "reason": "The strict event object contains undeclared field debug.",
+      "format": "ndjson_line",
+      "path": "invalid/extra-field.ndjson"
+    },
+    {
+      "id": "invalid-timestamp",
+      "direction": "event",
+      "classification": "malformed_envelope",
+      "reason": "The common timestamp omits required milliseconds.",
+      "format": "ndjson_line",
+      "path": "invalid/invalid-timestamp.ndjson"
+    },
+    {
+      "id": "invalid-id",
+      "direction": "command",
+      "classification": "malformed_envelope",
+      "reason": "The common command_id does not begin with cmd_.",
+      "format": "ndjson_line",
+      "path": "invalid/invalid-id.ndjson"
+    },
+    {
+      "id": "invalid-sequence",
+      "direction": "event",
+      "classification": "malformed_envelope",
+      "reason": "The session-event sequence is not positive.",
+      "format": "ndjson_line",
+      "path": "invalid/invalid-sequence.ndjson"
+    },
+    {
+      "id": "invalid-framing",
+      "direction": "command",
+      "classification": "invalid_framing",
+      "reason": "An otherwise-valid command is terminated with CRLF instead of LF.",
+      "format": "ndjson_stream",
+      "path": "invalid/invalid-framing.ndjson"
+    }
+  ]
+}

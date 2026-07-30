@@ -1,6 +1,6 @@
 # CAH-004 - Define protocol version 1
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M0 - Walking skeleton / E0 - Architecture and WSL walking skeleton
 - **Dependencies:** CAH-003
 - **Lesson:** [Protocol version 1](../docs/lessons/cah-004-protocol-v1.md)
@@ -59,6 +59,21 @@ Events: `runtime.ready`, `session.started`, `assistant.delta`, `assistant.comple
 Create or update `docs/protocol.md` and `protocol/README.md` with the envelope, ownership, sequencing,
 correlation, compatibility, error-handling, stdin/stdout/stderr rules, and example messages. Record
 intentional hand-maintained cross-language types as an M0 simplification.
+
+## Completion evidence
+
+`src/code_assist_harness/protocol/` implements strict Pydantic models, layered safe codecs,
+64-KiB LF readers, and a cancellation-safe ordered writer that owns per-session sequence assignment.
+`tui/src/protocol.ts` and `tui/src/protocol-stream.ts` implement the corresponding Zod wire
+boundary and byte framing. Both contract suites consume the 12 valid and 12 invalid cases in
+`protocol/fixtures/v1/manifest.json`.
+
+`src/code_assist_harness/runtime.py` contains malformed command lines and continues to a later valid
+initialization. `tui/src/runtime-supervisor.ts` remains `starting` after spawn, becomes `running`
+only after a matching `runtime.ready`, and fails closed with a distinguishable code for unknown and
+malformed events. The real Node-to-uv-to-Python test observes the validated handshake and clean
+shutdown. Final validation passes 120 Python tests and 119 TUI tests without a model, API key, or
+network access.
 
 ## Out of scope
 

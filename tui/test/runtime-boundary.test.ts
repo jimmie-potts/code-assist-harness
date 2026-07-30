@@ -20,6 +20,7 @@ import {describe, expect, it} from 'vitest';
 import {
   PythonRuntimeSupervisor,
   type RuntimeLaunchRequest,
+  type RuntimeState,
 } from '../src/runtime-supervisor.js';
 
 const repositoryRoot = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
@@ -72,10 +73,18 @@ describe('real Node to uv to Python boundary', () => {
         },
       },
     );
+    const states: RuntimeState[] = [];
+    const unsubscribe = supervisor.subscribe((state) => states.push(state));
 
     try {
-      await withTimeout(supervisor.start(), 5000, 'uv did not spawn');
+      expect(supervisor.getState().status).toBe('starting');
+      await withTimeout(
+        supervisor.start(),
+        5000,
+        'runtime did not return a validated runtime.ready event',
+      );
       expect(supervisor.getState().status).toBe('running');
+      expect(states.map((state) => state.status)).toEqual(['running']);
       expect(uvPid).toBeDefined();
       if (uvPid === undefined) {
         throw new Error('uv spawned without a process ID.');
@@ -96,6 +105,7 @@ describe('real Node to uv to Python boundary', () => {
       if (supervisor.getState().status !== 'stopped') {
         await supervisor.stop();
       }
+      unsubscribe();
       rmSync(workspace, {recursive: true, force: true});
       rmSync(poisonPythonPath, {recursive: true, force: true});
     }

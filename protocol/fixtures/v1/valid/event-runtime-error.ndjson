@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"runtime.error","timestamp":"2026-07-16T13:00:03.100Z","payload":{"code":"malformed_json","message":"A command line was not valid JSON.","recoverable":true}}

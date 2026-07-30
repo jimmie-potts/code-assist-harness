@@ -54,8 +54,8 @@ guidance rather than obscure syntax or runtime errors.
 - Unexpected child exit moves the TUI to a visible failed state.
 - TUI exit terminates an active child and does not leave terminal-rendering artifacts.
 - `Ctrl+C` has documented cancellation and exit semantics.
-- Child stdout is reserved for protocol data and never displayed as an unstructured log; CAH-003
-  drains it opaquely and CAH-004 owns parsing.
+- Child stdout is reserved for validated protocol events and is never displayed as an unstructured
+  log; an unknown, malformed, or unexpected event fails closed.
 - Child stderr diagnostics cannot corrupt the protocol stream.
 - A second session may start after a completed first session without restarting the application.
 
@@ -103,8 +103,8 @@ test matrix before the core architecture is proven.
 
 ## Implementation status
 
-CAH-002 implements terminal ownership and WSL runtime validation. CAH-003 now implements the
-physical process boundary:
+CAH-002 implements terminal ownership and WSL runtime validation, CAH-003 implements the physical
+process boundary, and CAH-004 gives that boundary its first validated protocol:
 
 - `scripts/run-tui` preserves the canonical caller directory and forwards arguments without
   combining them into a shell string;
@@ -122,7 +122,8 @@ physical process boundary:
   copies the parent except for `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and all `UV_*` variables;
   the supported project, environment, and interpreter choices are supplied explicitly in argv;
 - `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
-  writes nothing to stdout, and exits cleanly when its stdin pipe reaches EOF;
+  parses bounded protocol commands, writes validated events to stdout, and exits cleanly on
+  `runtime.shutdown` or stdin EOF;
 - `tui/src/runtime-diagnostics.ts` retains a bounded stderr tail, drops a leading partial physical
   line when byte truncation cuts one, redacts distinctive inherited environment values plus
   complete physical-line values for recognized separator-delimited and common camel-case or
@@ -131,8 +132,14 @@ physical process boundary:
   to `SIGTERM` and `SIGKILL` for the detached uv/Python process group when necessary, and waits for
   `close` before cleanup is complete. Parent `SIGHUP` and `SIGTERM` first request an Ink unmount so
   they enter that same cleanup path.
+- `src/code_assist_harness/protocol/` and `tui/src/protocol.ts` validate strict version 1 messages;
+  shared fixtures prove agreement between Pydantic and Zod, and bounded LF readers contain bad
+  physical lines;
+- after spawn, the supervisor sends `runtime.initialize` and remains `starting` until a matching
+  `runtime.ready` confirms the canonical workspace. Invalid or unexpected stdout becomes a visible
+  `protocol-failed` state and closes command input.
 
-An operating-system spawn currently moves the display to `running`; it is not evidence that Python
+An operating-system spawn establishes only the physical process; it is not evidence that Python
 accepted a protocol command. Any unrequested close, even with exit code zero, produces a visible
-failed state, and the supervisor does not restart the child. Protocol versioning, readiness,
-command parsing, and event validation remain CAH-004 work.
+failed state, and the supervisor does not restart the child. CAH-005 will use this implemented
+boundary for deterministic session streaming.
