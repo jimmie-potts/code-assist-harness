@@ -22,6 +22,7 @@ from code_assist_harness.protocol import (
     SessionStartCommand,
 )
 from code_assist_harness.runtime import RuntimeConfigurationError, resolve_workspace
+from code_assist_harness.session_state import SessionState
 
 TIMESTAMP = "2026-07-16T12:34:56.789Z"
 
@@ -137,7 +138,7 @@ def test_runtime_emits_correlated_ready_then_honors_orderly_shutdown(tmp_path: P
 
 
 def test_mock_session_checkpoints_expose_each_intermediate_delta() -> None:
-    async def scenario() -> tuple[list[tuple[int, str]], list[bytes]]:
+    async def scenario() -> tuple[list[tuple[int, str]], list[bytes], SessionState]:
         lines: list[bytes] = []
         reached: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
         releases = [asyncio.Event() for _delta in MOCK_RESPONSE_DELTAS]
@@ -149,8 +150,10 @@ def test_mock_session_checkpoints_expose_each_intermediate_delta() -> None:
             await reached.put((index, delta))
             await releases[index - 1].wait()
 
-        runner = MockSessionRunner(OrderedEventWriter(sink), checkpoint)
-        running = asyncio.create_task(runner.run(_session_start("cmd_session")))
+        session = MockSessionRunner(OrderedEventWriter(sink), checkpoint).create(
+            _session_start("cmd_session")
+        )
+        running = asyncio.create_task(session.run())
         observations: list[tuple[int, str]] = []
 
         for expected_count, release in enumerate(releases, start=1):
@@ -163,9 +166,9 @@ def test_mock_session_checkpoints_expose_each_intermediate_delta() -> None:
             release.set()
 
         await asyncio.wait_for(running, timeout=1)
-        return observations, lines
+        return observations, lines, session.lifecycle_state
 
-    observations, lines = asyncio.run(scenario())
+    observations, lines, lifecycle = asyncio.run(scenario())
     events = _event_lines(b"".join(lines))
 
     assert observations == list(enumerate(MOCK_RESPONSE_DELTAS, start=1))
@@ -185,6 +188,10 @@ def test_mock_session_checkpoints_expose_each_intermediate_delta() -> None:
     )
     completed = next(event for event in events if event.type == "assistant.completed")
     assert completed.payload.text == MOCK_RESPONSE_TEXT
+    assert lifecycle.status == "completed"
+    assert lifecycle.last_sequence == len(events)
+    assert lifecycle.assistant_text == MOCK_RESPONSE_TEXT
+    assert lifecycle.assistant_completed is True
 
 
 def test_mock_session_runner_assigns_a_new_id_and_sequence_for_a_second_session() -> None:
@@ -213,8 +220,36 @@ def test_mock_session_runner_assigns_a_new_id_and_sequence_for_a_second_session(
     assert {event.correlation_id for event in second} == {"cmd_second"}
 
 
+def test_mock_session_contains_an_impossible_lifecycle_invariant() -> None:
+    async def scenario() -> RuntimeError:
+        async def sink(_line: bytes) -> None:
+            return
+
+        async def immediate_checkpoint(_index: int, _delta: str) -> None:
+            return
+
+        writer = OrderedEventWriter(sink)
+        await MockSessionRunner(writer, immediate_checkpoint).run(_session_start("cmd_first"))
+        # Two runner allocators must never share one writer: both start at ses_mock_1, so the second
+        # started event exposes the impossible integration as a sequence gap.
+        conflicting = MockSessionRunner(writer, immediate_checkpoint).create(
+            _session_start("cmd_second", "sk-secret-task-must-not-appear")
+        )
+        with pytest.raises(RuntimeError) as captured:
+            await conflicting.run()
+        return captured.value
+
+    error = asyncio.run(scenario())
+
+    assert str(error) == (
+        "session lifecycle invariant failed: code=sequence_gap "
+        "prior_status=starting event_type=session.started"
+    )
+    assert "secret" not in str(error)
+
+
 def test_mock_session_cancels_before_the_first_delta_and_repeats_idempotently() -> None:
-    async def scenario() -> tuple[list[bytes], str, str]:
+    async def scenario() -> tuple[list[bytes], str, str, SessionState]:
         lines: list[bytes] = []
         checkpoint_reached = asyncio.Event()
         blocked_checkpoint = asyncio.Event()
@@ -234,9 +269,9 @@ def test_mock_session_cancels_before_the_first_delta_and_repeats_idempotently() 
         first_result = await session.request_cancellation("cmd_cancel")
         repeated_result = await session.request_cancellation("cmd_cancel")
         await asyncio.wait_for(running, timeout=1)
-        return lines, first_result, repeated_result
+        return lines, first_result, repeated_result, session.lifecycle_state
 
-    lines, first_result, repeated_result = asyncio.run(scenario())
+    lines, first_result, repeated_result, lifecycle = asyncio.run(scenario())
     events = _event_lines(b"".join(lines))
 
     assert first_result == "accepted"
@@ -244,6 +279,37 @@ def test_mock_session_cancels_before_the_first_delta_and_repeats_idempotently() 
     assert [event.type for event in events] == ["session.started", "session.cancelled"]
     assert [event.sequence for event in events] == [1, 2]
     assert [event.correlation_id for event in events] == ["cmd_session", "cmd_cancel"]
+    assert lifecycle.status == "cancelled"
+    assert lifecycle.last_sequence == len(events)
+    assert lifecycle.cancel_command_id == "cmd_cancel"
+
+
+def test_mock_session_defers_cancellation_requested_before_session_started() -> None:
+    async def scenario() -> tuple[list[bytes], str, str, SessionState]:
+        lines: list[bytes] = []
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def immediate_checkpoint(_index: int, _delta: str) -> None:
+            return
+
+        session = MockSessionRunner(OrderedEventWriter(sink), immediate_checkpoint).create(
+            _session_start("cmd_session")
+        )
+        cancellation_result = await session.request_cancellation("cmd_cancel")
+        state_before_start = session.lifecycle_state.status
+        await session.run()
+        return lines, cancellation_result, state_before_start, session.lifecycle_state
+
+    lines, cancellation_result, state_before_start, lifecycle = asyncio.run(scenario())
+    events = _event_lines(b"".join(lines))
+
+    assert cancellation_result == "accepted"
+    assert state_before_start == "starting"
+    assert [event.type for event in events] == ["session.started", "session.cancelled"]
+    assert lifecycle.status == "cancelled"
+    assert lifecycle.last_sequence == len(events)
 
 
 def test_mock_session_cancels_between_deltas_without_later_assistant_output() -> None:
@@ -287,7 +353,7 @@ def test_mock_session_cancels_between_deltas_without_later_assistant_output() ->
 
 
 def test_mock_session_completion_write_wins_a_concurrent_cancellation_race() -> None:
-    async def scenario() -> tuple[list[bytes], str, bool]:
+    async def scenario() -> tuple[list[bytes], str, bool, SessionState]:
         lines: list[bytes] = []
         terminal_write_started = asyncio.Event()
         release_terminal_write = asyncio.Event()
@@ -312,9 +378,14 @@ def test_mock_session_completion_write_wins_a_concurrent_cancellation_race() -> 
         release_terminal_write.set()
         await asyncio.wait_for(running, timeout=1)
         cancellation_result = await asyncio.wait_for(cancelling, timeout=1)
-        return lines, cancellation_result, cancellation_waited_for_terminal_write
+        return (
+            lines,
+            cancellation_result,
+            cancellation_waited_for_terminal_write,
+            session.lifecycle_state,
+        )
 
-    lines, cancellation_result, cancellation_waited = asyncio.run(scenario())
+    lines, cancellation_result, cancellation_waited, lifecycle = asyncio.run(scenario())
     events = _event_lines(b"".join(lines))
 
     assert cancellation_waited is True
@@ -328,6 +399,9 @@ def test_mock_session_completion_write_wins_a_concurrent_cancellation_race() -> 
         "session.completed",
     ]
     assert sum(event.type in {"session.completed", "session.cancelled"} for event in events) == 1
+    assert lifecycle.status == "completed"
+    assert lifecycle.last_sequence == len(events)
+    assert lifecycle.assistant_text == MOCK_RESPONSE_TEXT
 
 
 def test_runtime_streams_one_session_then_drains_it_before_shutdown(tmp_path: Path) -> None:

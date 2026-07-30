@@ -12,7 +12,8 @@
 
 ## Scope
 
-- Persist every validated session event as append-only JSONL under the WSL XDG state directory.
+- Persist every trusted lifecycle input accepted by the reducer—application-owned domain facts and
+  validated session events—as append-only JSONL under the WSL XDG state directory.
 - Derive a stable workspace identifier without placing unnecessary personal paths in filenames.
 - Redact configured sensitive values and bound stored result content.
 - Add human-readable completion summaries and an explicit `--no-transcript` mode.
@@ -22,8 +23,10 @@
 
 1. Transcript storage defaults to the appropriate XDG state location, with a documented fallback
    when the environment variable is unset.
-2. Every validated session event is appended in sequence as one JSON object per line; invalid wire
-   input and unvalidated provider payloads are never recorded as session events.
+2. Every trusted lifecycle input is appended in reducer order as one JSON object per line. Session
+   events retain their authoritative sequence, while domain facts such as `task.submitted`,
+   `cancel.requested`, and future approval facts use an explicit transcript record order. Invalid
+   wire input and unvalidated provider payloads are never recorded.
 3. Transcript files are created with restrictive local permissions and flushed often enough that an
    unexpected exit preserves previously accepted events.
 4. Filenames use session and stable workspace identifiers without exposing the full workspace path
@@ -37,9 +40,10 @@
    otherwise unchanged.
 9. A write or flush failure becomes a visible structured persistence error, avoids recursive writes,
    and does not silently mutate the reducer's terminal outcome.
-10. Re-reading a complete JSONL file and applying the reducer reconstructs the same terminal
-    lifecycle state and the same values for persisted safe fields; redacted or bounded content is
-    represented by its stored safe value rather than reconstructed.
+10. Re-reading a complete JSONL file from `idle` and applying its ordered domain facts and validated
+    events to the reducer reconstructs the same terminal lifecycle state and the same values for
+    persisted safe fields; redacted or bounded content is represented by its stored safe value rather
+    than reconstructed.
 11. Tests use temporary directories, fake credentials, and injected write failures; no real home
     state or credential is touched.
 

@@ -105,3 +105,22 @@ four files without drift.
 
 These scenarios are documentation evidence, not a new protocol definition or the future `evals/`
 scenario format. The boundary validators remain authoritative, and CAH-009 adds no runtime behavior.
+
+## Session-lifecycle reducer fixtures
+
+The language-neutral lifecycle contract lives under
+[`fixtures/session-lifecycle/v1/`](fixtures/session-lifecycle/v1/). Its manifest indexes legal
+transitions, complete replay scenarios, and invariant failures. Python and TypeScript construct each
+case from `idle`, reduce the same ordered inputs, and compare the complete normalized state or safe
+failure result.
+
+That suite deliberately includes two input families:
+
+- complete protocol-v1 session-event envelopes, which both wire validators must accept before the
+  reducers see them; and
+- trusted application-owned domain facts such as `task.submitted`, `cancel.requested`,
+  `approval.requested`, and `approval.resolved`.
+
+The domain facts are reducer inputs, not additions to protocol version 1. They do not cross the
+Python-to-TypeScript NDJSON boundary, and the lifecycle fixtures do not authorize either wire
+validator to accept them as commands or events.

@@ -2,196 +2,256 @@
 
 - **Unit:** CAH-010
 - **Milestone:** M1 - Conversational core
-- **Lesson status:** Planned
-- **Implementation status:** Planned; equivalent Python and TypeScript reducers do not exist yet
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; equivalent Python and TypeScript reducers share one fixture suite
 - **Story:** [CAH-010](../../user-stories/cah-010-session-state-reducer.md)
+- **Visual lesson:** [Every event needs the right track](assets/cah-010-session-state-reducer.pptx)
 - **Related architecture:** [Agent loop](../agent-loop.md), [protocol](../protocol.md),
   [architecture](../architecture.md), and [evaluation](../evaluation.md)
 
-> This lesson describes the planned state model. CAH-010 must still publish the actual transition
-> specification and resolve how every listed state is represented by validated reducer input.
-
 ## Quick summary
 
-CAH-010 will express session lifecycle as pure state reduction shared semantically by Python and
-TypeScript. Given equivalent prior state and validated input, both sides must reach equivalent next
-state, reject illegal ordering, and keep terminal states absorbing.
+CAH-010 implements one-session lifecycle reducers in Python and TypeScript. Both consume the same
+trusted domain facts and validated protocol events, apply the same 16 legal transitions, and return
+the same normalized state or payload-free invariant failure for 50 shared fixture cases. Replaying
+an ordered input tape is deterministic, while `completed`, `cancelled`, and `failed` remain
+absorbing.
 
 ## Learning objectives
 
 After completing this unit, you should be able to:
 
-- distinguish events, state, effects, and rendering;
-- write a pure reducer with explicit legal and illegal transitions;
-- explain sequence, session-identity, duplicate, and terminal-event checks;
-- prove cross-language equivalence using shared transition and replay fixtures; and
-- identify when formal statechart or durable event-processing infrastructure is justified.
+- distinguish domain facts, wire events, derived state, effects, and rendering;
+- explain why a one-session reducer and a multi-turn conversation projection are separate layers;
+- trace correlation, identity, sequence, and assistant-completion guards in their evaluation order;
+- prove cross-language equivalence with shared transition, failure, and replay fixtures; and
+- recognize when statecharts or durable workflow infrastructure justify their operational cost.
 
 ## Why this unit matters
 
-Before a reducer, Python lifecycle logic, TUI status code, tests, and future replay can each invent a
-slightly different meaning of “running” or “cancelled.” A published transition specification creates
-one inspectable semantic contract while still allowing each language to use native types.
+Before CAH-010, the TUI had a useful local reducer, but Python's mock lifecycle, future transcript
+replay, and the UI could still assign different meanings to “running” or “terminal.” The shared
+contract now makes those meanings inspectable and executable in both languages. A future transcript
+can record validated inputs without becoming a second source of lifecycle truth.
 
 ## Key concepts
 
-**State:** the derived lifecycle snapshot, including status and safe identifiers needed to validate
-the next input. It is not a hidden mutable flag owned independently by every component.
+**State:** the immutable one-session snapshot needed to validate the next input: status, command and
+session identities, last sequence, accumulated assistant text, completion confirmation, and a safe
+terminal failure.
 
-**Event:** a validated fact that has occurred. Reducers interpret facts; they do not perform I/O or
-decide policy.
+**Domain fact:** a trusted, application-owned input such as `task.submitted`, `cancel.requested`,
+`approval.requested`, or `approval.resolved`. These facts drive lifecycle state without pretending
+to be protocol-v1 messages.
 
-**Pure reducer:** a function of prior state and validated input only. It performs no clock access,
-randomness, mutation, logging, provider call, or subprocess work.
+**Wire event:** a complete protocol-v1 session envelope validated by Pydantic or Zod before it
+reaches a reducer.
 
-**Transition specification:** the reviewed table of legal source, input, target, guards, and invariant
-failures used by both implementations and shared fixtures.
+**Pure reducer:** a function of prior state and one trusted input. It performs no I/O, clock access,
+randomness, mutation, logging, provider work, policy decision, or protocol parsing.
 
-**Replay:** folding the same ordered validated inputs over the same initial state to reproduce an
-equivalent result. Replay in CAH-010 does not resume work or re-execute side effects.
+**Replay:** folding the same ordered inputs over the same initial state to reproduce an equivalent
+result. Replay derives state; it does not restart work or repeat side effects.
 
-**Absorbing terminal state:** `completed`, `cancelled`, or `failed` cannot return to active work.
+**Absorbing terminal:** a completed, cancelled, or failed session rejects every later input and
+returns the exact prior state.
 
-## Architecture and design
+## Architecture and invariants
 
-Planned lifecycle states are `idle`, `starting`, `running`, `awaiting_approval`, `cancelling`,
-`completed`, `cancelled`, and `failed`. A useful specification shape is:
+The one-session cores live in
+[`session_state.py`](../../src/code_assist_harness/session_state.py) and
+[`session-lifecycle.ts`](../../tui/src/session-lifecycle.ts). The TUI keeps multi-turn history in
+[`session-state.ts`](../../tui/src/session-state.ts), outside the absorbing core. A later task starts
+a fresh lifecycle and appends a new conversation turn; it never revives the old session.
 
-| Prior state | Validated input | Next state | Important guard |
+### Canonical transition table
+
+| Prior state | Trusted input | Next state | Guard or meaning |
 | --- | --- | --- | --- |
-| `idle` | start accepted | `starting` or `running` | New session identity is valid. |
-| `starting` | `session.started` | `running` | First sequence is valid. |
-| `running` | assistant/session event | `running` or terminal | Session and sequence match. |
-| `running` | cancellation accepted | `cancelling` | Request targets active session. |
-| active state | terminal event | corresponding terminal state | No terminal outcome exists yet. |
-| terminal state | later active event | invariant failure/no transition | Terminal states are absorbing. |
+| `idle` | `task.submitted` | `starting` | Record start command and task. |
+| `starting` | `session.started` | `running` | Start correlation and sequence 1. |
+| `running` | `assistant.delta` | `running` | Append the next fragment. |
+| `cancelling` | `assistant.delta` | `cancelling` | An already in-flight fragment may win. |
+| `running` | `assistant.completed` | `running` | Text exactly confirms accumulated deltas. |
+| `cancelling` | `assistant.completed` | `cancelling` | Completion may still win the race. |
+| `running` | `approval.requested` | `awaiting_approval` | Domain-only wait fact. |
+| `awaiting_approval` | `approval.resolved` | `running` | Domain-only resume fact. |
+| `running` | `cancel.requested` | `cancelling` | Target the active session. |
+| `awaiting_approval` | `cancel.requested` | `cancelling` | Waiting work remains cancellable. |
+| `running` | `session.completed` | `completed` | Assistant completion was confirmed. |
+| `cancelling` | `session.completed` | `completed` | Normal completion won the terminal race. |
+| `cancelling` | `session.cancelled` | `cancelled` | Correlate to the accepted cancel command. |
+| `running` | `session.failed` | `failed` | Preserve only validated safe failure data. |
+| `awaiting_approval` | `session.failed` | `failed` | Failure may end a wait. |
+| `cancelling` | `session.failed` | `failed` | Failure may win while cancellation is pending. |
 
-This table is illustrative, not the final CAH-010 contract. Protocol v1 currently names
-`session.started`, the three terminal events, and assistant events, but does not yet name wire events
-for every intermediate state. CAH-010 must deliberately decide whether command-originated facts or
-new domain/protocol events drive `starting` and `cancelling`, and how the future
-`awaiting_approval` state is represented. It must not let the TUI silently invent authoritative
-transitions that Python cannot replay. Any new wire message requires protocol documentation and
-cross-language fixtures.
+Every other edge is illegal. There is deliberately no `starting -> cancelling` transition. A direct
+mock caller can request cancellation before `session.started`; `MockSession` defers that domain fact,
+reduces the started event first, and then reduces the cancellation request.
 
-| Layer | Responsibility |
-| --- | --- |
-| Boundary validators | Reject malformed or unsupported wire objects before reduction. |
-| Sequence/session guard | Detect gaps, regressions, and cross-session events. |
-| Reducer | Apply one legal transition without side effects. |
-| Runtime effect layer | Start/cancel tasks and emit facts; never hide effects inside reducer. |
-| TUI projection | Render reduced state without deciding lifecycle authority. |
+### Guard order
+
+For a wire event, the reducers apply guards in this order:
+
+1. reject every input when the prior state is terminal;
+2. check that the input type is legal from the prior status;
+3. check command correlation;
+4. check session identity;
+5. require the next contiguous sequence; and
+6. enforce assistant-text and terminal payload invariants.
+
+The stable invariant codes are `illegal_transition`, `terminal_state_absorbing`,
+`correlation_mismatch`, `session_mismatch`, `sequence_gap`, `sequence_regression`,
+`assistant_after_completion`, `assistant_already_completed`,
+`assistant_completion_mismatch`, and `session_completion_before_assistant`.
+
+An invariant failure contains only its code, the prior status, and the rejected input type. It never
+copies task text, assistant text, identifiers, payloads, or validator details. The returned state is
+the same object supplied to the failed reduction.
+
+### Domain facts are not new wire messages
+
+CAH-010 does not change protocol version 1. `task.submitted` and `cancel.requested` describe accepted
+local command intent. The approval facts let both reducers and shared fixtures exercise the promised
+state before a later approval story defines approval IDs, actions, decisions, and protocol ownership.
+Adding those fields prematurely would create an unstable wire contract for behavior the runtime does
+not yet implement.
 
 ## Practical walkthrough
 
-1. Inventory every state promised by the story and every validated input capable of entering it.
-2. Resolve missing transition inputs before coding; update the protocol if wire events are added.
-3. Publish one transition table with source, input, target, guards, and duplicate policy.
-4. Define immutable Python and TypeScript state shapes using only harness-owned data.
-5. Keep session identity and last accepted sequence in state or in a clearly preceding validator.
-6. Implement the smallest pure reducer in each language from the same specification.
-7. Represent illegal transitions as bounded invariant failures without copying sensitive payloads.
-8. Add shared fixtures for every legal edge, sequence gap, wrong session, duplicate, and late terminal.
-9. Replay each fixture twice and compare normalized final state and failure identity across languages.
-10. Route M0 completion and cancellation paths through the new reducers without moving effects into them.
+1. Start at `INITIAL_SESSION_STATE` or `INITIAL_SESSION_LIFECYCLE_STATE`.
+2. Reduce `task.submitted`; the lifecycle enters `starting` with sequence zero.
+3. Validate `session.started` at the process boundary, then reduce it to establish session identity
+   and sequence one.
+4. Reduce each validated delta in order. The prior state remains unchanged, so earlier snapshots are
+   safe to retain in tests or projections.
+5. Require `assistant.completed` to exactly confirm accumulated text before accepting
+   `session.completed`.
+6. For cancellation, record `cancel.requested` first. Accept in-flight start-correlated output while
+   cancellation is pending; whichever valid terminal event arrives first wins.
+7. For a later task, the conversation adapter preserves the old terminal turn and creates a fresh
+   one-session core.
+8. To replay, run the same ordered inputs through `replay_session_updates` or
+   `replaySessionLifecycle`; both stop at the first failure.
 
-Do not test only named states. Prove edges, including the boundary between the last active state and
-each terminal state. Inject events in the wrong order and assert that state does not advance. A
-duplicate policy may be idempotent or diagnostic for a particular event, but it must be explicit and
-must never create a second terminal transition.
+The actual M0 mock path now records every successfully written session event through the Python
+reducer. The TypeScript supervisor validates the active tape with the core reducer, then publishes
+accepted updates to the multi-turn projection and Ink view. `session.failed` is a normal session
+terminal rather than a runtime protocol failure, so the child remains ready for another task.
+
+## Shared fixture laboratory
+
+The language-neutral suite under
+[`protocol/fixtures/session-lifecycle/v1`](../../protocol/fixtures/session-lifecycle/v1) contains:
+
+- 16 legal transition cases;
+- 7 complete replay scenarios;
+- 27 invariant-failure cases; and
+- 110 complete wire-event instances validated through both existing protocol boundaries.
+
+Each of the 50 cases starts from idle. Setup inputs construct the prior state rather than injecting
+an arbitrary snapshot, and the expected result includes every normalized state or failure field.
+Both language suites replay every case twice.
 
 ## Failure scenarios to study
 
-| Scenario | Observable symptom | Responsible boundary | Safe outcome |
+| Scenario | Observable symptom | Safe outcome | Evidence |
 | --- | --- | --- | --- |
-| Reducer reads clock | Replay differs later | Reducer design | Time arrives as validated data, if needed. |
-| TUI invents `cancelling` | Python and UI disagree | Transition/input contract | Both consume equivalent authoritative facts. |
-| Sequence gap is ignored | Missing event silently changes state | Sequence guard | Structured invariant failure, no advance. |
-| Wrong session event arrives | State is contaminated | Identity guard | Event is rejected before mutation. |
-| Terminal event repeats | Two outcomes appear | Duplicate/terminal policy | Terminal state remains absorbing. |
-| Payload is copied into error | Secret reaches diagnostics | Failure normalization | Only safe state and event type are reported. |
+| Sequence 3 follows sequence 1 | One event is missing | `sequence_gap`; exact prior state | Shared invariant fixtures |
+| Sequence 1 repeats | Duplicate or regression | `sequence_regression`; no text append | Reducer and fixture tests |
+| A different session ID appears | Cross-session contamination attempt | `session_mismatch`; no mutation | Shared invariant fixtures |
+| Completion text differs from deltas | Stream summary disagrees with history | `assistant_completion_mismatch` | Both core suites |
+| Session completes before assistant confirmation | Terminal arrives too early | `session_completion_before_assistant` | Both core suites |
+| A terminal event repeats | Second outcome is attempted | `terminal_state_absorbing` | All three terminal fixtures |
+| A failure payload contains sensitive-looking text | Diagnostic could become an exfiltration path | Invariant failure omits payload and IDs | Failure-safety tests |
+| Cancellation arrives before mock start is emitted | Direct-caller scheduling race | Defer request until after `session.started` | Python runtime integration test |
 
 ## Production expansion
 
 ### Example enterprise scenario
 
-A distributed workflow platform maintains millions of long-lived executions, supports rolling
-schema upgrades, and must reconstruct state after crashes while auditors inspect transition history.
-It may need durable event logs, snapshots, migration policy, formal state models, property-based
-testing, partition ownership, and observability around poison events and replay lag.
+A distributed workflow platform runs millions of long-lived executions, deploys schema changes while
+old histories remain active, and reconstructs state after worker loss. It may need durable event
+logs, snapshots, migrations, formal state models, property-based sequence generation, poison-event
+quarantine, and transition telemetry.
 
-### Typical production capabilities and tools
+### Representative capabilities and tools
 
-These references illustrate optional capabilities, not recommendations for this MVP:
+These are illustrative capabilities, not approved dependencies for this repository:
 
-- [Redux Toolkit](https://redux.js.org/redux-toolkit/overview/) illustrates standardized reducer and
-  immutable-update patterns for complex UI state, while introducing framework conventions,
-  dependency upgrades, integration code, and migration work when state contracts change.
-- [XState](https://stately.ai/docs/xstate) illustrates executable statecharts, guards, visualization,
-  and model-based state-machine structure, but teams must absorb its modeling vocabulary, maintain
-  generated or visual artifacts, and govern version and machine migrations.
-- [Temporal](https://docs.temporal.io/workflow-execution) illustrates durable workflow event history
-  and replay across worker failures while adding persistent services, deterministic workflow rules,
-  worker operations, retention, and compatibility management.
-- [Hypothesis stateful testing](https://hypothesis.readthedocs.io/en/latest/stateful.html) illustrates
-  generation of action sequences to discover unexpected state-machine paths, at the cost of strategy
-  design, runtime, shrinking diagnosis, and maintenance of a faithful behavioral model.
-- [OpenTelemetry](https://opentelemetry.io/docs/) illustrates observing transition latency and
-  failures without putting telemetry side effects inside reducers, but requires instrumentation,
-  cardinality controls, storage, dashboards, privacy policy, and an owning operations path.
+- [Redux Toolkit](https://redux.js.org/redux-toolkit/overview/) standardizes complex UI reducer and
+  immutable-update patterns, with dependency, convention, and migration costs.
+- [XState](https://stately.ai/docs/xstate) provides executable statecharts, guards, visualization,
+  and model-based structure, but adds a modeling language and machine-version governance.
+- [Temporal](https://docs.temporal.io/workflow-execution) provides durable workflow history and
+  replay across worker failures, while requiring persistent services, workers, retention, and
+  compatibility operations.
+- [Hypothesis stateful testing](https://hypothesis.readthedocs.io/en/latest/stateful.html) generates
+  action sequences and shrinks failures, but teams must maintain strategies and a faithful model.
+- [OpenTelemetry](https://opentelemetry.io/docs/) observes transition latency and failures outside
+  reducers, with instrumentation, storage, privacy, cardinality, and on-call ownership costs.
 
 ### Local design versus production design
 
 | Dimension | This repository | Production expansion |
 | --- | --- | --- |
-| State lifetime | One local runtime/session | Durable, long-lived distributed workflows |
-| Specification | Reviewed table plus fixtures | Versioned statecharts/schemas and migration policy |
-| Storage | In memory; transcript later | Event log, snapshots, retention, replication |
-| Verification | Exhaustive small table and replay tests | Property/model checking and compatibility suites |
-| Failure handling | Structured invariant failure | Quarantine, repair, replay tooling, incident workflows |
-| Operations | Local diagnostics | Lag, transition, poison-event metrics and runbooks |
+| State lifetime | One in-memory local session | Durable, long-lived distributed workflow |
+| Specification | Reviewed table plus shared JSON | Versioned statecharts and migration policy |
+| Storage | In memory; transcript is next | Event log, snapshots, retention, replication |
+| Verification | Exhaustive small matrix and replay | Property, model, and compatibility suites |
+| Failure handling | Safe structured rejection | Quarantine, repair, replay, incident tooling |
+| Operations | Local deterministic checks | Lag, poison-event, and transition telemetry |
 
 ### Trade-offs and graduation signals
 
-Two small hand-written reducers keep the lifecycle visible and teach the core semantics. A statechart
-library reduces boilerplate for hierarchy and concurrency; durable workflow systems add recovery and
-coordination. Both introduce abstractions, upgrade constraints, and operational ownership. Graduate
-when the transition graph becomes hard to review, histories must survive process loss, or recurring
-cross-version and concurrency bugs exceed what shared fixtures can control.
+Two hand-written reducers duplicate a small amount of implementation code, but keep the learning
+surface direct and force the semantic contract into reviewed fixtures. The observed cost is adapter
+code between camelCase and snake_case plus careful handling of one-session versus multi-turn state.
+The benefit is that framework types, protocol parsing, effects, and rendering stay outside the core.
+
+Graduate when the graph becomes difficult to review, histories must survive process loss, schema
+migrations must replay old sessions, or recurring state bugs exceed what the shared matrix can
+control. Until then, a durable workflow service would add more operational responsibility than
+learning value.
 
 ## Practical exercises
 
-1. Enumerate which currently named protocol events can and cannot enter each planned state.
-2. Write one illegal transition fixture for every terminal state.
-3. Remove a sequence number from a replay and predict the exact invariant failure.
-4. Add the same event twice and compare an idempotent policy with a strict diagnostic policy.
-5. Sketch a property: “after a terminal event, no generated event sequence returns to active state.”
+1. Remove sequence 2 from a replay and predict the exact state and failure fields.
+2. Send `session.cancelled` with the start command's correlation ID and explain why it fails before
+   changing state.
+3. Add a late delta after each terminal status and compare the three normalized results.
+4. Sketch the future approval protocol fields without adding them to protocol v1.
+5. Change one fixture expectation and observe both language suites reject the same drift.
 
 ## Key takeaways
 
-- Reducers derive state; runtime code performs effects and emits authoritative facts.
-- Purity and explicit transitions make cross-language replay testable.
-- Sequence, session identity, duplicates, and terminal absorption are part of lifecycle correctness.
-- More formal or durable machinery is justified by graph complexity and recovery needs.
+- Effects create facts; reducers derive state; renderers display projections.
+- Command-originated facts and wire events can share lifecycle semantics without sharing a wire shape.
+- Correlation, identity, sequence, and completion checks are part of state correctness.
+- Terminal states stay absorbing even when duplicate or late input is diagnostically useful.
+- One shared fixture suite makes equivalent behavior reviewable across two native implementations.
 
 ## Glossary
 
-- **Absorbing state:** a state from which no legal transition returns to active work.
-- **Guard:** a condition that must hold before a transition is legal.
-- **Invariant failure:** a structured report that the event history violates a lifecycle rule.
+- **Absorbing state:** a terminal state from which no legal input returns to active work.
+- **Domain fact:** a trusted application-owned lifecycle input that is not necessarily a wire event.
+- **Guard:** a condition that must hold before a transition is accepted.
+- **Invariant failure:** a stable, payload-free report that history violates the lifecycle contract.
 - **Pure reducer:** a deterministic, side-effect-free state transition function.
-- **Replay equivalence:** matching defined state semantics after processing the same ordered inputs.
-- **Transition specification:** the canonical legal-edge and guard definition.
+- **Replay equivalence:** matching normalized results after processing the same ordered inputs.
+- **Transition specification:** the canonical legal edges, guards, and duplicate policy.
 
-See the shared [project glossary](../glossary.md) for reducer, event, session, terminal state, and sequence.
+See the shared [project glossary](../glossary.md) for the project-wide definitions.
 
 ## Further reading
 
 - [CAH-010 user story](../../user-stories/cah-010-session-state-reducer.md)
+- [Visual lesson](assets/cah-010-session-state-reducer.pptx)
+- [State-switchyard cover illustration](assets/cah-010-state-switchyard.png)
+- [Shared lifecycle fixture manifest](../../protocol/fixtures/session-lifecycle/v1/manifest.json)
 - [Agent-loop state and terminal outcomes](../agent-loop.md)
 - [Process protocol](../protocol.md)
 - [Evaluation assertion layers](../evaluation.md)
-- [Project glossary](../glossary.md)
 - [Redux Toolkit](https://redux.js.org/redux-toolkit/overview/)
 - [XState](https://stately.ai/docs/xstate)
 - [Temporal workflow execution](https://docs.temporal.io/workflow-execution)

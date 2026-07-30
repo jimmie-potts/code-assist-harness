@@ -28,8 +28,10 @@ Python serializes cancellation against assistant and terminal writes, and exactl
 completed outcome wins. CAH-009 records that implemented path in a fixture-backed
 [walking-skeleton guide](walking-skeleton.md), without adding runtime behavior. CAH-007 adds the
 offline `./scripts/check` gate and lockfile-driven Linux workflow that run the complete M0 evidence
-through one developer/CI entry point. Provider, tool, workspace-read, policy, transcript, and agent
-behavior remain target architecture; CAH-010 is the next dependency-ready unit.
+through one developer/CI entry point. CAH-010 begins M1 with equivalent pure Python and TypeScript
+session-lifecycle reducers, shared transition and replay fixtures, structured invariant failures,
+and integration through the mock runtime and TUI projection. Provider, tool, workspace-read, policy,
+transcript, and agent behavior remain target architecture; CAH-011 is next.
 
 ## Product boundary
 
@@ -133,9 +135,10 @@ After readiness, the implemented M0 session path is:
 
 ```text
 Ink input -> PythonRuntimeSupervisor.submitTask -> session.start NDJSON
-  -> runtime.run_runtime -> MockSessionRunner creates MockSession -> OrderedEventWriter
-  -> completed six-event tape or shortened cancelled tape -> supervisor validation
-  -> reduceSessionState -> App conversation and status rendering
+  -> runtime.run_runtime -> MockSessionRunner creates MockSession
+  -> OrderedEventWriter returns each validated event -> Python lifecycle reducer
+  -> completed six-event tape or shortened cancelled tape -> supervisor lifecycle reducer
+  -> multi-turn conversation adapter -> App conversation and status rendering
 
 Escape while running -> PythonRuntimeSupervisor.cancelSession -> session.cancel NDJSON
   -> MockSession.request_cancellation -> cooperative checkpoint wake-up
@@ -152,6 +155,13 @@ for immediate feedback, but the runtime independently rejects them as `invalid_t
 still drains the bounded mock, while user-requested cancellation wakes its current checkpoint.
 The [walking-skeleton guide](walking-skeleton.md) follows these exact functions and both terminal
 paths using normalized protocol examples checked by the Python and TypeScript test suites.
+
+CAH-010 keeps one-session lifecycle meaning separate from process effects and conversation history.
+`task.submitted`, `cancel.requested`, `approval.requested`, and `approval.resolved` are trusted domain
+facts; the latter two do not expand protocol v1. Wire events reach the cores only after Pydantic or
+Zod validation. The cores enforce correlation, identity, contiguous sequence, assistant completion,
+and absorbing terminal states. A new conversation turn starts a fresh core instead of transitioning
+an old terminal session back to active work.
 
 The implemented Node project uses npm, commits `package-lock.json`, pins Node 22.22.1, and enforces
 the Ink-compatible range `>=22.13.0 <23`. Python remains at version 3.12 and is managed with `uv`;
@@ -181,7 +191,8 @@ The implemented Python boundary is separated from later domain subsystems:
 ```text
 src/code_assist_harness/
 ├── runtime.py          Command loop, active-session routing, cancellation, and shutdown
-├── mock_session.py     Fixed response, cooperative checkpoints, and terminal selection
+├── mock_session.py     Fixed response, cooperative checkpoints, reducer integration, and terminals
+├── session_state.py    Pure one-session lifecycle reducer and replay
 ├── protocol/
 │   ├── models.py       Strict Pydantic v2 wire models
 │   ├── codec.py        Two-stage parsing and safe serialization
@@ -206,6 +217,7 @@ tui/
 │   ├── protocol-stream.ts
 │   ├── runtime-diagnostics.ts
 │   ├── runtime-supervisor.ts
+│   ├── session-lifecycle.ts
 │   ├── session-state.ts
 │   ├── run-application.tsx
 │   └── app.tsx
@@ -221,14 +233,17 @@ workspace, and creates `PythonRuntimeSupervisor`. The canonical repository gate 
 assertion.
 `run-application.tsx` projects supervisor state into `app.tsx`, routes `SIGHUP` and `SIGTERM` through
 Ink unmount, and guarantees cleanup after every exit path. `protocol.ts` validates hand-maintained
-Zod wire shapes and `protocol-stream.ts` owns byte framing. `session-state.ts` is the pure
-conversation and cancelling-state projection; `runtime-supervisor.ts` validates each tape, writes at
-most one cancellation command, and publishes updates, while `app.tsx` owns only the draft, Escape
-binding, and visible feedback.
+Zod wire shapes and `protocol-stream.ts` owns byte framing. `session-lifecycle.ts` is the pure
+absorbing one-session core; `session-state.ts` adapts accepted inputs into persistent multi-turn
+conversation history. `runtime-supervisor.ts` validates each active tape with the core, writes at
+most one cancellation command, and publishes accepted updates, while `app.tsx` owns only the draft,
+Escape binding, and visible feedback.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
-are intentionally hand-maintained at first. Schema generation is deferred until contract drift
-demonstrates that its additional machinery is worthwhile.
+are intentionally hand-maintained at first. The CAH-010 lifecycle fixtures contain domain facts and
+complete validated wire envelopes without making the fixture schema part of protocol v1. Schema
+generation is deferred until contract drift demonstrates that its additional machinery is
+worthwhile.
 
 ## Agent loop
 
@@ -337,9 +352,11 @@ read-only assistant milestone, not part of the initial scaffold.
 
 ## Persistence and privacy
 
-Validated session events are appended as JSONL beneath the WSL XDG state directory, normally
-`~/.local/state/code-assist-harness/`. A stable workspace identifier groups sessions without
-placing harness files into repositories or exposing personal paths in filenames.
+Trusted lifecycle inputs—application-owned domain facts and validated session events—are redacted,
+bounded, and appended as JSONL beneath the WSL XDG state directory, normally
+`~/.local/state/code-assist-harness/`. Their record order supports reducer replay from `idle`, while
+session events retain their authoritative sequence. A stable workspace identifier groups sessions
+without placing harness files into repositories or exposing personal paths in filenames.
 
 The default transcript contains user tasks, assistant output, tool metadata, approval decisions,
 and bounded tool results. It excludes raw provider payloads and environment values. Sensitive

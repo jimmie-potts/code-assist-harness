@@ -111,16 +111,17 @@ including sensitive data.
 
 ## Transcripts and privacy
 
-Validated events will be append-only evidence, not raw debug capture. By default, session
-transcripts will live under the WSL XDG state directory, normally
+Trusted lifecycle inputs—application-owned domain facts and validated session events—will be
+append-only evidence, not raw debug capture. By default, session transcripts will live under the
+WSL XDG state directory, normally
 `~/.local/state/code-assist-harness/`, indexed by a stable workspace identifier rather than a
 personal path in the filename. Files should use restrictive local permissions.
 
-The event stream may include user tasks, assistant text, bounded tool metadata and results, approval
+The transcript may include user tasks, assistant text, bounded tool metadata and results, approval
 decisions, changed-file paths, and validation outcomes. It excludes raw provider payloads and
-environment values. Configured sensitive values and recognized credentials are redacted before an
-event is persisted. Redaction is a safety net, so producers should avoid emitting secrets in the
-first place.
+environment values. Configured sensitive values and recognized credentials are redacted before a
+lifecycle input is persisted. Redaction is a safety net, so producers should avoid emitting secrets
+in the first place.
 
 Before the first real-provider release, the CLI must offer a documented `--no-transcript` mode.
 Transcript failure is visible to the user and cannot silently corrupt or rewrite session state.

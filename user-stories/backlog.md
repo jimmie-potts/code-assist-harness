@@ -31,8 +31,10 @@ cancellable: Escape sends one addressable request, Python cooperatively selects 
 or prior completion, and the TUI waits for the authoritative terminal event. CAH-009 turns that
 verified walking skeleton into a fixture-backed learner guide without changing production behavior.
 CAH-007 closes M0 with one offline `./scripts/check` gate and lockfile-driven Linux workflow for every
-current Python, TypeScript, protocol, policy, documentation, and real-boundary layer. CAH-010 is the
-next dependency-ready unit and begins the reusable M1 session-state model.
+current Python, TypeScript, protocol, policy, documentation, and real-boundary layer. CAH-010 begins
+M1 with pure Python and TypeScript lifecycle reducers, one reviewed transition matrix, shared replay
+fixtures, and integration through the existing mock and TUI paths. CAH-011 is the next
+dependency-ready unit and will persist validated history without becoming a second source of truth.
 
 ## Epic backlog
 
@@ -60,10 +62,10 @@ replayable local record.
 
 - Define commands, events, legal transitions, correlation IDs, and monotonic sequence numbers.
 - Make cancellation a first-class terminal state.
-- Write validated events to append-only, redacted transcripts.
-- Reconstruct visible state by replaying events.
+- Write trusted domain facts and validated events to append-only, redacted transcripts.
+- Reconstruct visible state by replaying ordered lifecycle inputs from `idle`.
 
-Implementation-ready stories at the start of this epic: CAH-010 and CAH-011.
+CAH-010 is complete. CAH-011 is the next dependency-ready story in this epic.
 
 ### E2 - Provider interface and explicit agent loop
 

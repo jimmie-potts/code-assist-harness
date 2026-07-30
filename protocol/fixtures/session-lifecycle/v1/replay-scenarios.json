@@ -1,0 +1,413 @@
+{
+  "fixture_version": 1,
+  "description": "Complete ordered histories replayed from idle. Both implementations replay every case twice and compare the normalized result.",
+  "cases": [
+    {
+      "id": "streamed_success",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_01",
+          "task": "Replay a streamed success."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_01",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:00.000Z",
+          "correlation_id": "cmd_start_replay_01",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_replay_01",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:00.100Z",
+          "correlation_id": "cmd_start_replay_01",
+          "payload": {"text": "State "}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_replay_01",
+          "sequence": 3,
+          "timestamp": "2026-07-30T15:00:00.200Z",
+          "correlation_id": "cmd_start_replay_01",
+          "payload": {"text": "accepted."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_replay_01",
+          "sequence": 4,
+          "timestamp": "2026-07-30T15:00:00.300Z",
+          "correlation_id": "cmd_start_replay_01",
+          "payload": {"text": "State accepted."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.completed",
+          "session_id": "ses_replay_01",
+          "sequence": 5,
+          "timestamp": "2026-07-30T15:00:00.400Z",
+          "correlation_id": "cmd_start_replay_01",
+          "payload": {}
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_replay_01",
+          "task": "Replay a streamed success.",
+          "session_id": "ses_replay_01",
+          "cancel_command_id": null,
+          "last_sequence": 5,
+          "assistant_text": "State accepted.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "cancellation_wins_before_output",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_02",
+          "task": "Replay cooperative cancellation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_02",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:01.000Z",
+          "correlation_id": "cmd_start_replay_02",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_replay_02",
+          "session_id": "ses_replay_02"
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.cancelled",
+          "session_id": "ses_replay_02",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:01.100Z",
+          "correlation_id": "cmd_cancel_replay_02",
+          "payload": {}
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "cancelled",
+          "start_command_id": "cmd_start_replay_02",
+          "task": "Replay cooperative cancellation.",
+          "session_id": "ses_replay_02",
+          "cancel_command_id": "cmd_cancel_replay_02",
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "approval_wait_resume_success",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_03",
+          "task": "Replay an approval pause."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_03",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:02.000Z",
+          "correlation_id": "cmd_start_replay_03",
+          "payload": {}
+        },
+        {"type": "approval.requested", "session_id": "ses_replay_03"},
+        {"type": "approval.resolved", "session_id": "ses_replay_03"},
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_replay_03",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:02.100Z",
+          "correlation_id": "cmd_start_replay_03",
+          "payload": {"text": "Approved."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_replay_03",
+          "sequence": 3,
+          "timestamp": "2026-07-30T15:00:02.200Z",
+          "correlation_id": "cmd_start_replay_03",
+          "payload": {"text": "Approved."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.completed",
+          "session_id": "ses_replay_03",
+          "sequence": 4,
+          "timestamp": "2026-07-30T15:00:02.300Z",
+          "correlation_id": "cmd_start_replay_03",
+          "payload": {}
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_replay_03",
+          "task": "Replay an approval pause.",
+          "session_id": "ses_replay_03",
+          "cancel_command_id": null,
+          "last_sequence": 4,
+          "assistant_text": "Approved.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "completion_wins_cancellation_race",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_04",
+          "task": "Replay the terminal race."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_04",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:03.000Z",
+          "correlation_id": "cmd_start_replay_04",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_replay_04",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:03.100Z",
+          "correlation_id": "cmd_start_replay_04",
+          "payload": {"text": "Finished first."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_replay_04",
+          "sequence": 3,
+          "timestamp": "2026-07-30T15:00:03.200Z",
+          "correlation_id": "cmd_start_replay_04",
+          "payload": {"text": "Finished first."}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_replay_04",
+          "session_id": "ses_replay_04"
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.completed",
+          "session_id": "ses_replay_04",
+          "sequence": 4,
+          "timestamp": "2026-07-30T15:00:03.300Z",
+          "correlation_id": "cmd_start_replay_04",
+          "payload": {}
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_replay_04",
+          "task": "Replay the terminal race.",
+          "session_id": "ses_replay_04",
+          "cancel_command_id": "cmd_cancel_replay_04",
+          "last_sequence": 4,
+          "assistant_text": "Finished first.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "failure_from_running",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_05",
+          "task": "Replay a running failure."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_05",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:04.000Z",
+          "correlation_id": "cmd_start_replay_05",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.failed",
+          "session_id": "ses_replay_05",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:04.100Z",
+          "correlation_id": "cmd_start_replay_05",
+          "payload": {
+            "code": "mock_failure",
+            "message": "The deterministic run stopped safely."
+          }
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_replay_05",
+          "task": "Replay a running failure.",
+          "session_id": "ses_replay_05",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "mock_failure",
+            "message": "The deterministic run stopped safely."
+          }
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "failure_from_awaiting_approval",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_06",
+          "task": "Replay failure during approval."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_06",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:05.000Z",
+          "correlation_id": "cmd_start_replay_06",
+          "payload": {}
+        },
+        {"type": "approval.requested", "session_id": "ses_replay_06"},
+        {
+          "protocol_version": 1,
+          "type": "session.failed",
+          "session_id": "ses_replay_06",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:05.100Z",
+          "correlation_id": "cmd_start_replay_06",
+          "payload": {
+            "code": "approval_interrupted",
+            "message": "The approval wait ended safely."
+          }
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_replay_06",
+          "task": "Replay failure during approval.",
+          "session_id": "ses_replay_06",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "approval_interrupted",
+            "message": "The approval wait ended safely."
+          }
+        },
+        "failure": null
+      }
+    },
+    {
+      "id": "failure_from_cancelling",
+      "initial_state": "idle",
+      "inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_replay_07",
+          "task": "Replay failure during cancellation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_replay_07",
+          "sequence": 1,
+          "timestamp": "2026-07-30T15:00:06.000Z",
+          "correlation_id": "cmd_start_replay_07",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_replay_07",
+          "session_id": "ses_replay_07"
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.failed",
+          "session_id": "ses_replay_07",
+          "sequence": 2,
+          "timestamp": "2026-07-30T15:00:06.100Z",
+          "correlation_id": "cmd_start_replay_07",
+          "payload": {
+            "code": "cancellation_failure",
+            "message": "The cancellation path stopped safely."
+          }
+        }
+      ],
+      "expected_result": {
+        "ok": true,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_replay_07",
+          "task": "Replay failure during cancellation.",
+          "session_id": "ses_replay_07",
+          "cancel_command_id": "cmd_cancel_replay_07",
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "cancellation_failure",
+            "message": "The cancellation path stopped safely."
+          }
+        },
+        "failure": null
+      }
+    }
+  ]
+}

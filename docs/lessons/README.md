@@ -42,7 +42,7 @@ clarify or reinforce the concept; they must never weaken accuracy, legibility, o
 | 7 | CAH-006 | [Session cancellation](cah-006-session-cancellation.md) | Done |
 | 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Done |
 | 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Done |
-| 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Planned |
+| 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Done |
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Planned |
 | 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | Planned |
 | 13 | CAH-021 | [One model turn](cah-021-one-model-turn.md) | Planned |

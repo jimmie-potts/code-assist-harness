@@ -2,6 +2,10 @@ import {Box, Text, useInput} from 'ink';
 import {useEffect, useRef, useState, type ReactElement} from 'react';
 
 import {SessionSubmissionError, type RuntimeState} from './runtime-supervisor.js';
+import {
+  isActiveSessionStatus,
+  isCancellableSessionStatus,
+} from './session-lifecycle.js';
 import type {ConversationTurn, SessionState} from './session-state.js';
 
 const WAIT_FOR_RUNTIME_FEEDBACK = 'Wait for the Python runtime to become ready.';
@@ -49,9 +53,7 @@ export function App({
       inputFeedback === WAIT_FOR_RUNTIME_FEEDBACK && runtimeState.status === 'running';
     const sessionBecameAvailable =
       inputFeedback === WAIT_FOR_SESSION_FEEDBACK &&
-      sessionState.status !== 'starting' &&
-      sessionState.status !== 'running' &&
-      sessionState.status !== 'cancelling';
+      !isActiveProjection(sessionState);
     if (runtimeBecameReady || sessionBecameAvailable) {
       setInputFeedback(undefined);
     }
@@ -59,7 +61,11 @@ export function App({
 
   useInput((input, key) => {
     if (key.escape) {
-      if (runtimeState.status === 'running' && sessionState.status === 'running') {
+      if (
+        runtimeState.status === 'running' &&
+        sessionState.status !== 'protocol-failed' &&
+        isCancellableSessionStatus(sessionState.status)
+      ) {
         onCancelSession();
       }
       return;
@@ -119,7 +125,11 @@ export function App({
       <Box marginTop={1}>
         <SessionStatus
           state={sessionState}
-          canCancel={runtimeState.status === 'running' && sessionState.status === 'running'}
+          canCancel={
+            runtimeState.status === 'running' &&
+            sessionState.status !== 'protocol-failed' &&
+            isCancellableSessionStatus(sessionState.status)
+          }
         />
       </Box>
 
@@ -180,12 +190,16 @@ function assistantText(turn: ConversationTurn): ReactElement | string {
       return <Text dimColor>Starting…</Text>;
     case 'running':
       return <Text dimColor>Waiting for response…</Text>;
+    case 'awaiting_approval':
+      return <Text dimColor>Waiting for approval…</Text>;
     case 'cancelling':
       return <Text dimColor>Cancelling…</Text>;
     case 'cancelled':
       return <Text dimColor>Cancelled before a response.</Text>;
     case 'completed':
       return <Text dimColor>No response text.</Text>;
+    case 'failed':
+      return <Text dimColor>Failed before a response.</Text>;
   }
 }
 
@@ -207,12 +221,29 @@ function SessionStatus({
           Session status: running · streaming response{canCancel ? ' · Esc to cancel' : ''}
         </Text>
       );
+    case 'awaiting_approval':
+      return (
+        <Text color="yellow">
+          Session status: awaiting approval · waiting for a decision
+          {canCancel ? ' · Esc to cancel' : ''}
+        </Text>
+      );
     case 'cancelling':
       return <Text color="yellow">Session status: cancelling · waiting for Python</Text>;
     case 'completed':
       return <Text color="green">Session status: completed · ready for another task</Text>;
     case 'cancelled':
       return <Text color="yellow">Session status: cancelled · ready for another task</Text>;
+    case 'failed': {
+      const failure = state.turns.at(-1)?.sessionFailure;
+      return (
+        <Text color="red">
+          Session status: failed
+          {failure === undefined ? '' : ` (${failure.code}) · ${failure.message}`} · ready for
+          another task
+        </Text>
+      );
+    }
     case 'protocol-failed':
       return <Text color="red">Session status: protocol failed · {state.protocolFailure}</Text>;
   }
@@ -234,11 +265,7 @@ function submitDraft(
     setInputFeedback(WAIT_FOR_RUNTIME_FEEDBACK);
     return;
   }
-  if (
-    sessionState.status === 'starting' ||
-    sessionState.status === 'running' ||
-    sessionState.status === 'cancelling'
-  ) {
+  if (isActiveProjection(sessionState)) {
     setInputFeedback(WAIT_FOR_SESSION_FEEDBACK);
     return;
   }
@@ -257,6 +284,10 @@ function submitDraft(
         : 'The task could not be submitted. Review the status and retry.',
     );
   }
+}
+
+function isActiveProjection(state: SessionState): boolean {
+  return state.status !== 'protocol-failed' && isActiveSessionStatus(state.status);
 }
 
 function RuntimeStatus({state}: {readonly state: RuntimeState}): ReactElement {

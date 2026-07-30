@@ -20,10 +20,16 @@ import {
 } from './protocol-stream.js';
 import {RuntimeDiagnostics} from './runtime-diagnostics.js';
 import {
-  INITIAL_SESSION_STATE,
-  reduceSessionState,
+  INITIAL_SESSION_LIFECYCLE_STATE,
+  isActiveSessionStatus,
+  isCancellableSessionStatus,
+  isTerminalSessionStatus,
+  reduceSessionLifecycle,
+  type SessionLifecycleState,
+} from './session-lifecycle.js';
+import {
+  formatSessionInvariantFailure,
   type SessionEvent,
-  type SessionState,
   type SessionUpdate,
 } from './session-state.js';
 
@@ -254,7 +260,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
   #failureShutdownRequested = false;
   #initializationCommandId: string | undefined;
   #readinessTimer: NodeJS.Timeout | undefined;
-  #sessionValidationState: SessionState = INITIAL_SESSION_STATE;
+  #sessionValidationState: SessionLifecycleState = INITIAL_SESSION_LIFECYCLE_STATE;
 
   /** Create a supervisor fixed to one canonical workspace. */
   public constructor(
@@ -324,11 +330,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     if (this.#state.status !== 'running') {
       throw new SessionSubmissionError('Wait for the Python runtime to become ready.');
     }
-    if (
-      this.#sessionValidationState.status === 'starting' ||
-      this.#sessionValidationState.status === 'running' ||
-      this.#sessionValidationState.status === 'cancelling'
-    ) {
+    if (isActiveSessionStatus(this.#sessionValidationState.status)) {
       throw new SessionSubmissionError('Wait for the active session to finish.');
     }
 
@@ -357,16 +359,14 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     const update: SessionUpdate = {type: 'task.submitted', commandId, task};
     // The supervisor validates only the active tape; conversation history remains solely in the
     // application projection that consumes the published updates.
-    const validationState =
-      this.#sessionValidationState.status === 'completed' ||
-      this.#sessionValidationState.status === 'cancelled'
-        ? INITIAL_SESSION_STATE
+    const validationState = isTerminalSessionStatus(this.#sessionValidationState.status)
+      ? INITIAL_SESSION_LIFECYCLE_STATE
         : this.#sessionValidationState;
-    const nextState = reduceSessionState(validationState, update);
-    if (nextState.status === 'protocol-failed') {
+    const result = reduceSessionLifecycle(validationState, update);
+    if (!result.ok) {
       throw new SessionSubmissionError('The task could not enter a valid local session state.');
     }
-    this.#sessionValidationState = nextState;
+    this.#sessionValidationState = result.state;
     this.#publishSessionUpdate(update);
 
     void this.#writeEncodedCommandLine(commandLine).catch(() => {
@@ -390,11 +390,14 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
    * @returns `true` when one command was accepted for writing, otherwise `false`.
    */
   public cancelSession(): boolean {
-    if (this.#state.status !== 'running' || this.#sessionValidationState.status !== 'running') {
+    if (
+      this.#state.status !== 'running' ||
+      !isCancellableSessionStatus(this.#sessionValidationState.status)
+    ) {
       return false;
     }
-    const turn = this.#sessionValidationState.turns.at(-1);
-    if (turn?.status !== 'running' || turn.sessionId === undefined) {
+    const sessionId = this.#sessionValidationState.sessionId;
+    if (sessionId === null) {
       return false;
     }
 
@@ -406,7 +409,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
         type: 'session.cancel',
         command_id: commandId,
         timestamp: this.#now(),
-        payload: {session_id: turn.sessionId},
+        payload: {session_id: sessionId},
       });
     } catch {
       this.#transitionToProtocolFailure(
@@ -419,17 +422,17 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     const update: SessionUpdate = {
       type: 'cancel.requested',
       commandId,
-      sessionId: turn.sessionId,
+      sessionId,
     };
-    const nextState = reduceSessionState(this.#sessionValidationState, update);
-    if (nextState.status === 'protocol-failed') {
+    const result = reduceSessionLifecycle(this.#sessionValidationState, update);
+    if (!result.ok) {
       this.#transitionToProtocolFailure(
         'unexpected_event',
-        nextState.protocolFailure ?? 'Cancellation could not enter a valid local session state.',
+        formatSessionInvariantFailure(result.failure),
       );
       return false;
     }
-    this.#sessionValidationState = nextState;
+    this.#sessionValidationState = result.state;
     this.#publishSessionUpdate(update);
 
     void this.#writeEncodedCommandLine(commandLine).catch(() => {
@@ -734,15 +737,15 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
 
   #acceptSessionEvent(event: SessionEvent): void {
     const update: SessionUpdate = {type: 'event.received', event};
-    const nextState = reduceSessionState(this.#sessionValidationState, update);
-    if (nextState.status === 'protocol-failed') {
+    const result = reduceSessionLifecycle(this.#sessionValidationState, event);
+    if (!result.ok) {
       this.#transitionToProtocolFailure(
         'unexpected_event',
-        nextState.protocolFailure ?? 'Python runtime sent an invalid session event transition.',
+        formatSessionInvariantFailure(result.failure),
       );
       return;
     }
-    this.#sessionValidationState = nextState;
+    this.#sessionValidationState = result.state;
     this.#publishSessionUpdate(update);
   }
 
@@ -840,7 +843,8 @@ function isSessionEvent(event: ProtocolEvent): event is SessionEvent {
     event.type === 'assistant.delta' ||
     event.type === 'assistant.completed' ||
     event.type === 'session.completed' ||
-    event.type === 'session.cancelled'
+    event.type === 'session.cancelled' ||
+    event.type === 'session.failed'
   );
 }
 

@@ -71,6 +71,13 @@ results without replacing the event sequence number.
 A harness-generated unified representation of proposed or applied file changes. The model
 proposes structured edit operations; it does not supply the authoritative review diff.
 
+## Domain fact
+
+A trusted application-owned lifecycle input that does not necessarily cross the process protocol.
+`task.submitted`, `cancel.requested`, `approval.requested`, and `approval.resolved` are CAH-010
+domain facts. They share reducer semantics with validated wire events without becoming protocol-v1
+message types.
+
 ## Edit batch
 
 One immutable proposal containing one or more exact replacement, create, or delete operations.
@@ -98,7 +105,14 @@ execution environment.
 ## Human-readable summary
 
 A compact session artifact containing the task, terminal outcome, changed files, and validation
-results. It complements rather than replaces the append-only event transcript.
+results. It complements rather than replaces the append-only lifecycle transcript.
+
+## Invariant failure
+
+A structured rejection from a pure reducer when an otherwise trusted input violates lifecycle
+ordering, correlation, identity, sequence, assistant-completion, or terminal rules. It returns the
+exact prior state and includes only a stable code, prior status, and input type; it excludes payloads,
+identifiers, and user or assistant text.
 
 ## Limit
 
@@ -148,8 +162,15 @@ will implement the same port; OpenAI will be the first real provider adapter. Th
 
 ## Reducer
 
-A pure function that derives the next state from the current state and an event. Replaying the same
-ordered event list through a reducer must produce the same result.
+A pure function that derives the next state from the current state and one trusted domain fact or
+validated event. It performs no I/O, clock access, randomness, mutation, parsing, or policy work.
+Replaying the same ordered inputs through a reducer must produce the same result.
+
+## Replay
+
+Deterministically folding trusted ordered lifecycle inputs over an initial state. Replay derives
+state and stops at the first invariant failure; it does not resume work or repeat provider, tool,
+filesystem, or subprocess effects.
 
 ## Runtime
 
@@ -159,8 +180,8 @@ terminal interface.
 
 ## Sequence number
 
-A monotonically increasing integer on session events. It establishes event order independently of
-timestamps and correlation IDs.
+A positive, contiguous integer on session events. It establishes event order independently of
+timestamps and correlation IDs; a gap, duplicate, or regression is a lifecycle invariant failure.
 
 ## Session
 
@@ -203,8 +224,10 @@ its capability and effective policy.
 
 ## Transcript
 
-An append-only JSONL record of validated session events stored under the WSL XDG state directory
-unless disabled. It contains redacted domain data, not raw provider payloads or environment values.
+An append-only JSONL record of trusted lifecycle inputs stored under the WSL XDG state directory
+unless disabled. It preserves reducer order across application-owned domain facts and validated
+session events after redaction and bounding; it never contains raw provider payloads or environment
+values and does not replace authoritative in-memory state.
 
 ## TUI
 

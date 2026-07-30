@@ -1,0 +1,89 @@
+{
+  "fixture_version": 1,
+  "name": "CAH-010 session lifecycle reducer conformance",
+  "description": "Language-neutral inputs and normalized outcomes for the pure Python and TypeScript session lifecycle reducers.",
+  "canonical_initial_state": {
+    "status": "idle",
+    "start_command_id": null,
+    "task": null,
+    "session_id": null,
+    "cancel_command_id": null,
+    "last_sequence": 0,
+    "assistant_text": "",
+    "assistant_completed": false,
+    "session_failure": null
+  },
+  "input_contract": {
+    "domain_facts": [
+      {
+        "type": "task.submitted",
+        "fields": ["command_id", "task"],
+        "wire_message": false
+      },
+      {
+        "type": "cancel.requested",
+        "fields": ["command_id", "session_id"],
+        "wire_message": false
+      },
+      {
+        "type": "approval.requested",
+        "fields": ["session_id"],
+        "wire_message": false
+      },
+      {
+        "type": "approval.resolved",
+        "fields": ["session_id"],
+        "wire_message": false
+      }
+    ],
+    "wire_events": [
+      "session.started",
+      "assistant.delta",
+      "assistant.completed",
+      "session.completed",
+      "session.cancelled",
+      "session.failed"
+    ],
+    "wire_note": "Wire events are complete protocol v1 envelopes and must be validated by the existing Pydantic or Zod boundary before reduction. Approval inputs are harness-owned domain facts only; they are not NDJSON protocol v1 messages and must not be added to the wire manifest by this fixture set."
+  },
+  "normalization": {
+    "state_fields": [
+      "status",
+      "start_command_id",
+      "task",
+      "session_id",
+      "cancel_command_id",
+      "last_sequence",
+      "assistant_text",
+      "assistant_completed",
+      "session_failure"
+    ],
+    "optional_state_fields": "Absent identifiers and session failure are represented by explicit JSON null values; last_sequence is zero until session.started is accepted.",
+    "failure_fields": ["code", "prior_status", "event_type"],
+    "failure_safety": "Invariant failures contain stable classifications only and never copy task text, assistant text, failure messages, identifiers, or validator details."
+  },
+  "policy": {
+    "case_origin": "Every case begins from canonical_initial_state; setup_inputs are reduced before the one subject input.",
+    "ordering": "After session.started, wire events must use the same session_id and the next monotonic sequence.",
+    "correlation": "session.cancelled correlates to cancel_command_id; every other wire event correlates to start_command_id.",
+    "terminal": "completed, cancelled, and failed are absorbing. Every later input returns terminal_state_absorbing and the exact prior state, including duplicate terminal events.",
+    "replay": "A replay stops on the first invariant failure. Replaying the same validated ordered inputs from idle must produce the same normalized result."
+  },
+  "files": [
+    {
+      "path": "legal-transitions.json",
+      "case_count": 16,
+      "purpose": "Every legal row in the initial transition matrix."
+    },
+    {
+      "path": "replay-scenarios.json",
+      "case_count": 7,
+      "purpose": "Complete deterministic histories for successful, cancelled, approval, race, and failure outcomes."
+    },
+    {
+      "path": "invariant-failures.json",
+      "case_count": 27,
+      "purpose": "Illegal edges, guard failures, and strict absorbing-terminal behavior."
+    }
+  ]
+}

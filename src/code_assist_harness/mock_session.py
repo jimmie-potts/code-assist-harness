@@ -7,6 +7,14 @@ from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from .protocol import CommandId, OrderedEventWriter, SessionId, SessionStartCommand
+from .session_state import (
+    CancelRequested,
+    SessionInvariantFailure,
+    SessionState,
+    SessionUpdate,
+    TaskSubmitted,
+    reduce_session_state,
+)
 
 MOCK_RESPONSE_DELTAS = (
     "Mock response: ",
@@ -69,11 +77,24 @@ class MockSession:
         self._terminal_outcome: _TerminalOutcome | None = None
         self._terminal_emitted = False
         self._run_started = False
+        initial_reduction = reduce_session_state(
+            SessionState(),
+            TaskSubmitted(command_id=command.command_id, task=command.payload.task),
+        )
+        if not initial_reduction.ok:
+            raise _lifecycle_invariant_error(initial_reduction.failure)
+        self._lifecycle_state = initial_reduction.state
+        self._deferred_cancellation: CancelRequested | None = None
 
     @property
     def session_id(self) -> SessionId:
         """Return the stable Python-owned session identity used for cancellation routing."""
         return self._session_id
+
+    @property
+    def lifecycle_state(self) -> SessionState:
+        """Return the immutable state derived from accepted commands and emitted events."""
+        return self._lifecycle_state
 
     async def request_cancellation(
         self,
@@ -102,6 +123,14 @@ class MockSession:
             if self._terminal_outcome is not None:
                 return "terminal"
 
+            cancellation = CancelRequested(command_id=command_id, session_id=self._session_id)
+            if self._lifecycle_state.status == "starting":
+                # A direct caller may cancel after allocation but before ``run`` publishes
+                # session.started. Preserve the legal matrix by reducing this fact immediately
+                # after the started event rather than inventing starting -> cancelling.
+                self._deferred_cancellation = cancellation
+            else:
+                self._reduce_lifecycle(cancellation)
             self._cancel_command_id = command_id
             self._terminal_outcome = "cancelled"
             self._cancellation_requested.set()
@@ -127,12 +156,17 @@ class MockSession:
             raise RuntimeError("a mock session can run only once")
         self._run_started = True
 
-        await self._writer.emit_session(
+        started = await self._writer.emit_session(
             "session.started",
             self._session_id,
             {},
             correlation_id=self._command.command_id,
         )
+        async with self._state_lock:
+            self._reduce_lifecycle(started)
+            if self._deferred_cancellation is not None:
+                self._reduce_lifecycle(self._deferred_cancellation)
+                self._deferred_cancellation = None
 
         accumulated: list[str] = []
         for index, delta in enumerate(MOCK_RESPONSE_DELTAS, start=1):
@@ -180,12 +214,13 @@ class MockSession:
         async with self._state_lock:
             if self._terminal_outcome is not None:
                 return False
-            await self._writer.emit_session(
+            event = await self._writer.emit_session(
                 "assistant.delta",
                 self._session_id,
                 {"text": delta},
                 correlation_id=self._command.command_id,
             )
+            self._reduce_lifecycle(event)
             return True
 
     async def _emit_completion(self, completed_text: str) -> bool:
@@ -193,21 +228,23 @@ class MockSession:
         async with self._state_lock:
             if self._terminal_outcome is not None:
                 return False
-            await self._writer.emit_session(
+            assistant_completed = await self._writer.emit_session(
                 "assistant.completed",
                 self._session_id,
                 {"text": completed_text},
                 correlation_id=self._command.command_id,
             )
+            self._reduce_lifecycle(assistant_completed)
             # Selection precedes the shielded terminal write. A cancellation waiting on the lock
             # must observe that completion already won even if the sink has not returned yet.
             self._terminal_outcome = "completed"
-            await self._writer.emit_session(
+            session_completed = await self._writer.emit_session(
                 "session.completed",
                 self._session_id,
                 {},
                 correlation_id=self._command.command_id,
             )
+            self._reduce_lifecycle(session_completed)
             self._terminal_emitted = True
             return True
 
@@ -218,13 +255,32 @@ class MockSession:
                 return
             if self._cancel_command_id is None:
                 raise RuntimeError("cancelled session is missing its command correlation")
-            await self._writer.emit_session(
+            session_cancelled = await self._writer.emit_session(
                 "session.cancelled",
                 self._session_id,
                 {},
                 correlation_id=self._cancel_command_id,
             )
+            self._reduce_lifecycle(session_cancelled)
             self._terminal_emitted = True
+
+    def _reduce_lifecycle(self, update: SessionUpdate) -> None:
+        """Accept one integration fact or raise a bounded payload-free invariant error."""
+        reduction = reduce_session_state(self._lifecycle_state, update)
+        if not reduction.ok:
+            raise _lifecycle_invariant_error(reduction.failure)
+        self._lifecycle_state = reduction.state
+
+
+def _lifecycle_invariant_error(failure: SessionInvariantFailure | None) -> RuntimeError:
+    """Build a safe integration error without copying state or event payload values."""
+    if failure is None:
+        return RuntimeError("session lifecycle reduction failed without a classification")
+    return RuntimeError(
+        "session lifecycle invariant failed: "
+        f"code={failure.code} prior_status={failure.prior_status} "
+        f"event_type={failure.event_type}"
+    )
 
 
 class MockSessionRunner:

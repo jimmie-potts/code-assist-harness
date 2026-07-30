@@ -1,0 +1,1411 @@
+{
+  "fixture_version": 1,
+  "description": "Strict diagnostic failures. Each case starts from idle, applies setup_inputs successfully, then rejects input without changing the prior normalized state.",
+  "cases": [
+    {
+      "id": "illegal_idle_session_started",
+      "initial_state": "idle",
+      "setup_inputs": [],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.started",
+        "session_id": "ses_invariant_01",
+        "sequence": 1,
+        "timestamp": "2026-07-30T16:00:00.000Z",
+        "correlation_id": "cmd_start_invariant_01",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "idle",
+          "start_command_id": null,
+          "task": null,
+          "session_id": null,
+          "cancel_command_id": null,
+          "last_sequence": 0,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "idle",
+          "event_type": "session.started"
+        }
+      }
+    },
+    {
+      "id": "illegal_starting_assistant_delta",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_02",
+          "task": "Reject output before session start."
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_02",
+        "sequence": 1,
+        "timestamp": "2026-07-30T16:00:01.000Z",
+        "correlation_id": "cmd_start_invariant_02",
+        "payload": {"text": "Too early."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "starting",
+          "start_command_id": "cmd_start_invariant_02",
+          "task": "Reject output before session start.",
+          "session_id": null,
+          "cancel_command_id": null,
+          "last_sequence": 0,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "starting",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "illegal_starting_cancel_requested",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_03",
+          "task": "Reject unaddressable cancellation."
+        }
+      ],
+      "input": {
+        "type": "cancel.requested",
+        "command_id": "cmd_cancel_invariant_03",
+        "session_id": "ses_invariant_03"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "starting",
+          "start_command_id": "cmd_start_invariant_03",
+          "task": "Reject unaddressable cancellation.",
+          "session_id": null,
+          "cancel_command_id": null,
+          "last_sequence": 0,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "starting",
+          "event_type": "cancel.requested"
+        }
+      }
+    },
+    {
+      "id": "illegal_running_second_task",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_04",
+          "task": "Keep one active task."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_04",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:02.000Z",
+          "correlation_id": "cmd_start_invariant_04",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "type": "task.submitted",
+        "command_id": "cmd_start_invariant_04b",
+        "task": "Do not overlap this task."
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_04",
+          "task": "Keep one active task.",
+          "session_id": "ses_invariant_04",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "running",
+          "event_type": "task.submitted"
+        }
+      }
+    },
+    {
+      "id": "illegal_running_approval_resolved",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_05",
+          "task": "Require a request before resolution."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_05",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:03.000Z",
+          "correlation_id": "cmd_start_invariant_05",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "type": "approval.resolved",
+        "session_id": "ses_invariant_05"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_05",
+          "task": "Require a request before resolution.",
+          "session_id": "ses_invariant_05",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "running",
+          "event_type": "approval.resolved"
+        }
+      }
+    },
+    {
+      "id": "illegal_awaiting_approval_assistant_delta",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_06",
+          "task": "Hold output during approval."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_06",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:04.000Z",
+          "correlation_id": "cmd_start_invariant_06",
+          "payload": {}
+        },
+        {
+          "type": "approval.requested",
+          "session_id": "ses_invariant_06"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_06",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:04.100Z",
+        "correlation_id": "cmd_start_invariant_06",
+        "payload": {"text": "Still waiting."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "awaiting_approval",
+          "start_command_id": "cmd_start_invariant_06",
+          "task": "Hold output during approval.",
+          "session_id": "ses_invariant_06",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "awaiting_approval",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "illegal_cancelling_approval_requested",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_07",
+          "task": "Do not reopen approval while cancelling."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_07",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:05.000Z",
+          "correlation_id": "cmd_start_invariant_07",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_invariant_07",
+          "session_id": "ses_invariant_07"
+        }
+      ],
+      "input": {
+        "type": "approval.requested",
+        "session_id": "ses_invariant_07"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "cancelling",
+          "start_command_id": "cmd_start_invariant_07",
+          "task": "Do not reopen approval while cancelling.",
+          "session_id": "ses_invariant_07",
+          "cancel_command_id": "cmd_cancel_invariant_07",
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "cancelling",
+          "event_type": "approval.requested"
+        }
+      }
+    },
+    {
+      "id": "illegal_running_session_cancelled",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_08",
+          "task": "Require a cancellation request."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_08",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:06.000Z",
+          "correlation_id": "cmd_start_invariant_08",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.cancelled",
+        "session_id": "ses_invariant_08",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:06.100Z",
+        "correlation_id": "cmd_cancel_invariant_08",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_08",
+          "task": "Require a cancellation request.",
+          "session_id": "ses_invariant_08",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "illegal_transition",
+          "prior_status": "running",
+          "event_type": "session.cancelled"
+        }
+      }
+    },
+    {
+      "id": "session_started_correlation_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_09",
+          "task": "Reject a foreign start correlation."
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.started",
+        "session_id": "ses_invariant_09",
+        "sequence": 1,
+        "timestamp": "2026-07-30T16:00:07.000Z",
+        "correlation_id": "cmd_start_foreign_09",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "starting",
+          "start_command_id": "cmd_start_invariant_09",
+          "task": "Reject a foreign start correlation.",
+          "session_id": null,
+          "cancel_command_id": null,
+          "last_sequence": 0,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "correlation_mismatch",
+          "prior_status": "starting",
+          "event_type": "session.started"
+        }
+      }
+    },
+    {
+      "id": "assistant_delta_correlation_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_10",
+          "task": "Reject a foreign stream correlation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_10",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:08.000Z",
+          "correlation_id": "cmd_start_invariant_10",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_10",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:08.100Z",
+        "correlation_id": "cmd_start_foreign_10",
+        "payload": {"text": "Foreign."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_10",
+          "task": "Reject a foreign stream correlation.",
+          "session_id": "ses_invariant_10",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "correlation_mismatch",
+          "prior_status": "running",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "session_cancelled_correlation_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_11",
+          "task": "Require cancellation correlation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_11",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:09.000Z",
+          "correlation_id": "cmd_start_invariant_11",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_invariant_11",
+          "session_id": "ses_invariant_11"
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.cancelled",
+        "session_id": "ses_invariant_11",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:09.100Z",
+        "correlation_id": "cmd_cancel_foreign_11",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "cancelling",
+          "start_command_id": "cmd_start_invariant_11",
+          "task": "Require cancellation correlation.",
+          "session_id": "ses_invariant_11",
+          "cancel_command_id": "cmd_cancel_invariant_11",
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "correlation_mismatch",
+          "prior_status": "cancelling",
+          "event_type": "session.cancelled"
+        }
+      }
+    },
+    {
+      "id": "wire_session_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_12",
+          "task": "Reject a foreign session event."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_12",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:10.000Z",
+          "correlation_id": "cmd_start_invariant_12",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_foreign_12",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:10.100Z",
+        "correlation_id": "cmd_start_invariant_12",
+        "payload": {"text": "Wrong session."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_12",
+          "task": "Reject a foreign session event.",
+          "session_id": "ses_invariant_12",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "session_mismatch",
+          "prior_status": "running",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "cancel_requested_session_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_13",
+          "task": "Target cancellation to one session."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_13",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:11.000Z",
+          "correlation_id": "cmd_start_invariant_13",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "type": "cancel.requested",
+        "command_id": "cmd_cancel_invariant_13",
+        "session_id": "ses_foreign_13"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_13",
+          "task": "Target cancellation to one session.",
+          "session_id": "ses_invariant_13",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "session_mismatch",
+          "prior_status": "running",
+          "event_type": "cancel.requested"
+        }
+      }
+    },
+    {
+      "id": "approval_requested_session_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_14",
+          "task": "Target approval to one session."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_14",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:12.000Z",
+          "correlation_id": "cmd_start_invariant_14",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "type": "approval.requested",
+        "session_id": "ses_foreign_14"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_14",
+          "task": "Target approval to one session.",
+          "session_id": "ses_invariant_14",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "session_mismatch",
+          "prior_status": "running",
+          "event_type": "approval.requested"
+        }
+      }
+    },
+    {
+      "id": "approval_resolved_session_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_15",
+          "task": "Resolve approval for the active session."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_15",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:13.000Z",
+          "correlation_id": "cmd_start_invariant_15",
+          "payload": {}
+        },
+        {
+          "type": "approval.requested",
+          "session_id": "ses_invariant_15"
+        }
+      ],
+      "input": {
+        "type": "approval.resolved",
+        "session_id": "ses_foreign_15"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "awaiting_approval",
+          "start_command_id": "cmd_start_invariant_15",
+          "task": "Resolve approval for the active session.",
+          "session_id": "ses_invariant_15",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "session_mismatch",
+          "prior_status": "awaiting_approval",
+          "event_type": "approval.resolved"
+        }
+      }
+    },
+    {
+      "id": "wire_sequence_gap",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_16",
+          "task": "Detect a missing event."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_16",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:14.000Z",
+          "correlation_id": "cmd_start_invariant_16",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_16",
+        "sequence": 3,
+        "timestamp": "2026-07-30T16:00:14.100Z",
+        "correlation_id": "cmd_start_invariant_16",
+        "payload": {"text": "Skipped sequence two."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_16",
+          "task": "Detect a missing event.",
+          "session_id": "ses_invariant_16",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "sequence_gap",
+          "prior_status": "running",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "wire_sequence_regression_duplicate",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_17",
+          "task": "Detect a repeated sequence."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_17",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:15.000Z",
+          "correlation_id": "cmd_start_invariant_17",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_invariant_17",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:15.100Z",
+          "correlation_id": "cmd_start_invariant_17",
+          "payload": {"text": "First."}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_17",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:15.200Z",
+        "correlation_id": "cmd_start_invariant_17",
+        "payload": {"text": "Duplicate."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_17",
+          "task": "Detect a repeated sequence.",
+          "session_id": "ses_invariant_17",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "First.",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "sequence_regression",
+          "prior_status": "running",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "assistant_completion_mismatch",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_18",
+          "task": "Confirm exact accumulated text."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_18",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:16.000Z",
+          "correlation_id": "cmd_start_invariant_18",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_invariant_18",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:16.100Z",
+          "correlation_id": "cmd_start_invariant_18",
+          "payload": {"text": "Exact."}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.completed",
+        "session_id": "ses_invariant_18",
+        "sequence": 3,
+        "timestamp": "2026-07-30T16:00:16.200Z",
+        "correlation_id": "cmd_start_invariant_18",
+        "payload": {"text": "Different."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_18",
+          "task": "Confirm exact accumulated text.",
+          "session_id": "ses_invariant_18",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "Exact.",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "assistant_completion_mismatch",
+          "prior_status": "running",
+          "event_type": "assistant.completed"
+        }
+      }
+    },
+    {
+      "id": "assistant_already_completed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_19",
+          "task": "Accept one assistant completion."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_19",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:17.000Z",
+          "correlation_id": "cmd_start_invariant_19",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_invariant_19",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:17.100Z",
+          "correlation_id": "cmd_start_invariant_19",
+          "payload": {"text": "Once."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_invariant_19",
+          "sequence": 3,
+          "timestamp": "2026-07-30T16:00:17.200Z",
+          "correlation_id": "cmd_start_invariant_19",
+          "payload": {"text": "Once."}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.completed",
+        "session_id": "ses_invariant_19",
+        "sequence": 4,
+        "timestamp": "2026-07-30T16:00:17.300Z",
+        "correlation_id": "cmd_start_invariant_19",
+        "payload": {"text": "Once."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_19",
+          "task": "Accept one assistant completion.",
+          "session_id": "ses_invariant_19",
+          "cancel_command_id": null,
+          "last_sequence": 3,
+          "assistant_text": "Once.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "assistant_already_completed",
+          "prior_status": "running",
+          "event_type": "assistant.completed"
+        }
+      }
+    },
+    {
+      "id": "assistant_delta_after_completion",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_20",
+          "task": "Stop deltas after confirmation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_20",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:18.000Z",
+          "correlation_id": "cmd_start_invariant_20",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_invariant_20",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:18.100Z",
+          "correlation_id": "cmd_start_invariant_20",
+          "payload": {"text": "Final."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_invariant_20",
+          "sequence": 3,
+          "timestamp": "2026-07-30T16:00:18.200Z",
+          "correlation_id": "cmd_start_invariant_20",
+          "payload": {"text": "Final."}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_20",
+        "sequence": 4,
+        "timestamp": "2026-07-30T16:00:18.300Z",
+        "correlation_id": "cmd_start_invariant_20",
+        "payload": {"text": "Too late."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_20",
+          "task": "Stop deltas after confirmation.",
+          "session_id": "ses_invariant_20",
+          "cancel_command_id": null,
+          "last_sequence": 3,
+          "assistant_text": "Final.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "assistant_after_completion",
+          "prior_status": "running",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "session_completion_before_assistant",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_21",
+          "task": "Require assistant confirmation first."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_21",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:19.000Z",
+          "correlation_id": "cmd_start_invariant_21",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.completed",
+        "session_id": "ses_invariant_21",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:19.100Z",
+        "correlation_id": "cmd_start_invariant_21",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "running",
+          "start_command_id": "cmd_start_invariant_21",
+          "task": "Require assistant confirmation first.",
+          "session_id": "ses_invariant_21",
+          "cancel_command_id": null,
+          "last_sequence": 1,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "session_completion_before_assistant",
+          "prior_status": "running",
+          "event_type": "session.completed"
+        }
+      }
+    },
+    {
+      "id": "completed_duplicate_terminal_absorbed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_22",
+          "task": "Complete exactly once."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_22",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:20.000Z",
+          "correlation_id": "cmd_start_invariant_22",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_invariant_22",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:20.100Z",
+          "correlation_id": "cmd_start_invariant_22",
+          "payload": {"text": "Done."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_invariant_22",
+          "sequence": 3,
+          "timestamp": "2026-07-30T16:00:20.200Z",
+          "correlation_id": "cmd_start_invariant_22",
+          "payload": {"text": "Done."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.completed",
+          "session_id": "ses_invariant_22",
+          "sequence": 4,
+          "timestamp": "2026-07-30T16:00:20.300Z",
+          "correlation_id": "cmd_start_invariant_22",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.completed",
+        "session_id": "ses_invariant_22",
+        "sequence": 4,
+        "timestamp": "2026-07-30T16:00:20.400Z",
+        "correlation_id": "cmd_start_invariant_22",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_invariant_22",
+          "task": "Complete exactly once.",
+          "session_id": "ses_invariant_22",
+          "cancel_command_id": null,
+          "last_sequence": 4,
+          "assistant_text": "Done.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "terminal_state_absorbing",
+          "prior_status": "completed",
+          "event_type": "session.completed"
+        }
+      }
+    },
+    {
+      "id": "completed_late_delta_absorbed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_23",
+          "task": "Absorb output after completion."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_23",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:21.000Z",
+          "correlation_id": "cmd_start_invariant_23",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.delta",
+          "session_id": "ses_invariant_23",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:21.100Z",
+          "correlation_id": "cmd_start_invariant_23",
+          "payload": {"text": "Done."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "assistant.completed",
+          "session_id": "ses_invariant_23",
+          "sequence": 3,
+          "timestamp": "2026-07-30T16:00:21.200Z",
+          "correlation_id": "cmd_start_invariant_23",
+          "payload": {"text": "Done."}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.completed",
+          "session_id": "ses_invariant_23",
+          "sequence": 4,
+          "timestamp": "2026-07-30T16:00:21.300Z",
+          "correlation_id": "cmd_start_invariant_23",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_23",
+        "sequence": 5,
+        "timestamp": "2026-07-30T16:00:21.400Z",
+        "correlation_id": "cmd_start_invariant_23",
+        "payload": {"text": "Late."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "completed",
+          "start_command_id": "cmd_start_invariant_23",
+          "task": "Absorb output after completion.",
+          "session_id": "ses_invariant_23",
+          "cancel_command_id": null,
+          "last_sequence": 4,
+          "assistant_text": "Done.",
+          "assistant_completed": true,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "terminal_state_absorbing",
+          "prior_status": "completed",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "cancelled_duplicate_terminal_absorbed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_24",
+          "task": "Cancel exactly once."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_24",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:22.000Z",
+          "correlation_id": "cmd_start_invariant_24",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_invariant_24",
+          "session_id": "ses_invariant_24"
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.cancelled",
+          "session_id": "ses_invariant_24",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:22.100Z",
+          "correlation_id": "cmd_cancel_invariant_24",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.cancelled",
+        "session_id": "ses_invariant_24",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:22.200Z",
+        "correlation_id": "cmd_cancel_invariant_24",
+        "payload": {}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "cancelled",
+          "start_command_id": "cmd_start_invariant_24",
+          "task": "Cancel exactly once.",
+          "session_id": "ses_invariant_24",
+          "cancel_command_id": "cmd_cancel_invariant_24",
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "terminal_state_absorbing",
+          "prior_status": "cancelled",
+          "event_type": "session.cancelled"
+        }
+      }
+    },
+    {
+      "id": "cancelled_late_delta_absorbed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_25",
+          "task": "Absorb output after cancellation."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_25",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:23.000Z",
+          "correlation_id": "cmd_start_invariant_25",
+          "payload": {}
+        },
+        {
+          "type": "cancel.requested",
+          "command_id": "cmd_cancel_invariant_25",
+          "session_id": "ses_invariant_25"
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.cancelled",
+          "session_id": "ses_invariant_25",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:23.100Z",
+          "correlation_id": "cmd_cancel_invariant_25",
+          "payload": {}
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "assistant.delta",
+        "session_id": "ses_invariant_25",
+        "sequence": 3,
+        "timestamp": "2026-07-30T16:00:23.200Z",
+        "correlation_id": "cmd_start_invariant_25",
+        "payload": {"text": "Late."}
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "cancelled",
+          "start_command_id": "cmd_start_invariant_25",
+          "task": "Absorb output after cancellation.",
+          "session_id": "ses_invariant_25",
+          "cancel_command_id": "cmd_cancel_invariant_25",
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": null
+        },
+        "failure": {
+          "code": "terminal_state_absorbing",
+          "prior_status": "cancelled",
+          "event_type": "assistant.delta"
+        }
+      }
+    },
+    {
+      "id": "failed_duplicate_terminal_absorbed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_26",
+          "task": "Fail exactly once."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_26",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:24.000Z",
+          "correlation_id": "cmd_start_invariant_26",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.failed",
+          "session_id": "ses_invariant_26",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:24.100Z",
+          "correlation_id": "cmd_start_invariant_26",
+          "payload": {
+            "code": "mock_failure",
+            "message": "The session stopped safely."
+          }
+        }
+      ],
+      "input": {
+        "protocol_version": 1,
+        "type": "session.failed",
+        "session_id": "ses_invariant_26",
+        "sequence": 2,
+        "timestamp": "2026-07-30T16:00:24.200Z",
+        "correlation_id": "cmd_start_invariant_26",
+        "payload": {
+          "code": "another_failure",
+          "message": "A duplicate failure must not replace the first."
+        }
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_invariant_26",
+          "task": "Fail exactly once.",
+          "session_id": "ses_invariant_26",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "mock_failure",
+            "message": "The session stopped safely."
+          }
+        },
+        "failure": {
+          "code": "terminal_state_absorbing",
+          "prior_status": "failed",
+          "event_type": "session.failed"
+        }
+      }
+    },
+    {
+      "id": "failed_late_cancel_absorbed",
+      "initial_state": "idle",
+      "setup_inputs": [
+        {
+          "type": "task.submitted",
+          "command_id": "cmd_start_invariant_27",
+          "task": "Absorb commands after failure."
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.started",
+          "session_id": "ses_invariant_27",
+          "sequence": 1,
+          "timestamp": "2026-07-30T16:00:25.000Z",
+          "correlation_id": "cmd_start_invariant_27",
+          "payload": {}
+        },
+        {
+          "protocol_version": 1,
+          "type": "session.failed",
+          "session_id": "ses_invariant_27",
+          "sequence": 2,
+          "timestamp": "2026-07-30T16:00:25.100Z",
+          "correlation_id": "cmd_start_invariant_27",
+          "payload": {
+            "code": "mock_failure",
+            "message": "The session stopped safely."
+          }
+        }
+      ],
+      "input": {
+        "type": "cancel.requested",
+        "command_id": "cmd_cancel_invariant_27",
+        "session_id": "ses_invariant_27"
+      },
+      "expected_result": {
+        "ok": false,
+        "state": {
+          "status": "failed",
+          "start_command_id": "cmd_start_invariant_27",
+          "task": "Absorb commands after failure.",
+          "session_id": "ses_invariant_27",
+          "cancel_command_id": null,
+          "last_sequence": 2,
+          "assistant_text": "",
+          "assistant_completed": false,
+          "session_failure": {
+            "code": "mock_failure",
+            "message": "The session stopped safely."
+          }
+        },
+        "failure": {
+          "code": "terminal_state_absorbing",
+          "prior_status": "failed",
+          "event_type": "cancel.requested"
+        }
+      }
+    }
+  ]
+}
