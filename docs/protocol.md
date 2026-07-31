@@ -179,6 +179,12 @@ phantom session, writes no bytes, and leaves the runtime available. The TUI uses
 boundary: an unknown, malformed, or semantically invalid event becomes a visible, classified
 protocol failure, closes command input, and never enters trusted state.
 
+A validated post-readiness `runtime.error` with `recoverable: true` leaves the supervisor running
+and becomes a sanitized visible warning. CAH-011 uses this existing envelope for
+`transcript_persistence_failed`; the warning is not a session event, does not enter the lifecycle
+transcript, and does not alter an active or terminal session outcome. A nonrecoverable runtime error,
+malformed message, or invalid session tape still fails closed.
+
 A cancel command for the wrong currently active session produces recoverable `session_mismatch`.
 When no session is active, a command naming neither the most recent terminal session nor an active
 session produces recoverable `session_not_active`. A repeated request for the active session and a
@@ -334,3 +340,14 @@ validated session event union plus four explicitly domain-only facts. Fifty shar
 legal edge, replay, invariant failure, and absorbing terminal path. `session.failed` now enters the
 session lifecycle, while malformed or semantically invalid event tapes still fail the supervisor
 closed.
+
+### CAH-011 — Write an append-only transcript
+
+> As a user, I want each session recorded so that I can inspect what happened after the application
+> exits.
+
+This story is complete without adding a protocol message. Python observes reducer-accepted domain
+facts and validated session events, sanitizes them, and appends a separate transcript-v1 JSONL
+record with contiguous `record_order`. Protocol event `sequence` remains authoritative within the
+session event tape. Persistence failure reuses recoverable `runtime.error`; transcript contents and
+summary paths never cross stdout.

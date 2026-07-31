@@ -54,6 +54,44 @@ describe('App', () => {
     }
   });
 
+  it('renders a recoverable recording warning while task input remains usable', async () => {
+    const onSubmitTask = vi.fn();
+    const view = render(
+      <App
+        runtimeState={{
+          status: 'running',
+          workspace: '/workspace',
+          recordingWarning: {
+            code: 'transcript_persistence_failed',
+            message: 'Session recording is unavailable; session work will continue.',
+          },
+          warning: {
+            code: 'invalid_task',
+            message: 'A submitted task was invalid.',
+          },
+        }}
+        sessionState={INITIAL_SESSION_STATE}
+        onSubmitTask={onSubmitTask}
+        onCancelSession={() => false}
+      />,
+    );
+
+    try {
+      expect(view.lastFrame()).toContain('Recording warning (transcript_persistence_failed)');
+      expect(view.lastFrame()).toContain('Runtime warning (invalid_task)');
+      expect(view.lastFrame()).toContain('will continue.');
+      expect(view.lastFrame()).toContain('Session status: idle');
+
+      view.stdin.write('Continue without recording');
+      view.stdin.write('\r');
+      await vi.waitFor(() => {
+        expect(onSubmitTask).toHaveBeenCalledWith('Continue without recording');
+      });
+    } finally {
+      view.unmount();
+    }
+  });
+
   it('rejects whitespace-only input locally with understandable feedback', async () => {
     const onSubmitTask = vi.fn();
     const view = render(

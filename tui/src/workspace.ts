@@ -9,6 +9,14 @@ export interface WorkspaceSelection {
   readonly source: 'launch-directory' | 'command-line';
 }
 
+/** User-facing launch configuration parsed before the Python child is constructed. */
+export interface ApplicationConfiguration {
+  /** The one canonical target repository assigned to this application process. */
+  readonly workspace: WorkspaceSelection;
+  /** Whether Python should create local transcript and summary artifacts. */
+  readonly transcriptEnabled: boolean;
+}
+
 /** An actionable error raised before a child is started with an unusable workspace. */
 export class WorkspaceConfigurationError extends Error {
   /** Create a workspace configuration error suitable for the CLI error channel. */
@@ -33,7 +41,23 @@ export function resolveWorkspace(
   arguments_: readonly string[],
   launchDirectory: string,
 ): WorkspaceSelection {
-  const configuredPath = parseWorkspaceArgument(arguments_);
+  return resolveApplicationConfiguration(arguments_, launchDirectory).workspace;
+}
+
+/**
+ * Resolve the workspace and transcript opt-out from order-independent CLI arguments.
+ *
+ * @param arguments_ - TUI arguments after the Node entry point.
+ * @param launchDirectory - Directory from which the repository launcher was invoked.
+ * @returns Canonical workspace selection and whether local persistence remains enabled.
+ * @throws WorkspaceConfigurationError If an option is unknown, repeated, or incomplete.
+ */
+export function resolveApplicationConfiguration(
+  arguments_: readonly string[],
+  launchDirectory: string,
+): ApplicationConfiguration {
+  const parsed = parseApplicationArguments(arguments_);
+  const configuredPath = parsed.workspace;
   const candidate =
     configuredPath === undefined ? launchDirectory : resolve(launchDirectory, configuredPath);
   const description =
@@ -64,27 +88,54 @@ export function resolveWorkspace(
   }
 
   return {
-    path: canonicalPath,
-    source: configuredPath === undefined ? 'launch-directory' : 'command-line',
+    workspace: {
+      path: canonicalPath,
+      source: configuredPath === undefined ? 'launch-directory' : 'command-line',
+    },
+    transcriptEnabled: !parsed.noTranscript,
   };
 }
 
-function parseWorkspaceArgument(arguments_: readonly string[]): string | undefined {
-  if (arguments_.length === 0) {
-    return undefined;
-  }
-
-  if (arguments_[0] !== '--workspace') {
+function parseApplicationArguments(arguments_: readonly string[]): {
+  readonly workspace: string | undefined;
+  readonly noTranscript: boolean;
+} {
+  let workspace: string | undefined;
+  let noTranscript = false;
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === '--no-transcript') {
+      if (noTranscript) {
+        throw new WorkspaceConfigurationError(
+          `The --no-transcript option may be provided only once. ${usage()}`,
+        );
+      }
+      noTranscript = true;
+      continue;
+    }
+    if (argument === '--workspace') {
+      if (workspace !== undefined) {
+        throw new WorkspaceConfigurationError(
+          `The --workspace option may be provided only once. ${usage()}`,
+        );
+      }
+      const value = arguments_[index + 1];
+      if (value === undefined || value.length === 0 || value.startsWith('--')) {
+        throw new WorkspaceConfigurationError(
+          `The --workspace option requires exactly one path. ${usage()}`,
+        );
+      }
+      workspace = value;
+      index += 1;
+      continue;
+    }
     throw new WorkspaceConfigurationError(
-      `Unknown argument ${JSON.stringify(arguments_[0])}. Usage: ./scripts/run-tui [--workspace PATH]`,
+      `Unknown argument ${JSON.stringify(argument)}. ${usage()}`,
     );
   }
+  return {workspace, noTranscript};
+}
 
-  if (arguments_.length !== 2 || arguments_[1] === undefined || arguments_[1].length === 0) {
-    throw new WorkspaceConfigurationError(
-      'The --workspace option requires exactly one path. Usage: ./scripts/run-tui [--workspace PATH]',
-    );
-  }
-
-  return arguments_[1];
+function usage(): string {
+  return 'Usage: ./scripts/run-tui [--workspace PATH] [--no-transcript]';
 }

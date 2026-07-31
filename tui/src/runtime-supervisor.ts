@@ -51,7 +51,14 @@ const VIRTUAL_ENVIRONMENT_NAME = 'VIRTUAL_ENV';
  */
 export type RuntimeState =
   | {readonly status: 'starting'; readonly workspace: string}
-  | {readonly status: 'running'; readonly workspace: string}
+  | {
+      readonly status: 'running';
+      readonly workspace: string;
+      /** Latest recoverable Python warning; it does not close input or own session truth. */
+      readonly warning?: RuntimeWarning;
+      /** Durable notice that local transcript persistence is unavailable for this process. */
+      readonly recordingWarning?: RuntimeWarning;
+    }
   | {readonly status: 'failed-to-start'; readonly workspace: string; readonly message: string}
   | {
       readonly status: 'protocol-failed';
@@ -62,6 +69,14 @@ export type RuntimeState =
   | {readonly status: 'unexpectedly-exited'; readonly workspace: string; readonly message: string}
   | {readonly status: 'stopping'; readonly workspace: string}
   | {readonly status: 'stopped'; readonly workspace: string};
+
+/** Sanitized recoverable runtime problem displayed without stopping session work. */
+export interface RuntimeWarning {
+  /** Bounded machine-readable code from the validated runtime.error payload. */
+  readonly code: string;
+  /** Diagnostic-sanitized message safe for terminal rendering. */
+  readonly message: string;
+}
 
 /** Safe failure categories exposed by the local runtime lifecycle projection. */
 export type RuntimeProtocolFailureCode =
@@ -109,6 +124,8 @@ export interface PythonRuntimeSupervisorConfiguration {
   readonly repositoryRoot: string;
   readonly workspace: string;
   readonly command?: string;
+  /** Disable only local transcript and summary files when explicitly false. */
+  readonly transcriptEnabled?: boolean;
 }
 
 /** Injectable process and timing seams for deterministic lifecycle tests. */
@@ -163,6 +180,7 @@ export function buildRuntimeLaunchRequest(
   workspace: string,
   command = 'uv',
   environment: NodeJS.ProcessEnv = process.env,
+  transcriptEnabled = true,
 ): RuntimeLaunchRequest {
   const pythonExecutable = join(repositoryRoot, '.venv', 'bin', 'python');
   return {
@@ -186,6 +204,7 @@ export function buildRuntimeLaunchRequest(
       'code_assist_harness.runtime',
       '--workspace',
       workspace,
+      ...(transcriptEnabled ? [] : ['--no-transcript']),
     ],
     options: {
       cwd: repositoryRoot,
@@ -272,6 +291,7 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
       configuration.workspace,
       configuration.command,
       dependencies.environment,
+      configuration.transcriptEnabled,
     );
     this.#spawnProcess = dependencies.spawnProcess ?? spawnRuntimeProcess;
     this.#prepareLaunch = dependencies.prepareLaunch ?? prepareRuntimeLaunch;
@@ -673,6 +693,28 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
     if (this.#state.status === 'running') {
       if (isSessionEvent(event)) {
         this.#acceptSessionEvent(event);
+        return;
+      }
+      if (event.type === 'runtime.error' && event.payload.recoverable) {
+        const message =
+          this.#diagnostics.sanitize(event.payload.message) ?? 'No safe details were provided.';
+        const warning = {code: event.payload.code, message};
+        const existingRecordingWarning = this.#state.recordingWarning;
+        const existingWarning = this.#state.warning;
+        this.#transition({
+          status: 'running',
+          workspace: this.#requestWorkspace(),
+          ...(event.payload.code === 'transcript_persistence_failed'
+            ? {recordingWarning: warning}
+            : {warning}),
+          ...(event.payload.code === 'transcript_persistence_failed' && existingWarning !== undefined
+            ? {warning: existingWarning}
+            : {}),
+          ...(event.payload.code !== 'transcript_persistence_failed' &&
+          existingRecordingWarning !== undefined
+            ? {recordingWarning: existingRecordingWarning}
+            : {}),
+        });
         return;
       }
       const reportedCode = event.type === 'runtime.error' ? event.payload.code : undefined;

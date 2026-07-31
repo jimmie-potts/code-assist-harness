@@ -31,6 +31,9 @@ _DEFAULT_DELTA_DELAY_SECONDS = 0.5
 type MockDeltaCheckpoint = Callable[[int, str], Awaitable[None]]
 """Async scheduling seam invoked immediately before each mocked delta."""
 
+type LifecycleObserver = Callable[[SessionUpdate, SessionState], Awaitable[None]]
+"""Async observer called after one update enters authoritative lifecycle state."""
+
 type CancellationRequestResult = Literal["accepted", "already_requested", "terminal"]
 """Result of asking one mock session to select cancellation as its terminal outcome."""
 
@@ -77,9 +80,14 @@ class MockSession:
         self._terminal_outcome: _TerminalOutcome | None = None
         self._terminal_emitted = False
         self._run_started = False
+        self._lifecycle_observer: LifecycleObserver | None = None
+        self._task_submitted = TaskSubmitted(
+            command_id=command.command_id,
+            task=command.payload.task,
+        )
         initial_reduction = reduce_session_state(
             SessionState(),
-            TaskSubmitted(command_id=command.command_id, task=command.payload.task),
+            self._task_submitted,
         )
         if not initial_reduction.ok:
             raise _lifecycle_invariant_error(initial_reduction.failure)
@@ -95,6 +103,23 @@ class MockSession:
     def lifecycle_state(self) -> SessionState:
         """Return the immutable state derived from accepted commands and emitted events."""
         return self._lifecycle_state
+
+    async def attach_lifecycle_observer(self, observer: LifecycleObserver) -> None:
+        """Attach the one observer that will receive accepted updates in reducer order.
+
+        Args:
+            observer: Async persistence or evidence boundary. It is called only after the reducer
+                accepts an update and must not mutate lifecycle state.
+
+        Raises:
+            RuntimeError: If work has started or an observer was already attached.
+        """
+        if self._run_started:
+            raise RuntimeError("a lifecycle observer must be attached before the session starts")
+        if self._lifecycle_observer is not None:
+            raise RuntimeError("a mock session accepts only one lifecycle observer")
+        self._lifecycle_observer = observer
+        await self._notify_lifecycle(self._task_submitted)
 
     async def request_cancellation(
         self,
@@ -130,7 +155,7 @@ class MockSession:
                 # after the started event rather than inventing starting -> cancelling.
                 self._deferred_cancellation = cancellation
             else:
-                self._reduce_lifecycle(cancellation)
+                await self._reduce_lifecycle(cancellation)
             self._cancel_command_id = command_id
             self._terminal_outcome = "cancelled"
             self._cancellation_requested.set()
@@ -163,9 +188,9 @@ class MockSession:
             correlation_id=self._command.command_id,
         )
         async with self._state_lock:
-            self._reduce_lifecycle(started)
+            await self._reduce_lifecycle(started)
             if self._deferred_cancellation is not None:
-                self._reduce_lifecycle(self._deferred_cancellation)
+                await self._reduce_lifecycle(self._deferred_cancellation)
                 self._deferred_cancellation = None
 
         accumulated: list[str] = []
@@ -220,7 +245,7 @@ class MockSession:
                 {"text": delta},
                 correlation_id=self._command.command_id,
             )
-            self._reduce_lifecycle(event)
+            await self._reduce_lifecycle(event)
             return True
 
     async def _emit_completion(self, completed_text: str) -> bool:
@@ -234,7 +259,7 @@ class MockSession:
                 {"text": completed_text},
                 correlation_id=self._command.command_id,
             )
-            self._reduce_lifecycle(assistant_completed)
+            await self._reduce_lifecycle(assistant_completed)
             # Selection precedes the shielded terminal write. A cancellation waiting on the lock
             # must observe that completion already won even if the sink has not returned yet.
             self._terminal_outcome = "completed"
@@ -244,7 +269,7 @@ class MockSession:
                 {},
                 correlation_id=self._command.command_id,
             )
-            self._reduce_lifecycle(session_completed)
+            await self._reduce_lifecycle(session_completed)
             self._terminal_emitted = True
             return True
 
@@ -261,15 +286,21 @@ class MockSession:
                 {},
                 correlation_id=self._cancel_command_id,
             )
-            self._reduce_lifecycle(session_cancelled)
+            await self._reduce_lifecycle(session_cancelled)
             self._terminal_emitted = True
 
-    def _reduce_lifecycle(self, update: SessionUpdate) -> None:
+    async def _reduce_lifecycle(self, update: SessionUpdate) -> None:
         """Accept one integration fact or raise a bounded payload-free invariant error."""
         reduction = reduce_session_state(self._lifecycle_state, update)
         if not reduction.ok:
             raise _lifecycle_invariant_error(reduction.failure)
         self._lifecycle_state = reduction.state
+        await self._notify_lifecycle(update)
+
+    async def _notify_lifecycle(self, update: SessionUpdate) -> None:
+        """Publish one accepted update without granting the observer lifecycle authority."""
+        if self._lifecycle_observer is not None:
+            await self._lifecycle_observer(update, self._lifecycle_state)
 
 
 def _lifecycle_invariant_error(failure: SessionInvariantFailure | None) -> RuntimeError:

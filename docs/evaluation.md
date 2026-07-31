@@ -138,8 +138,11 @@ environment values are never diagnostic artifacts.
 
 Because visible state is input-derived, replaying trusted domain facts and a stored validated event
 list reproduces the same terminal state. CAH-010 implements this fold in both languages and stops at
-the first structured invariant failure. Replay does not re-execute tools or provider calls. A future
-transcript that cannot be validated must fail explicitly rather than being partially trusted.
+the first structured invariant failure. CAH-011 now validates transcript-v1 JSONL framing, schema,
+contiguous record order, workspace/session identity, embedded protocol events, and reducer
+invariants before returning a terminal or explicitly incomplete projection. Replay does not
+re-execute tools or provider calls, recover redacted or bounded values, resume work, or trust later
+lines after a failure.
 
 ## Definition of done for behavioral work
 

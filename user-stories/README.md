@@ -27,14 +27,15 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, CAH-007, and CAH-010 are
+CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, CAH-007, CAH-010, and
+CAH-011 are
 **Done**: the architecture baseline, documentation standard, Ink shell, supervised Python process,
 protocol version 1 boundary, deterministic mocked-session slice, authoritative cancellation
 lifecycle, fixture-backed walking-skeleton guide, offline repository/CI gate, and equivalent
-cross-language session reducers are implemented and validated. M0 is complete, M1 has begun, and
-CAH-011 is the next dependency-ready unit. Task submission, streaming, cancellation, and replayable
-in-memory lifecycle state work; durable transcripts, providers, workspace reads, tools, policy, and
-agent behavior remain unimplemented.
+cross-language session reducers are implemented and validated. The Python runtime now also writes
+private, redacted, replayable session transcripts and honest summaries unless explicitly disabled.
+M0 is complete, M1 is in progress, and CAH-020 is the next dependency-ready unit. Providers,
+workspace reads, tools, policy, and agent behavior remain unimplemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -50,7 +51,7 @@ agent behavior remain unimplemented.
 | 8 | [CAH-009: Document the first end-to-end execution](cah-009-document-walking-skeleton.md) | [Walking-skeleton guide](../docs/lessons/cah-009-walking-skeleton-guide.md) | M0 | Done | CAH-006 |
 | 9 | [CAH-007: Establish repository-wide checks](cah-007-establish-repository-checks.md) | [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md) | M0 | Done | CAH-009 |
 | 10 | [CAH-010: Implement session state as a reducer](cah-010-session-state-reducer.md) | [Session state reducer](../docs/lessons/cah-010-session-state-reducer.md) | M1 | Done | CAH-004, CAH-006, CAH-007 |
-| 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md) | M1 | Planned | CAH-010 |
+| 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md) | M1 | Done | CAH-010 |
 | 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | Planned | CAH-010, CAH-011 |
 | 13 | [CAH-021: Complete one model turn](cah-021-complete-one-model-turn.md) | [One model turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Planned | CAH-020 |
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Planned | CAH-021 |
@@ -93,3 +94,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-30 CAH-010 session reducer](notes/2026-07-30-cah-010-session-state-reducer.md) records the
   domain-versus-wire input boundary, canonical transitions, strict terminal policy, shared fixture
   evidence, runtime integration, and visual lesson validation.
+- [2026-07-30 CAH-011 append-only transcript](notes/2026-07-30-cah-011-append-only-transcript.md)
+  records the transcript schema, privacy and filesystem boundaries, replay behavior, recoverable
+  warning integration, interruption evidence, and visual lesson validation.

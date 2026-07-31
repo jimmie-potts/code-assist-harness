@@ -30,8 +30,10 @@ completed outcome wins. CAH-009 records that implemented path in a fixture-backe
 offline `./scripts/check` gate and lockfile-driven Linux workflow that run the complete M0 evidence
 through one developer/CI entry point. CAH-010 begins M1 with equivalent pure Python and TypeScript
 session-lifecycle reducers, shared transition and replay fixtures, structured invariant failures,
-and integration through the mock runtime and TUI projection. Provider, tool, workspace-read, policy,
-transcript, and agent behavior remain target architecture; CAH-011 is next.
+and integration through the mock runtime and TUI projection. CAH-011 adds private XDG transcript
+storage, privacy-aware typed sanitization, honest terminal summaries, strict side-effect-free replay,
+local opt-out, and recoverable persistence warnings. Provider, tool, workspace-read, policy, and
+agent behavior remain target architecture; CAH-020 is next.
 
 ## Product boundary
 
@@ -178,7 +180,7 @@ dependency-resolution changes commit `uv.lock`.
 | Context selection | Python context subsystem | Context items retain their source path, line range, and inclusion reason. |
 | Tool validation and execution policy | Python tool and safety subsystems | The model and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
-| Durable audit record | Python persistence subsystem | Only validated, redacted domain events are persisted. |
+| Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs are persisted after reducer acceptance. |
 | Visible conversation, plan, tools, errors, and diffs | Ink TUI | Visible state is reduced from runtime events. |
 
 This boundary allows a future CLI, web UI, test harness, or library caller to use the same Python
@@ -193,6 +195,8 @@ src/code_assist_harness/
 ├── runtime.py          Command loop, active-session routing, cancellation, and shutdown
 ├── mock_session.py     Fixed response, cooperative checkpoints, reducer integration, and terminals
 ├── session_state.py    Pure one-session lifecycle reducer and replay
+├── persistence/
+│   └── transcript.py   Private JSONL append, sanitization, summary, and strict replay
 ├── protocol/
 │   ├── models.py       Strict Pydantic v2 wire models
 │   ├── codec.py        Two-stage parsing and safe serialization
@@ -200,7 +204,7 @@ src/code_assist_harness/
 └── __init__.py         Intentional package surface
 ```
 
-Future `core/`, `context/`, `providers/`, `tools/`, `safety/`, and `persistence/` paths remain
+Future `core/`, `context/`, `providers/`, `tools/`, and `safety/` paths remain
 conceptual and will be introduced only by their owning stories.
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
@@ -354,15 +358,25 @@ read-only assistant milestone, not part of the initial scaffold.
 
 Trusted lifecycle inputs—application-owned domain facts and validated session events—are redacted,
 bounded, and appended as JSONL beneath the WSL XDG state directory, normally
-`~/.local/state/code-assist-harness/`. Their record order supports reducer replay from `idle`, while
-session events retain their authoritative sequence. A stable workspace identifier groups sessions
-without placing harness files into repositories or exposing personal paths in filenames.
+`~/.local/state/code-assist-harness/transcripts/`. Their contiguous `record_order` supports reducer
+replay from `idle`, while session events retain their authoritative sequence. A stable `ws1_` hash
+and random transcript ID prevent repeating mock session IDs from colliding without placing harness
+files into repositories or exposing personal paths in filenames. Record timestamps are descriptive;
+neither they nor event timestamps replace the two explicit order fields.
 
-The default transcript contains user tasks, assistant output, tool metadata, approval decisions,
-and bounded tool results. It excludes raw provider payloads and environment values. Sensitive
-configured values are redacted, files use restrictive local permissions, and write failures are
-visible without silently changing session semantics. A documented `--no-transcript` mode must
-exist before a real provider release.
+The implemented CAH-011 transcript contains the current user task, assistant output, cancellation
+intent, minimal approval facts when a producer exists, and terminal failures. Later tool stories may
+add bounded tool metadata and results through the same typed boundary. Raw provider payloads and
+environment mappings are excluded. Recognized environment values are used only as in-memory
+redaction candidates; configured secrets and credential-shaped text are replaced before
+persistence. Application directories use `0700`, files use `0600`, and each record is flushed and
+fsynced. A first storage failure disables later writes, emits one recoverable TUI warning, and never
+rolls back the already accepted lifecycle state.
+
+`--no-transcript` short-circuits state-location and secret discovery and creates neither JSONL nor
+summary. It controls local harness files only. Local permissions are not encryption or protection
+from another process running as the same WSL user, the workspace hash is pseudonymous rather than
+anonymous, and automatic retention remains out of scope.
 
 ## Documentation and testing
 

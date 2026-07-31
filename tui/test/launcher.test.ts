@@ -140,16 +140,21 @@ describe('run-tui launcher', () => {
     );
 
     try {
-      const result = spawnSync(launcherPath, ['--workspace', 'target with spaces'], {
+      const result = spawnSync(
+        launcherPath,
+        ['--no-transcript', '--workspace', 'target with spaces'],
+        {
         cwd: launchDirectory,
         encoding: 'utf8',
         env: {PATH: testPath(fakePath)},
-      });
+        },
+      );
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`launch=${launchDirectory}`);
       expect(result.stdout).toContain('argument=<start>');
       expect(result.stdout).toContain('argument=<-->');
+      expect(result.stdout).toContain('argument=<--no-transcript>');
       expect(result.stdout).toContain('argument=<--workspace>');
       expect(result.stdout).toContain('argument=<target with spaces>');
     } finally {

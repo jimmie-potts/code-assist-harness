@@ -52,10 +52,37 @@ const cancellationScenarioEvents = readScenarioFixture<SessionEvent>(
 );
 // A broken cancellation path would finish the three 500 ms mock checkpoints inside this window.
 const POST_CANCELLATION_OBSERVATION_MS = 2000;
+const FAKE_RUNTIME_SECRET = 'FAKE_CAH_RUNTIME_BOUNDARY_SECRET_011';
+
+interface IsolatedRuntimeEnvironment {
+  readonly directory: string;
+  readonly values: NodeJS.ProcessEnv;
+}
+
+function createIsolatedRuntimeEnvironment(): IsolatedRuntimeEnvironment {
+  const directory = mkdtempSync(join(tmpdir(), 'cah-real-runtime-environment-'));
+  const home = join(directory, 'home');
+  mkdirSync(home, {mode: 0o700});
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of ['LANG', 'LC_ALL', 'PATH', 'TERM', 'TMPDIR'] as const) {
+    const value = process.env[name];
+    if (value !== undefined) {
+      environment[name] = value;
+    }
+  }
+  return {directory, values: {...environment, HOME: home}};
+}
+
+interface TranscriptRecordFixture {
+  readonly record_order: number;
+  readonly input: {readonly type: string};
+}
 
 describe('real Node to uv to Python boundary', () => {
   it('starts the genuine runtime with filtered overrides and reaps the process group', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-runtime-workspace-'));
+    const stateRoot = mkdtempSync(join(tmpdir(), 'cah-real-runtime-state-'));
+    const isolatedEnvironment = createIsolatedRuntimeEnvironment();
     const poisonPythonPath = mkdtempSync(join(tmpdir(), 'cah-poison-python-path-'));
     const poisonPackage = join(poisonPythonPath, 'code_assist_harness');
     const poisonMarker = join(poisonPythonPath, 'poison-runtime-imported');
@@ -110,12 +137,14 @@ describe('real Node to uv to Python boundary', () => {
         createCommandId: nextFixtureValue(commandIds, 'success command ID'),
         now: nextFixtureValue(commandTimestamps, 'success command timestamp'),
         environment: {
-          ...process.env,
+          ...isolatedEnvironment.values,
+          OPENAI_API_KEY: FAKE_RUNTIME_SECRET,
           PYTHONHOME: join(workspace, 'missing-python-home'),
           PYTHONPATH: poisonPythonPath,
           UV_ISOLATED: '1',
           UV_PROJECT_ENVIRONMENT: join(workspace, 'poison-uv-project-environment'),
           VIRTUAL_ENV: join(workspace, 'poison-active-environment'),
+          XDG_STATE_HOME: stateRoot,
         },
       },
     );
@@ -203,6 +232,30 @@ describe('real Node to uv to Python boundary', () => {
       expect(existsSync(`/proc/${pythonPid}`)).toBe(false);
       expect(existsSync(poisonMarker)).toBe(false);
       expect(readdirSync(workspace)).toEqual([]);
+      const transcriptDirectory = join(stateRoot, 'code-assist-harness', 'transcripts');
+      const artifacts = readdirSync(transcriptDirectory);
+      const transcripts = artifacts.filter((name) => name.endsWith('.jsonl'));
+      const summaries = artifacts.filter((name) => name.endsWith('.summary.txt'));
+      expect(transcripts).toHaveLength(2);
+      expect(summaries).toHaveLength(2);
+      for (const artifact of artifacts) {
+        expect(readFileSync(join(transcriptDirectory, artifact), 'utf8')).not.toContain(
+          FAKE_RUNTIME_SECRET,
+        );
+      }
+      for (const transcript of transcripts) {
+        const contents = readFileSync(join(transcriptDirectory, transcript), 'utf8');
+        expect(contents.endsWith('\n')).toBe(true);
+        expect(contents).not.toContain(workspace);
+        const records = contents
+          .trimEnd()
+          .split('\n')
+          .map((line) => JSON.parse(line) as TranscriptRecordFixture);
+        expect(records.map((record) => record.record_order)).toEqual(
+          records.map((_record, index) => index + 1),
+        );
+        expect(records.at(-1)?.input.type).toBe('session.completed');
+      }
     } finally {
       if (supervisor.getState().status !== 'stopped') {
         await supervisor.stop();
@@ -210,12 +263,15 @@ describe('real Node to uv to Python boundary', () => {
       unsubscribe();
       unsubscribeFromSession();
       rmSync(workspace, {recursive: true, force: true});
+      rmSync(stateRoot, {recursive: true, force: true});
+      rmSync(isolatedEnvironment.directory, {recursive: true, force: true});
       rmSync(poisonPythonPath, {recursive: true, force: true});
     }
   }, 15_000);
 
   it('cancels genuine sessions before the first delta and between later deltas', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-cancel-workspace-'));
+    const isolatedEnvironment = createIsolatedRuntimeEnvironment();
     const [cancelStartCommand, cancelCommand] = cancellationScenarioCommands;
     if (
       cancellationScenarioCommands.length !== 2 ||
@@ -241,12 +297,13 @@ describe('real Node to uv to Python boundary', () => {
       '2026-07-30T14:01:02.000Z',
     ];
     const supervisor = new PythonRuntimeSupervisor(
-      {repositoryRoot, workspace},
+      {repositoryRoot, workspace, transcriptEnabled: false},
       {
         gracePeriodMs: 2000,
         terminatePeriodMs: 2000,
         createCommandId: nextFixtureValue(commandIds, 'cancellation command ID'),
         now: nextFixtureValue(commandTimestamps, 'cancellation command timestamp'),
+        environment: isolatedEnvironment.values,
       },
     );
     let sessionState = INITIAL_SESSION_STATE;
@@ -336,6 +393,7 @@ describe('real Node to uv to Python boundary', () => {
       unsubscribe();
       await supervisor.stop();
       rmSync(workspace, {recursive: true, force: true});
+      rmSync(isolatedEnvironment.directory, {recursive: true, force: true});
     }
 
     expect(supervisor.getState().status).toBe('stopped');
@@ -343,6 +401,7 @@ describe('real Node to uv to Python boundary', () => {
 
   it('stops and reaps genuine uv and Python processes during active session work', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-active-stop-workspace-'));
+    const isolatedEnvironment = createIsolatedRuntimeEnvironment();
     let uvPid: number | undefined;
     let pythonPid: number | undefined;
     const spawnProcess = (request: RuntimeLaunchRequest): ChildProcessWithoutNullStreams => {
@@ -357,8 +416,13 @@ describe('real Node to uv to Python boundary', () => {
       return child;
     };
     const supervisor = new PythonRuntimeSupervisor(
-      {repositoryRoot, workspace},
-      {spawnProcess, gracePeriodMs: 2500, terminatePeriodMs: 2000},
+      {repositoryRoot, workspace, transcriptEnabled: false},
+      {
+        spawnProcess,
+        gracePeriodMs: 2500,
+        terminatePeriodMs: 2000,
+        environment: isolatedEnvironment.values,
+      },
     );
     let sessionState = INITIAL_SESSION_STATE;
     const unsubscribe = supervisor.subscribeToSessionUpdates((update) => {
@@ -398,14 +462,20 @@ describe('real Node to uv to Python boundary', () => {
         await supervisor.stop();
       }
       rmSync(workspace, {recursive: true, force: true});
+      rmSync(isolatedEnvironment.directory, {recursive: true, force: true});
     }
   }, 12_000);
 
   it('renders every genuine mocked delta before completion and accepts a second task', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'cah-real-render-workspace-'));
+    const isolatedEnvironment = createIsolatedRuntimeEnvironment();
     const supervisor = new PythonRuntimeSupervisor(
-      {repositoryRoot, workspace},
-      {gracePeriodMs: 2000, terminatePeriodMs: 2000},
+      {repositoryRoot, workspace, transcriptEnabled: false},
+      {
+        gracePeriodMs: 2000,
+        terminatePeriodMs: 2000,
+        environment: isolatedEnvironment.values,
+      },
     );
     const frames: string[] = [];
     let terminal: ReturnType<typeof renderInk> | undefined;
@@ -526,6 +596,7 @@ describe('real Node to uv to Python boundary', () => {
         await running;
       } finally {
         rmSync(workspace, {recursive: true, force: true});
+        rmSync(isolatedEnvironment.directory, {recursive: true, force: true});
       }
     }
 

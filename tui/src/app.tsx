@@ -295,7 +295,21 @@ function RuntimeStatus({state}: {readonly state: RuntimeState}): ReactElement {
     case 'starting':
       return <Text>Status: starting Python runtime · workspace: {state.workspace}</Text>;
     case 'running':
-      return <Text>Status: runtime running · workspace: {state.workspace} · Ctrl+C to exit</Text>;
+      return (
+        <Box flexDirection="column">
+          <Text>Status: runtime running · workspace: {state.workspace} · Ctrl+C to exit</Text>
+          {state.warning === undefined ? null : (
+            <Text color="yellow">
+              Runtime warning ({state.warning.code}): {state.warning.message}
+            </Text>
+          )}
+          {state.recordingWarning === undefined ? null : (
+            <Text color="yellow">
+              Recording warning ({state.recordingWarning.code}): {state.recordingWarning.message}
+            </Text>
+          )}
+        </Box>
+      );
     case 'failed-to-start':
       return (
         <Text color="red">

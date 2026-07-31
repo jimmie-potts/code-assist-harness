@@ -6,7 +6,9 @@
 - **Automated boundary:** [Node-to-Python integration test](../tui/test/runtime-boundary.test.ts)
 
 > This guide follows the deterministic M0 mock that exists today. It does not describe a model,
-> repository context, tools, approvals, edits, or a durable transcript as implemented behavior.
+> repository context, tools, approvals, or edits. CAH-011 now records the same lifecycle, but the M0
+> trace below intentionally stays on the protocol path rather than following that persistence side
+> channel record by record.
 
 ## What this slice proves
 
@@ -237,11 +239,14 @@ loop. This walking skeleton does not yet:
 - discover, search, or read workspace content;
 - expose tools, evaluate policy, or request approval;
 - propose or apply edits, run repository subprocesses, or show diffs;
-- write or reload a durable transcript; or
 - execute a provider-backed agent loop.
 
 These omissions keep the first boundary deterministic. They must not be filled in by explanatory
 prose before their owning stories implement and test them.
+
+CAH-011 now observes this unchanged mock tape after reducer acceptance and writes a redacted local
+transcript plus terminal summary unless disabled. It can strictly replay the stored safe tape, but
+the walking skeleton still does not browse, export, resume, or derive live authority from storage.
 
 ## What comes next
 
@@ -252,8 +257,10 @@ walking-skeleton runtime semantics documented here.
 
 [CAH-010](../user-stories/cah-010-session-state-reducer.md) now routes this tape through equivalent
 pure Python and TypeScript lifecycle reducers while keeping multi-turn rendering as an adapter.
-[CAH-011](../user-stories/cah-011-append-only-transcript.md) is next. It will persist validated,
-redacted history without becoming the lifecycle source of truth.
+[CAH-011](../user-stories/cah-011-append-only-transcript.md) now persists validated, redacted
+history without becoming the lifecycle source of truth. [CAH-020](../user-stories/cah-020-provider-interface-and-fake.md)
+is next and will replace the fixed response source with a provider-neutral interface and
+deterministic fake.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.
