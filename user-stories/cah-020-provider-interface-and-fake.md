@@ -1,9 +1,12 @@
 # CAH-020 - Define the provider interface and fake provider
 
-- **Status:** Planned
+- **Status:** In progress
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-010, CAH-011
 - **Lesson:** [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md)
+- **Visual lesson:** Pending generation and validation at
+  `docs/lessons/assets/cah-020-provider-interface-and-fake.pptx`; Windows-native artifact-tool
+  execution permission is still required
 
 ## User story
 
@@ -58,3 +61,40 @@ cancellation, and normalization boundaries. Document the fake script format for 
 - The OpenAI adapter and any live call.
 - Executing provider-requested tools or continuing through multiple model/tool turns.
 - LangChain orchestration or adapter dependencies.
+
+## Delivered evidence
+
+- `src/code_assist_harness/provider/models.py` defines immutable, harness-owned conversation,
+  repository-instruction, stream-event, usage, completion, and normalized-failure values without a
+  provider or framework dependency.
+- `src/code_assist_harness/provider/port.py` defines the structural `Provider` and
+  `ProviderOperation` protocols. One operation exposes a single-consumer async event stream,
+  idempotent awaited cancellation, and repeatable cleanup waiting.
+- `src/code_assist_harness/provider/fake.py` verifies an ordered sequence of exact
+  `ProviderRequest` values and executes explicit emit, logical-delay, and cancellation-checkpoint
+  steps. Request diagnostics identify only bounded field paths, never request contents.
+- Fake scripts reject ambiguous terminal placement, duplicate checkpoint names, and unsupported
+  steps. `FakeProvider.assert_complete()` detects unfinished exchanges, omitted requests, and
+  unconsumed output.
+- Provider tests cover every stream variant, malformed serialized tool arguments, normalized
+  failure bounds, ordered exchanges, request mismatches, omitted and extra requests, logical
+  delays, cancellation before output and between deltas, consumer cancellation, and single-stream
+  ownership.
+- The provider package imports while common vendor and framework modules are unavailable, and the
+  project metadata contains no OpenAI or LangChain dependency. Transcript regression coverage
+  proves that only a normalized provider failure reaches persisted session evidence in the modeled
+  handoff.
+- The current `MockSession`, Python runtime, protocol, and TUI are intentionally unchanged.
+  [CAH-021](cah-021-complete-one-model-turn.md) is the next unit and will connect this port to one
+  model-free provider turn.
+
+## Completion evidence
+
+- The written lesson records the concrete provider types, fake script API, cancellation contract,
+  failure paths, tests, and implementation code samples.
+- **PENDING — visual validation:** record the final slide count, slide-by-slide rendered-image
+  inspection, and presentation overflow-test result after the deck is generated.
+- `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` passes: 263 Python tests, 30 Python
+  protocol-fixture tests, 24 repository-policy tests, 208 TUI tests, 29 TypeScript
+  protocol-fixture tests, and 4 real Node/Python boundary tests, plus Python lint/format and
+  TypeScript typecheck/lint.

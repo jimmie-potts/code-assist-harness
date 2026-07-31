@@ -23,6 +23,15 @@ from code_assist_harness.persistence import (
     stable_workspace_id,
 )
 from code_assist_harness.protocol import SessionEvent, validate_event
+from code_assist_harness.provider import (
+    FakeProvider,
+    FakeProviderEmit,
+    FakeProviderExchange,
+    ProviderFailed,
+    ProviderFailure,
+    ProviderMessage,
+    ProviderRequest,
+)
 from code_assist_harness.session_state import (
     INITIAL_SESSION_STATE,
     ApprovalRequested,
@@ -47,12 +56,13 @@ def _event(
     *,
     text: str = "",
     correlation_id: str = START_COMMAND_ID,
+    failure_code: str = "provider_failed",
     failure_message: str = "The session failed safely.",
 ) -> SessionEvent:
     if event_type in {"assistant.delta", "assistant.completed"}:
         payload: dict[str, object] = {"text": text}
     elif event_type == "session.failed":
-        payload = {"code": "provider_failed", "message": failure_message}
+        payload = {"code": failure_code, "message": failure_message}
     else:
         payload = {}
     return cast(
@@ -449,6 +459,67 @@ def test_failed_summary_uses_only_safe_persisted_values(tmp_path: Path) -> None:
     assert FAKE_SECRET not in summary
     assert "Outcome: failed" in summary
     assert "Failure code: provider_failed" in summary
+
+
+def test_transcript_records_only_normalized_failure_not_raw_provider_detail(
+    tmp_path: Path,
+) -> None:
+    class RawAdapterFailure:
+        def __init__(self) -> None:
+            self.response_body = "RAW_PROVIDER_BODY_FAKE_TOKEN_98765"
+            self.authorization = "Bearer RAW_FAKE_CREDENTIAL_12345"
+
+    raw_failure = RawAdapterFailure()
+    normalized = ProviderFailure(
+        code="unavailable",
+        message="The provider is temporarily unavailable.",
+        retryable=True,
+    )
+    with pytest.raises(TypeError):
+        ProviderFailed(raw_failure)  # type: ignore[arg-type]
+
+    request = ProviderRequest(
+        conversation=(ProviderMessage(role="user", content="Handle a provider failure."),)
+    )
+    normalized_event = ProviderFailed(normalized)
+    fake = FakeProvider(
+        (
+            FakeProviderExchange(
+                expected_request=request,
+                steps=(FakeProviderEmit(normalized_event),),
+            ),
+        )
+    )
+
+    async def collect_failure() -> ProviderFailed:
+        operation = fake.start(request)
+        events = tuple([event async for event in operation.events()])
+        fake.assert_complete()
+        assert events == (normalized_event,)
+        return cast(ProviderFailed, events[0])
+
+    collected_failure = asyncio.run(collect_failure()).failure
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Handle a provider failure."),
+        _event("session.started", 1),
+        _event(
+            "session.failed",
+            2,
+            failure_code=f"provider_{collected_failure.code}",
+            failure_message=collected_failure.message,
+        ),
+    ]
+
+    _state, failures = asyncio.run(_record_updates(transcript, updates))
+    persisted = transcript.transcript_path.read_text(encoding="utf-8")
+
+    assert failures == [None, None, None]
+    assert "provider_unavailable" in persisted
+    assert collected_failure.message in persisted
+    assert raw_failure.response_body not in persisted
+    assert raw_failure.authorization not in persisted
+    assert type(raw_failure).__name__ not in persisted
 
 
 def test_files_are_private_unique_and_outside_the_workspace(tmp_path: Path) -> None:

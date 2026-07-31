@@ -9,6 +9,11 @@ The first lesson set maps one-to-one to the 14 implementation-ready stories. Out
 not receive lesson files until they are refined into a story with acceptance criteria. This keeps a
 lesson attached to work that can actually be built and verified.
 
+Each lesson assumes the reader can write code but may be new to the unit's architecture. A dedicated
+junior-engineer foundation explains prerequisite concepts, syntax, runtime behavior, and common
+misconceptions before the deeper design. Once implementation exists, exact repository code samples
+connect those concepts to the shipped path and one important failure or test path.
+
 ## How to use a lesson
 
 Read the lesson before starting its story, then keep it open while implementing and validating the
@@ -44,7 +49,7 @@ clarify or reinforce the concept; they must never weaken accuracy, legibility, o
 | 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Done |
 | 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Done |
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Verified against implementation |
-| 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | Planned |
+| 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | In progress |
 | 13 | CAH-021 | [One model turn](cah-021-one-model-turn.md) | Planned |
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Planned |
 
@@ -55,17 +60,21 @@ Every unit lesson contains:
 1. Metadata that identifies the unit, milestone, lesson status, implementation status, story, and
    related architecture.
 2. A quick summary, learning objectives, and an explanation of why the unit matters.
-3. Key concepts, architecture, ownership boundaries, invariants, and deliberately deferred work.
-4. A practical walkthrough of the intended or observed implementation and what to inspect.
-5. Failure scenarios that connect symptoms, responsible boundaries, safe outcomes, and evidence.
-6. A production expansion with a realistic enterprise scenario and three to five representative
+3. A junior-engineer foundation that explains prerequisite ideas, syntax, one small example, and a
+   common beginner misconception before using the deeper abstraction.
+4. Key concepts, architecture, ownership boundaries, invariants, and deliberately deferred work.
+5. A practical walkthrough of the intended or observed implementation and what to inspect.
+6. Exact repository code samples after implementation, covering the important path and at least one
+   failure or test path with beginner-friendly explanation.
+7. Failure scenarios that connect symptoms, responsible boundaries, safe outcomes, and evidence.
+8. A production expansion with a realistic enterprise scenario and three to five representative
    tools linked to official references.
-7. A direct comparison between the repository approach and a production approach.
-8. Trade-offs, operational costs, and measurable signals for graduating to more infrastructure.
-9. Practical exercises that work without a live model or network unless explicitly opt-in.
-10. A concise takeaway list and a lesson-local glossary.
-11. Further reading that links the story, local architecture, and named production references.
-12. For CAH-007 and units completed going forward, a linked visual PPTX that has passed
+9. A direct comparison between the repository approach and a production approach.
+10. Trade-offs, operational costs, and measurable signals for graduating to more infrastructure.
+11. Practical exercises that work without a live model or network unless explicitly opt-in.
+12. A concise takeaway list and a lesson-local glossary.
+13. Further reading that links the story, local architecture, and named production references.
+14. For CAH-007 and units completed going forward, a linked visual PPTX that has passed
     slide-by-slide and overflow review.
 
 Use [the lesson template](lesson-template.md) when a new implementation-ready story is added.
@@ -104,9 +113,11 @@ scale requirement outweighs that simplicity.
 
 Before a story is implemented, its lesson describes accepted design and planned behavior and must
 not claim the feature exists. During implementation, add concrete module names, event examples,
-test scenarios, and surprising failure evidence. When the story is complete:
+test scenarios, and surprising failure evidence. Begin with the prerequisite concepts a junior
+engineer needs rather than assuming familiarity with the abstraction. When the story is complete:
 
 - replace hypothetical walkthrough details with the actual implementation path;
+- add exact implementation and test excerpts with beginner-friendly explanations;
 - record which trade-offs were observed rather than merely predicted;
 - link the tests or evaluation scenario that proves each important invariant;
 - update production comparisons if the implemented seam changed; and

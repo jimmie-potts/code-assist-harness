@@ -4,8 +4,9 @@
 > streamed-completion and cancellation evidence in unit and real-boundary tests, and CAH-009 binds
 > normalized teaching tapes to that evidence. CAH-007 runs all current deterministic layers through
 > one offline repository gate and Linux workflow. CAH-010 adds equivalent pure lifecycle reducers
-> and shared transition/replay fixtures. Filesystem-backed `evals/` scenarios are not implemented
-> yet.
+> and shared transition/replay fixtures. CAH-020 adds the provider-neutral port and programmable
+> fake used by later loop and evaluation scenarios. Filesystem-backed `evals/` scenarios and a
+> provider-backed session turn are not implemented yet.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -29,9 +30,12 @@ format should be chosen in the runner story; readability, stable diffs, and prec
 more important than adopting a framework. Scenario inputs are immutable during a run. Each run uses
 a fresh temporary copy so tests cannot influence one another.
 
-The fake provider is programmable rather than a canned text stub. It verifies expected
-provider-neutral requests and emits text deltas, tool calls, delays, usage, failure, or cancellation
-at exact points. An unexpected request fails the scenario with a useful diff.
+The implemented fake provider is programmable rather than a canned text stub. It verifies ordered
+provider-neutral requests and executes explicit text/tool/usage/failure emits, logical delays, or
+cancellation checkpoints at exact points. An unexpected request fails with bounded differing field
+paths rather than a content-bearing diff; `assert_complete()` also catches omitted requests and
+unconsumed stream steps. The later scenario runner still owns the on-disk serialization of this
+Python script model.
 
 ## Initial scenarios
 
@@ -39,7 +43,7 @@ at exact points. An unexpected request fails the scenario with a useful diff.
 | --- | --- |
 | Normal streamed response | Deltas remain ordered and the session completes once. |
 | User cancellation | Active work stops and the session is cancelled once. Unit and boundary tests exist; a reusable evaluation scenario remains planned. |
-| Provider exception | A structured provider failure is emitted and persisted. |
+| Provider exception | The fake can emit a normalized provider failure; CAH-021 must translate it into one structured session failure before transcript persistence. |
 | Invalid protocol line | The runtime survives when possible and reports a safe protocol error. |
 | Unknown tool | Dispatch is rejected and the model receives a structured result. |
 | Step-limit exhaustion | The loop stops before another provider call. |
@@ -71,6 +75,17 @@ legal transitions, seven full replays, 27 failure cases, every terminal path, ap
 completion winning a cancellation race, and payload-free failure diagnostics. Both suites replay
 every case twice. Focused runtime, supervisor, conversation-reducer, and Ink tests prove that the
 same core semantics participate in the implemented mock path.
+
+CAH-020 adds deterministic provider-boundary evidence without introducing the agent loop or scenario
+runner. `tests/provider/test_provider_models.py` exercises every harness-owned stream variant, immutable
+request ordering, malformed serialized tool arguments, usage validation, and safe failure bounds.
+`tests/provider/test_fake.py` exercises exact request order, logical delays without wall-clock sleep,
+normalized failure, content-safe mismatch diagnostics, omitted and extra calls, abandoned streams,
+single-consumer ownership, and cancellation before output and between deltas.
+`tests/provider/test_port_imports.py` proves the package imports while common vendor and framework
+modules are unavailable and that the project declares no OpenAI or LangChain dependency. A
+transcript regression models the later failure handoff and verifies that only normalized failure
+fields are persisted, never a raw adapter object.
 
 ## Assertion layers
 
@@ -108,8 +123,10 @@ flaky wall-clock tests.
 
 ### Unit tests
 
-Pure reducers, validators, budgeting, path policy, command policy, redaction, and loop branches use
-fakes and temporary directories. They never invoke a live provider or depend on network access.
+Pure reducers, validators, provider contracts, budgeting, path policy, command policy, redaction,
+and loop branches use fakes and temporary directories. They never invoke a live provider or depend
+on network access. The CAH-020 fake uses named logical gates rather than short sleeps for
+asynchronous ordering evidence.
 
 ### Contract tests
 
@@ -121,7 +138,8 @@ fixtures test unsupported versions, bad discriminators, missing fields, and malf
 The walking-skeleton tests start the real Node parent and Python child with mocked runtime behavior.
 They assert ordered streamed completion, authoritative cancellation, another session after a
 terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. Later
-integrations may use a fake provider and fake or restricted executor.
+integrations begin with the CAH-020 fake provider in CAH-021 and may later add a fake or restricted
+executor. The current `MockSession` integration does not consume the provider port.
 
 ### Live-provider smoke evaluations
 

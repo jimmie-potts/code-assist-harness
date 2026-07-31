@@ -8,7 +8,8 @@
 > This guide follows the deterministic M0 mock that exists today. It does not describe a model,
 > repository context, tools, approvals, or edits. CAH-011 now records the same lifecycle, but the M0
 > trace below intentionally stays on the protocol path rather than following that persistence side
-> channel record by record.
+> channel record by record. CAH-020 adds a separately tested provider port and fake; neither is
+> wired into this trace.
 
 ## What this slice proves
 
@@ -233,7 +234,8 @@ The commands use no API key, model, network call, or target-workspace write.
 ## Intentional M0 omissions
 
 The response text is fixed. `MockSession` is a runtime fixture, not a provider adapter or an agent
-loop. This walking skeleton does not yet:
+loop. CAH-020's provider-neutral package exists beside this path but does not replace its response
+source. This walking skeleton does not yet:
 
 - call OpenAI or any other provider;
 - discover, search, or read workspace content;
@@ -258,9 +260,11 @@ walking-skeleton runtime semantics documented here.
 [CAH-010](../user-stories/cah-010-session-state-reducer.md) now routes this tape through equivalent
 pure Python and TypeScript lifecycle reducers while keeping multi-turn rendering as an adapter.
 [CAH-011](../user-stories/cah-011-append-only-transcript.md) now persists validated, redacted
-history without becoming the lifecycle source of truth. [CAH-020](../user-stories/cah-020-provider-interface-and-fake.md)
-is next and will replace the fixed response source with a provider-neutral interface and
-deterministic fake.
+history without becoming the lifecycle source of truth.
+[CAH-020](../user-stories/cah-020-provider-interface-and-fake.md) now defines and tests the
+provider-neutral interface and deterministic fake independently of this M0 runtime.
+[CAH-021](../user-stories/cah-021-complete-one-model-turn.md) is next and will connect that boundary
+to one model-free turn while preserving the existing lifecycle invariants.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

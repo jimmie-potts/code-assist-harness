@@ -1,7 +1,8 @@
 # Agent Loop
 
-> Status: proposed model-loop design. CAH-010 verifies its pure session-state and replay precursor
-> in Python and TypeScript; no model-backed loop exists yet.
+> Status: proposed model-loop design with the CAH-020 provider port and deterministic fake now
+> implemented. CAH-010 verifies the pure session-state and replay precursor in Python and
+> TypeScript; no provider-backed loop exists yet, and the current `MockSession` path is unchanged.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -21,8 +22,9 @@ The Python harness owns:
 - Emitting one ordered, authoritative session event stream.
 - Selecting exactly one terminal outcome.
 
-The provider adapter will own translation between provider-neutral types and a provider SDK. OpenAI
-SDK objects must not escape its module. The TUI will display events and send commands; it does not
+A real provider adapter will own translation between the implemented provider-neutral types and its
+SDK. OpenAI SDK objects must not escape that adapter. The deterministic fake implements the same
+port without an SDK or network access. The TUI will display events and send commands; it does not
 decide that a turn is complete or that an action is safe.
 
 ## Vocabulary
@@ -84,20 +86,63 @@ to unit test with a programmable fake provider.
 
 ## Provider port
 
-Provider request and stream types represent harness concepts rather than OpenAI concepts. The
-stream must be able to express:
+`src/code_assist_harness/provider/` now defines the provider boundary using harness concepts rather
+than OpenAI concepts. `ProviderRequest` contains a non-empty ordered conversation and ordered,
+caller-supplied repository instructions. Instruction discovery and context selection remain later
+work. The stream can express:
 
 - Text deltas.
 - A completed assistant message.
 - Tool-call requests with serialized arguments.
 - Usage information.
 - Provider completion and failure.
-- Cooperative cancellation.
+- Cooperative cancellation through the operation contract rather than as a fabricated stream
+  event.
 
-The deterministic fake provider is the first implementation. It receives a script of expected
-requests and events and fails clearly when the loop deviates. It must simulate delays, provider
-errors, malformed tool arguments, and cancellation without network access. The OpenAI adapter is a
-later story and will target the Responses API at the provider boundary.
+`Provider.start()` returns one `ProviderOperation`. Its event stream may be claimed exactly once and
+ends normally with `ProviderCompleted` or `ProviderFailed`. `cancel()` is idempotent and waits for
+cleanup; after it returns, the operation cannot emit another event. Cancellation ends iteration
+without inventing a provider failure because the session layer already owns the user's cancellation
+intent. `wait_closed()` lets the caller await natural completion, failure, or cancellation cleanup
+without requesting cancellation.
+
+The deterministic `FakeProvider` is the first implementation. It consumes an ordered tuple of
+`FakeProviderExchange` values. Each exchange pairs one exact `ProviderRequest` with explicit emit,
+logical-delay, and cancellation-checkpoint steps:
+
+```python
+fake = FakeProvider(
+    (
+        FakeProviderExchange(
+            expected_request=request,
+            steps=(
+                FakeProviderEmit(ProviderTextDelta("hello")),
+                FakeProviderEmit(ProviderTextCompleted("hello")),
+                FakeProviderEmit(ProviderCompleted()),
+            ),
+        ),
+    )
+)
+
+operation = fake.start(request)
+events = [event async for event in operation.events()]
+fake.assert_complete()
+```
+
+Non-cancellation exchanges end in exactly one completion or normalized failure event. A
+`FakeProviderDelay` names a logical gate that the test releases explicitly, so asynchronous
+ordering tests need no timing-sensitive sleep. `FakeProviderWaitForCancellation` lets a test pause
+before output or between deltas; cancellation consumes and suppresses the remaining scripted emits.
+Every started exchange must finish before the next begins, and `assert_complete()` detects omitted
+requests, active streams, abandoned consumers, and unconsumed steps. Unexpected requests report
+only bounded differing field paths rather than conversation or instruction contents.
+
+`ProviderFailure` normalizes provider errors into a stable code, bounded single-line safe message,
+and retryable observation. It has no raw exception, response, header, environment, or credential
+field; retryability does not authorize the loop to retry. Malformed tool arguments remain serialized
+text at this boundary so later tool validation can return a structured harness result. Provider
+contract tests run without vendor modules, framework packages, API keys, or network access. The
+OpenAI adapter is a later story and will target the Responses API at this boundary.
 
 ## State and terminal outcomes
 
@@ -170,15 +215,21 @@ the cancellation race, and an authoritative `session.failed` terminal.
 > As an agent-loop developer, I want provider-neutral streaming types and a deterministic fake so
 > that orchestration can be tested without OpenAI.
 
-Complete this story without adding provider SDK types to the core or making network requests.
+The implementation is delivered, while the story remains in progress until its required visual
+lesson is generated and validated. Harness-owned immutable request and stream values live in
+`provider/models.py`, the structural async port lives in `provider/port.py`, and the strict scripted
+implementation lives in `provider/fake.py`. Focused tests exercise every event variant, ordering,
+logical delays, normalized failures, mismatch privacy, malformed tool arguments, omitted work, and
+cancellation before output and between deltas without a provider dependency or network request.
 
 ### CAH-021 — Complete one model turn
 
 > As a user, I want one task answered through a provider so that the first conversational capability
 > is available.
 
-Complete this story when deltas, completion, provider failure, and cancellation all flow through
-the fake-provider path and terminal event invariants hold.
+This story follows CAH-020 and becomes dependency-ready after CAH-020's required visual evidence is
+complete. Finish it when deltas, completion, provider failure, and cancellation all flow through the
+fake-provider path and terminal event invariants hold.
 
 ### CAH-022 — Enforce loop limits
 
