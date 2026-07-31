@@ -247,6 +247,14 @@ describe('PythonRuntimeSupervisor', () => {
     });
   });
 
+  it('forwards transcript opt-out as one separate shell-free Python argument', () => {
+    const request = buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {}, false);
+
+    expect(request.arguments.slice(-3)).toEqual(['--workspace', '/workspace', '--no-transcript']);
+    expect(request.arguments.filter((argument) => argument === '--no-transcript')).toHaveLength(1);
+    expect(request.options.shell).toBe(false);
+  });
+
   it('strips runtime-selection overrides while preserving the remaining child environment', () => {
     const environment = {
       PATH: '/usr/bin',
@@ -617,6 +625,107 @@ describe('PythonRuntimeSupervisor', () => {
     expect(state.status === 'protocol-failed' ? state.message : '').not.toContain('hidden-value');
     child.close(0);
     await supervisor.stop();
+  });
+
+  it('keeps an active tape usable after a sanitized recoverable persistence warning', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      SECOND_SESSION_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      environment: {API_TOKEN: 'hidden-value'},
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    const updates: SessionUpdate[] = [];
+    supervisor.subscribeToSessionUpdates((update) => updates.push(update));
+    await startReady(child, supervisor);
+
+    const firstCommand = nextInputLine(child);
+    expect(supervisor.submitTask('Continue if recording fails.')).toBe(SESSION_COMMAND_ID);
+    expect(await firstCommand).toBe(
+      sessionStartCommandLine(SESSION_COMMAND_ID, 'Continue if recording fails.'),
+    );
+    child.stdout.write(sessionEventLine('session.started', 1, {}));
+
+    child.stdout.write(
+      `${JSON.stringify({
+        protocol_version: 1,
+        type: 'runtime.error',
+        timestamp: EVENT_TIMESTAMP,
+        payload: {
+          code: 'transcript_persistence_failed',
+          message: 'Recording failed near hidden-value; work will continue.',
+          recoverable: true,
+        },
+      })}\n`,
+    );
+
+    expect(supervisor.getState()).toEqual({
+      status: 'running',
+      workspace: WORKSPACE,
+      recordingWarning: {
+        code: 'transcript_persistence_failed',
+        message: 'Recording failed near [REDACTED]; work will continue.',
+      },
+    });
+    expect(child.stdin.writableEnded).toBe(false);
+
+    for (const line of [
+      sessionEventLine('assistant.delta', 2, {text: 'Work continued.'}),
+      sessionEventLine('assistant.completed', 3, {text: 'Work continued.'}),
+      sessionEventLine('session.completed', 4, {}),
+    ]) {
+      child.stdout.write(line);
+    }
+    expect(
+      updates.map((update) =>
+        update.type === 'event.received' ? update.event.type : update.type,
+      ),
+    ).toEqual([
+      'task.submitted',
+      'session.started',
+      'assistant.delta',
+      'assistant.completed',
+      'session.completed',
+    ]);
+    expect(supervisor.getState()).toMatchObject({
+      status: 'running',
+      recordingWarning: {code: 'transcript_persistence_failed'},
+    });
+
+    child.stdout.write(
+      `${JSON.stringify({
+        protocol_version: 1,
+        type: 'runtime.error',
+        timestamp: EVENT_TIMESTAMP,
+        payload: {
+          code: 'invalid_task',
+          message: 'A submitted task was invalid.',
+          recoverable: true,
+        },
+      })}\n`,
+    );
+    expect(supervisor.getState()).toMatchObject({
+      status: 'running',
+      recordingWarning: {code: 'transcript_persistence_failed'},
+      warning: {code: 'invalid_task', message: 'A submitted task was invalid.'},
+    });
+
+    const secondCommand = nextInputLine(child);
+    expect(supervisor.submitTask('Start a later task.')).toBe(SECOND_SESSION_COMMAND_ID);
+    expect(await secondCommand).toBe(
+      sessionStartCommandLine(SECOND_SESSION_COMMAND_ID, 'Start a later task.'),
+    );
+    expect(updates.at(-1)).toEqual({
+      type: 'task.submitted',
+      commandId: SECOND_SESSION_COMMAND_ID,
+      task: 'Start a later task.',
+    });
+
+    await closeOnInputEnd(child, supervisor);
   });
 
   it('writes one validated task and publishes two complete session tapes without restarting', async () => {

@@ -33,8 +33,10 @@ verified walking skeleton into a fixture-backed learner guide without changing p
 CAH-007 closes M0 with one offline `./scripts/check` gate and lockfile-driven Linux workflow for every
 current Python, TypeScript, protocol, policy, documentation, and real-boundary layer. CAH-010 begins
 M1 with pure Python and TypeScript lifecycle reducers, one reviewed transition matrix, shared replay
-fixtures, and integration through the existing mock and TUI paths. CAH-011 is the next
-dependency-ready unit and will persist validated history without becoming a second source of truth.
+fixtures, and integration through the existing mock and TUI paths. CAH-011 now persists redacted,
+bounded trusted lifecycle inputs and honest summaries under private XDG state, supports strict
+side-effect-free replay and local opt-out, and reports persistence loss without becoming a second
+source of truth. CAH-020 is the next dependency-ready unit.
 
 ## Epic backlog
 
@@ -65,7 +67,8 @@ replayable local record.
 - Write trusted domain facts and validated events to append-only, redacted transcripts.
 - Reconstruct visible state by replaying ordered lifecycle inputs from `idle`.
 
-CAH-010 is complete. CAH-011 is the next dependency-ready story in this epic.
+CAH-010 and CAH-011 are complete. Their reducer and durable-evidence outcomes unlock CAH-020 in the
+provider-loop epic.
 
 ### E2 - Provider interface and explicit agent loop
 

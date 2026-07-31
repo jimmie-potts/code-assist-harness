@@ -4,7 +4,11 @@ import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
-import {resolveWorkspace, WorkspaceConfigurationError} from '../src/workspace.js';
+import {
+  resolveApplicationConfiguration,
+  resolveWorkspace,
+  WorkspaceConfigurationError,
+} from '../src/workspace.js';
 
 describe('resolveWorkspace', () => {
   it('uses the canonical launch directory by default', () => {
@@ -40,9 +44,29 @@ describe('resolveWorkspace', () => {
   });
 
   it.each([
+    ['--no-transcript', '--workspace', '.'],
+    ['--workspace', '.', '--no-transcript'],
+  ])('accepts transcript opt-out before or after the workspace: %s %s %s', (...arguments_) => {
+    const configuration = resolveApplicationConfiguration(arguments_, process.cwd());
+
+    expect(configuration).toEqual({
+      workspace: {path: realpathSync(process.cwd()), source: 'command-line'},
+      transcriptEnabled: false,
+    });
+  });
+
+  it('enables local transcripts by default', () => {
+    expect(resolveApplicationConfiguration([], process.cwd())).toEqual({
+      workspace: {path: realpathSync(process.cwd()), source: 'launch-directory'},
+      transcriptEnabled: true,
+    });
+  });
+
+  it.each([
     {arguments_: ['--unknown'], message: 'Unknown argument'},
     {arguments_: ['--workspace'], message: 'requires exactly one path'},
-    {arguments_: ['--workspace', '.', '--workspace', '.'], message: 'requires exactly one path'},
+    {arguments_: ['--workspace', '.', '--workspace', '.'], message: 'provided only once'},
+    {arguments_: ['--no-transcript', '--no-transcript'], message: 'provided only once'},
   ])('rejects invalid arguments: $arguments_', ({arguments_, message}) => {
     expect(() => resolveWorkspace(arguments_, process.cwd())).toThrow(message);
   });

@@ -7,9 +7,11 @@ import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from .mock_session import MockSession, MockSessionRunner
+from .persistence import SessionTranscript, TranscriptPersistenceError, TranscriptSettings
 from .protocol import (
     Command,
     CommandLineReader,
@@ -21,6 +23,7 @@ from .protocol import (
     SessionId,
     SessionStartCommand,
 )
+from .session_state import SessionState, SessionUpdate
 
 _READ_CHUNK_SIZE = 64 * 1024
 
@@ -32,6 +35,14 @@ class RuntimeConfigurationError(ValueError):
 class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise RuntimeConfigurationError(message)
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeOptions:
+    """Validated process configuration supplied outside protocol stdin."""
+
+    workspace: Path
+    transcript_enabled: bool
 
 
 def resolve_workspace(value: str | Path) -> Path:
@@ -60,13 +71,14 @@ def resolve_workspace(value: str | Path) -> Path:
     return resolved
 
 
-def _parse_workspace(arguments: Sequence[str]) -> Path:
+def _parse_runtime_options(arguments: Sequence[str]) -> _RuntimeOptions:
     parser = _ArgumentParser(
         prog="python -m code_assist_harness.runtime",
         add_help=False,
         allow_abbrev=False,
     )
     parser.add_argument("--workspace", action="append", metavar="PATH")
+    parser.add_argument("--no-transcript", action="store_true")
     parsed = parser.parse_args(arguments)
 
     workspace_values: list[str] | None = parsed.workspace
@@ -75,7 +87,10 @@ def _parse_workspace(arguments: Sequence[str]) -> Path:
     if len(workspace_values) != 1:
         raise RuntimeConfigurationError("--workspace PATH must be provided exactly once")
 
-    return resolve_workspace(workspace_values[0])
+    return _RuntimeOptions(
+        workspace=resolve_workspace(workspace_values[0]),
+        transcript_enabled=not parsed.no_transcript,
+    )
 
 
 async def _read_stdin_chunks() -> AsyncIterator[bytes]:
@@ -145,7 +160,12 @@ async def _read_commands() -> AsyncIterator[Command | ProtocolParseFailure]:
         yield failure
 
 
-async def run_runtime(workspace: Path) -> None:
+async def run_runtime(
+    workspace: Path,
+    *,
+    transcript_enabled: bool = True,
+    transcript_settings: TranscriptSettings | None = None,
+) -> None:
     """Validate commands and emit ordered protocol events until shutdown or pipe EOF.
 
     The runtime owns exactly one canonical workspace for its lifetime. Each physical stdin line is
@@ -158,6 +178,10 @@ async def run_runtime(workspace: Path) -> None:
 
     Args:
         workspace: Canonical existing directory owned by this runtime process.
+        transcript_enabled: Whether accepted session inputs should create local evidence files.
+        transcript_settings: Optional explicit storage and redaction settings. When omitted and
+            persistence is enabled, settings are derived from XDG and recognized sensitive
+            environment values. Disabled mode never inspects those locations or values.
 
     Raises:
         RuntimeConfigurationError: If ``workspace`` is not canonical or is no longer a directory.
@@ -176,11 +200,17 @@ async def run_runtime(workspace: Path) -> None:
     if workspace != resolved_workspace or not resolved_workspace.is_dir():
         raise RuntimeConfigurationError("workspace must be a canonical existing directory")
 
+    settings = transcript_settings
+    if transcript_enabled and settings is None:
+        settings = TranscriptSettings.from_environment()
+
     writer = OrderedEventWriter(_write_stdout_line)
     mock_sessions = MockSessionRunner(writer)
+    transcript_available = transcript_enabled
     initialized = False
     active_session: MockSession | None = None
     active_session_task: asyncio.Task[SessionId] | None = None
+    active_transcript: SessionTranscript | None = None
     latest_terminal_session_id: SessionId | None = None
     commands = _read_commands()
     next_command = asyncio.create_task(anext(commands))
@@ -202,6 +232,7 @@ async def run_runtime(workspace: Path) -> None:
                 latest_terminal_session_id = active_session.session_id
                 active_session = None
                 active_session_task = None
+                active_transcript = None
 
             if next_command not in completed:
                 continue
@@ -308,6 +339,53 @@ async def run_runtime(workspace: Path) -> None:
                     )
                     continue
                 active_session = mock_sessions.create(result)
+                if transcript_available:
+                    if settings is None:
+                        raise RuntimeError("enabled transcripts are missing their settings")
+                    try:
+                        active_transcript = await SessionTranscript.create(
+                            settings,
+                            workspace,
+                            active_session.session_id,
+                        )
+                    except TranscriptPersistenceError:
+                        transcript_available = False
+                        await writer.emit_runtime(
+                            "runtime.error",
+                            {
+                                "code": "transcript_persistence_failed",
+                                "message": (
+                                    "Session recording is unavailable; session work will continue."
+                                ),
+                                "recoverable": True,
+                            },
+                            correlation_id=result.command_id,
+                        )
+                    else:
+                        transcript = active_transcript
+                        start_command_id = result.command_id
+
+                        async def _record_lifecycle(
+                            update: SessionUpdate,
+                            accepted_state: SessionState,
+                        ) -> None:
+                            """Persist one accepted input or emit the one safe warning."""
+                            nonlocal transcript_available
+                            failure = await transcript.record(update, accepted_state)
+                            if failure is None:
+                                return
+                            transcript_available = False
+                            await writer.emit_runtime(
+                                "runtime.error",
+                                {
+                                    "code": "transcript_persistence_failed",
+                                    "message": failure.message,
+                                    "recoverable": True,
+                                },
+                                correlation_id=start_command_id,
+                            )
+
+                        await active_session.attach_lifecycle_observer(_record_lifecycle)
                 active_session_task = asyncio.create_task(active_session.run())
                 continue
 
@@ -349,6 +427,7 @@ async def run_runtime(workspace: Path) -> None:
                 latest_terminal_session_id = active_session.session_id
                 active_session = None
                 active_session_task = None
+                active_transcript = None
                 continue
 
             raise RuntimeError(f"unhandled validated command type: {type(result).__name__}")
@@ -368,6 +447,8 @@ async def run_runtime(workspace: Path) -> None:
                 await active_session_task
             except asyncio.CancelledError:
                 pass
+        if active_transcript is not None:
+            await active_transcript.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -385,8 +466,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     arguments = sys.argv[1:] if argv is None else argv
     try:
-        workspace = _parse_workspace(arguments)
-        asyncio.run(run_runtime(workspace))
+        options = _parse_runtime_options(arguments)
+        asyncio.run(
+            run_runtime(
+                options.workspace,
+                transcript_enabled=options.transcript_enabled,
+            )
+        )
     except RuntimeConfigurationError as error:
         print(f"runtime configuration error: {error}", file=sys.stderr)
         return 2

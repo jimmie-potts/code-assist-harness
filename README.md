@@ -23,14 +23,20 @@ domain facts and validated wire events. Fifty shared transition, replay, and fai
 correlation, session identity, contiguous sequence, assistant completion, and absorbing terminals.
 The Python mock and TypeScript supervisor route their current event tapes through those cores, while
 the Ink conversation projection preserves completed, cancelled, and failed turns.
+Each accepted session now attempts an append-only transcript under the WSL XDG state directory and,
+after a successfully persisted terminal record, a human-readable summary. Python redacts configured
+sensitive values and recognized credentials, bounds persisted text, writes owner-only artifacts,
+flushes every accepted record, and can replay a validated complete tape through the same reducer. A
+storage failure becomes one recoverable TUI warning without changing the session outcome. Use
+`--no-transcript` to disable only these local files.
 The application does **not** yet run an agent loop, read the workspace, or integrate with OpenAI.
 CAH-009 documents that first end-to-end execution in the
 [walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
 are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
 adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
-evidence. CAH-010 begins M1 with replayable in-memory lifecycle state. CAH-011 is next and will add
-the append-only transcript; provider, workspace-read, tool, policy, and agent behavior remain
-unimplemented.
+evidence. CAH-010 begins M1 with replayable in-memory lifecycle state, and CAH-011 adds durable local
+evidence without moving lifecycle authority into storage. CAH-020 is next; provider, workspace-read,
+tool, policy, and agent behavior remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -160,6 +166,22 @@ single workspace with an absolute path, or with a path relative to that launch d
 ./scripts/run-tui --workspace /path/to/repository
 ```
 
+Transcripts are enabled by default and live under
+`$XDG_STATE_HOME/code-assist-harness/transcripts/`, falling back to
+`~/.local/state/code-assist-harness/transcripts/`. Disable transcript and summary creation for a
+run with either of these equivalent forms:
+
+```bash
+./scripts/run-tui --no-transcript
+./scripts/run-tui --workspace /path/to/repository --no-transcript
+```
+
+The flag controls local harness artifacts only; it does not make a future provider request or
+provider-side retention policy disappear. Transcript filenames contain a pseudonymous workspace
+hash, session ID, and random transcript ID, not the workspace path or repository name. The hash is
+not anonymous, file mode `0600` is not encryption, and retention remains the local user's
+responsibility.
+
 The launcher reports actionable setup guidance when Node or npm is missing, rejects Windows Node or
 npm executables reached directly or through a symlink, and checks the supported Node range before
 npm or the TypeScript loader runs. The runtime supervisor separately resolves `uv` from its filtered
@@ -255,7 +277,7 @@ duplicating its check list in workflow YAML.
 ## Current and planned project layout
 
 ```text
-src/code_assist_harness/  Current runtime and Pydantic protocol boundary; future harness core
+src/code_assist_harness/  Runtime, reducers, Pydantic protocol boundary, and transcript persistence
 tests/                    Current Python tests mirroring source modules
 tui/                      Current supervised Ink app, Zod protocol boundary, metadata, and tests
 scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
@@ -268,9 +290,10 @@ user-stories/             Roadmap, implementation stories, and planning notes
 ```
 
 The Python runtime, supervised TUI, protocol messages and fixtures, deterministic mocked streaming,
-cooperative session cancellation, conversation projection, documentation, and backlog exist today.
-Broader evaluation, provider, workspace-read, tool, policy, transcript, and agent paths remain
-planned and are introduced only by the story that needs them.
+cooperative session cancellation, conversation projection, transcript persistence and replay,
+documentation, and backlog exist today. Broader evaluation, provider, workspace-read, tool, policy,
+transcript browsing/export/retention, and agent paths remain planned and are introduced only by the
+story that needs them.
 
 ## Documentation map
 

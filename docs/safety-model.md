@@ -111,20 +111,31 @@ including sensitive data.
 
 ## Transcripts and privacy
 
-Trusted lifecycle inputs—application-owned domain facts and validated session events—will be
-append-only evidence, not raw debug capture. By default, session transcripts will live under the
+Trusted lifecycle inputs—application-owned domain facts and validated session events—are
+append-only evidence, not raw debug capture. By default, session transcripts live under the
 WSL XDG state directory, normally
-`~/.local/state/code-assist-harness/`, indexed by a stable workspace identifier rather than a
-personal path in the filename. Files should use restrictive local permissions.
+`~/.local/state/code-assist-harness/transcripts/`, indexed by a stable workspace hash, session ID,
+and random transcript ID rather than a personal path in the filename. Application directories are
+`0700`; transcript and summary files are `0600`; each accepted record is flushed and fsynced.
 
-The transcript may include user tasks, assistant text, bounded tool metadata and results, approval
-decisions, changed-file paths, and validation outcomes. It excludes raw provider payloads and
-environment values. Configured sensitive values and recognized credentials are redacted before a
-lifecycle input is persisted. Redaction is a safety net, so producers should avoid emitting secrets
-in the first place.
+CAH-011 transcripts include user tasks, assistant text, validated session events, cancellation
+intent, and the approval wait/resume lifecycle facts introduced by CAH-010. Typed tool metadata,
+tool results, approval decision details, changed-file paths, and validation outcomes remain future
+fields; the current summary reports those unavailable rather than inventing them. Raw provider
+payloads and environment mappings are excluded. Values discovered under recognized secret-like
+environment names and recognized credential syntax are redacted before a lifecycle input is
+persisted. Redaction is a safety net, so producers should avoid emitting secrets in the first place.
 
-Before the first real-provider release, the CLI must offer a documented `--no-transcript` mode.
-Transcript failure is visible to the user and cannot silently corrupt or rewrite session state.
+The CLI implements `--no-transcript`, which disables local JSONL and summary files without changing
+the event tape. It does not govern future provider-side storage. A first transcript failure becomes
+one sanitized recoverable TUI warning, disables later persistence attempts for that process, and
+cannot silently corrupt or rewrite session state.
+
+These controls reduce accidental disclosure; they do not make the record encrypted, tamper-evident,
+anonymous, or inaccessible to another process running as the same WSL user. User text can itself
+contain identifying paths even when filenames do not. Redaction is a safety net rather than proof
+that arbitrary encoded or transformed secrets are absent, and local retention/deletion remains the
+user's responsibility.
 
 ## Threat-driven tests
 
@@ -159,10 +170,13 @@ into secure execution of arbitrary untrusted code.
 > As a user, I want traversal, symlinks, and stale edit targets checked at execution time so that
 > tools cannot escape or overwrite newer content.
 
-### Future story — Persist redacted audit evidence
+### Implemented in CAH-011 — Persist redacted lifecycle evidence
 
 > As a learner, I want a local append-only record with a privacy opt-out so that I can study
 > behavior without retaining raw provider or environment data.
+
+The current implementation is described in [Transcripts and privacy](#transcripts-and-privacy).
+Search, export, automated retention, tamper evidence, and centralized governance remain future work.
 
 Each story is complete only with a no-side-effect failure test, actionable user-facing errors, and
 validated transcript events for decisions and outcomes.

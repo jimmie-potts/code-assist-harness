@@ -105,7 +105,9 @@ execution environment.
 ## Human-readable summary
 
 A compact session artifact containing the task, terminal outcome, changed files, and validation
-results. It complements rather than replaces the append-only lifecycle transcript.
+results. CAH-011 reports changed files and validation as unavailable because their producers do not
+exist yet; it never turns missing evidence into empty success. The summary complements rather than
+replaces the append-only lifecycle transcript.
 
 ## Invariant failure
 
@@ -227,7 +229,8 @@ its capability and effective policy.
 An append-only JSONL record of trusted lifecycle inputs stored under the WSL XDG state directory
 unless disabled. It preserves reducer order across application-owned domain facts and validated
 session events after redaction and bounding; it never contains raw provider payloads or environment
-values and does not replace authoritative in-memory state.
+values and does not replace authoritative in-memory state. A complete safe tape can be replayed;
+an incomplete prefix is inspectable but not resumable.
 
 ## TUI
 

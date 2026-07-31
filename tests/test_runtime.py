@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import select
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
+import code_assist_harness.runtime as runtime_module
 from code_assist_harness.mock_session import (
     MOCK_RESPONSE_DELTAS,
     MOCK_RESPONSE_TEXT,
     MockSessionRunner,
+)
+from code_assist_harness.persistence import (
+    SessionTranscript,
+    TranscriptFileOperations,
+    TranscriptSettings,
+    replay_transcript,
 )
 from code_assist_harness.protocol import (
     Event,
@@ -20,20 +29,45 @@ from code_assist_harness.protocol import (
     OrderedEventWriter,
     ProtocolParseFailure,
     SessionStartCommand,
+    validate_command,
 )
 from code_assist_harness.runtime import RuntimeConfigurationError, resolve_workspace
 from code_assist_harness.session_state import SessionState
 
 TIMESTAMP = "2026-07-16T12:34:56.789Z"
+FAKE_RUNTIME_SECRET = "FAKE_CAH_RUNTIME_SECRET_011"
 
 
-def _run_runtime(*arguments: str, input_bytes: bytes = b"") -> subprocess.CompletedProcess[bytes]:
+def _isolated_runtime_environment(
+    tmp_path: Path,
+    **overrides: str,
+) -> dict[str, str]:
+    """Return only non-secret process settings plus explicit fake test values."""
+    environment = {
+        "HOME": str(tmp_path / "isolated-home"),
+        "LANG": "C.UTF-8",
+        "PATH": os.environ.get("PATH", os.defpath),
+    }
+    environment.update(overrides)
+    return environment
+
+
+def _run_runtime(
+    *arguments: str,
+    input_bytes: bytes = b"",
+    transcript_enabled: bool = False,
+    environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    runtime_arguments = list(arguments)
+    if not transcript_enabled and "--no-transcript" not in runtime_arguments:
+        runtime_arguments.append("--no-transcript")
     return subprocess.run(
-        [sys.executable, "-m", "code_assist_harness.runtime", *arguments],
+        [sys.executable, "-m", "code_assist_harness.runtime", *runtime_arguments],
         input=input_bytes,
         capture_output=True,
         check=False,
         timeout=5,
+        env=environment,
     )
 
 
@@ -63,6 +97,16 @@ def _event_lines(lines: bytes) -> list[Event]:
     results = [*reader.feed(lines), *reader.finish()]
     assert all(not isinstance(result, ProtocolParseFailure) for result in results)
     return [result for result in results if not isinstance(result, ProtocolParseFailure)]
+
+
+def _event_semantics(events: list[Event]) -> list[dict[str, object]]:
+    """Drop only nondeterministic timestamps before comparing two runtime tapes."""
+    normalized: list[dict[str, object]] = []
+    for event in events:
+        value = event.model_dump(mode="json")
+        value.pop("timestamp")
+        normalized.append(value)
+    return normalized
 
 
 def _session_start(command_id: str, task: str = "Explain this repository") -> SessionStartCommand:
@@ -497,7 +541,14 @@ def test_runtime_rejects_a_whitespace_only_task_without_starting_a_session(
 
 def test_runtime_accepts_a_second_session_after_the_first_completes(tmp_path: Path) -> None:
     process = subprocess.Popen(
-        [sys.executable, "-m", "code_assist_harness.runtime", "--workspace", str(tmp_path)],
+        [
+            sys.executable,
+            "-m",
+            "code_assist_harness.runtime",
+            "--workspace",
+            str(tmp_path),
+            "--no-transcript",
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -582,7 +633,14 @@ def test_runtime_accepts_a_second_session_after_the_first_completes(tmp_path: Pa
 
 def test_runtime_routes_cancellation_and_rejects_a_wrong_active_session(tmp_path: Path) -> None:
     process = subprocess.Popen(
-        [sys.executable, "-m", "code_assist_harness.runtime", "--workspace", str(tmp_path)],
+        [
+            sys.executable,
+            "-m",
+            "code_assist_harness.runtime",
+            "--workspace",
+            str(tmp_path),
+            "--no-transcript",
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -781,6 +839,361 @@ def test_runtime_reports_unterminated_input_as_one_safe_protocol_error(tmp_path:
     assert events[0].type == "runtime.error"
     assert events[0].payload.code == "invalid_framing"
     assert events[0].payload.recoverable is True
+
+
+def test_enabled_transcript_excludes_secret_bearing_invalid_wire_input(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    xdg_state = tmp_path / "xdg-state"
+    invalid_secret = b"sk-FAKEINVALIDWIRESECRET011"
+    malformed = b'{"credential":"' + invalid_secret + b'"\n'
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(workspace.resolve())},
+            ),
+            _command("session.start", "cmd_session", {"task": "Record only trusted input"}),
+            malformed,
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime(
+        "--workspace",
+        str(workspace),
+        input_bytes=input_bytes,
+        transcript_enabled=True,
+        environment=_isolated_runtime_environment(
+            tmp_path,
+            XDG_STATE_HOME=str(xdg_state),
+        ),
+    )
+    events = _stdout_events(completed)
+    transcript_directory = xdg_state / "code-assist-harness" / "transcripts"
+    transcript_path = next(transcript_directory.glob("*.jsonl"))
+    summary_path = next(transcript_directory.glob("*.summary.txt"))
+    persisted_bytes = transcript_path.read_bytes() + summary_path.read_bytes()
+
+    assert completed.returncode == 0
+    assert [event.payload.code for event in events if event.type == "runtime.error"] == [
+        "malformed_json"
+    ]
+    assert events[-1].type == "session.completed"
+    assert replay_transcript(transcript_path).complete
+    assert invalid_secret not in persisted_bytes
+    assert b"credential" not in persisted_bytes
+
+
+def test_runtime_persists_and_replays_one_complete_session_under_xdg_state(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "private-workspace-name"
+    workspace.mkdir()
+    xdg_state = tmp_path / "xdg-state"
+    environment = _isolated_runtime_environment(
+        tmp_path,
+        OPENAI_API_KEY=FAKE_RUNTIME_SECRET,
+        XDG_STATE_HOME=str(xdg_state),
+    )
+    submitted_task = f"Persist {FAKE_RUNTIME_SECRET} safely"
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(workspace.resolve())},
+            ),
+            _command("session.start", "cmd_session", {"task": submitted_task}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime(
+        "--workspace",
+        str(workspace),
+        input_bytes=input_bytes,
+        transcript_enabled=True,
+        environment=environment,
+    )
+    events = _stdout_events(completed)
+    transcript_directory = xdg_state / "code-assist-harness" / "transcripts"
+    transcript_paths = list(transcript_directory.glob("*.jsonl"))
+    summary_paths = list(transcript_directory.glob("*.summary.txt"))
+
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    assert [event.type for event in events] == [
+        "runtime.ready",
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert len(transcript_paths) == 1
+    assert len(summary_paths) == 1
+    assert "private-workspace-name" not in transcript_paths[0].name
+    replay = replay_transcript(transcript_paths[0])
+    assert replay.complete
+    assert replay.state.status == "completed"
+    persisted_bytes = transcript_paths[0].read_bytes() + summary_paths[0].read_bytes()
+    assert replay.state.task == "Persist [REDACTED] safely"
+    assert FAKE_RUNTIME_SECRET.encode() not in persisted_bytes
+    assert list(workspace.iterdir()) == []
+
+
+def test_no_transcript_preserves_session_tape_without_reading_an_unsafe_state_path(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    unused_state = workspace / "must-not-be-created"
+    environment = _isolated_runtime_environment(
+        tmp_path,
+        XDG_STATE_HOME=str(unused_state),
+    )
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(workspace.resolve())},
+            ),
+            _command("session.start", "cmd_session", {"task": "Do not persist"}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime(
+        "--no-transcript",
+        "--workspace",
+        str(workspace),
+        input_bytes=input_bytes,
+        environment=environment,
+    )
+    events = _stdout_events(completed)
+    enabled_state = tmp_path / "comparison-xdg-state"
+    enabled_completed = _run_runtime(
+        "--workspace",
+        str(workspace),
+        input_bytes=input_bytes,
+        transcript_enabled=True,
+        environment=_isolated_runtime_environment(
+            tmp_path,
+            XDG_STATE_HOME=str(enabled_state),
+        ),
+    )
+    enabled_events = _stdout_events(enabled_completed)
+
+    assert completed.returncode == 0
+    assert enabled_completed.returncode == 0
+    assert [event.type for event in events] == [
+        "runtime.ready",
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert _event_semantics(events) == _event_semantics(enabled_events)
+    assert not unused_state.exists()
+    assert list(workspace.iterdir()) == []
+
+
+def test_runtime_reports_one_recoverable_persistence_error_and_completes_session(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    environment = _isolated_runtime_environment(
+        tmp_path,
+        XDG_STATE_HOME=str(workspace),
+    )
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(workspace.resolve())},
+            ),
+            _command("session.start", "cmd_session", {"task": "Continue safely"}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime(
+        "--workspace",
+        str(workspace),
+        input_bytes=input_bytes,
+        transcript_enabled=True,
+        environment=environment,
+    )
+    events = _stdout_events(completed)
+    errors = [event for event in events if event.type == "runtime.error"]
+
+    assert completed.returncode == 0
+    assert len(errors) == 1
+    assert errors[0].payload.code == "transcript_persistence_failed"
+    assert errors[0].payload.recoverable is True
+    assert errors[0].correlation_id == "cmd_session"
+    assert events[-1].type == "session.completed"
+    assert not (workspace / "code-assist-harness").exists()
+
+
+def test_runtime_reports_one_mid_session_flush_failure_without_changing_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    settings = TranscriptSettings(state_directory=tmp_path / "state" / "code-assist-harness")
+    commands = [
+        validate_command(
+            json.loads(
+                _command(
+                    "runtime.initialize",
+                    "cmd_initialize",
+                    {"workspace": str(workspace.resolve())},
+                )
+            )
+        ),
+        validate_command(
+            json.loads(
+                _command("session.start", "cmd_session", {"task": "Keep running after fsync"})
+            )
+        ),
+        validate_command(json.loads(_command("runtime.shutdown", "cmd_shutdown", {}))),
+    ]
+    output_lines: list[bytes] = []
+    transcripts: list[SessionTranscript] = []
+    flush_count = 0
+    original_create = SessionTranscript.create
+
+    def flush(descriptor: int) -> None:
+        nonlocal flush_count
+        flush_count += 1
+        if flush_count == 3:
+            raise OSError("injected fsync failure whose details must remain private")
+        os.fsync(descriptor)
+
+    async def read_commands():
+        for command in commands:
+            yield command
+
+    async def write_stdout_line(line: bytes) -> None:
+        output_lines.append(line)
+
+    async def create_transcript(
+        transcript_settings: TranscriptSettings,
+        canonical_workspace: Path,
+        session_id: str,
+    ) -> SessionTranscript:
+        transcript = await original_create(
+            transcript_settings,
+            canonical_workspace,
+            session_id,
+            operations=TranscriptFileOperations(flush=flush),
+            create_transcript_id=lambda: "runtime_failure_tape_011",
+        )
+        transcripts.append(transcript)
+        return transcript
+
+    monkeypatch.setattr(runtime_module, "_read_commands", read_commands)
+    monkeypatch.setattr(runtime_module, "_write_stdout_line", write_stdout_line)
+    monkeypatch.setattr(
+        runtime_module.SessionTranscript,
+        "create",
+        staticmethod(create_transcript),
+    )
+
+    asyncio.run(
+        runtime_module.run_runtime(
+            workspace.resolve(),
+            transcript_settings=settings,
+        )
+    )
+    events = _event_lines(b"".join(output_lines))
+    errors = [event for event in events if event.type == "runtime.error"]
+
+    assert len(transcripts) == 1
+    assert len(errors) == 1
+    assert errors[0].payload.code == "transcript_persistence_failed"
+    assert errors[0].payload.recoverable is True
+    assert errors[0].correlation_id == "cmd_session"
+    assert events[-1].type == "session.completed"
+    replay = replay_transcript(transcripts[0].transcript_path)
+    assert replay.state.status == "running"
+    assert not replay.complete
+
+
+def test_interrupted_runtime_retains_a_valid_incomplete_jsonl_prefix(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    xdg_state = tmp_path / "xdg-state"
+    environment = _isolated_runtime_environment(
+        tmp_path,
+        XDG_STATE_HOME=str(xdg_state),
+    )
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "code_assist_harness.runtime",
+            "--workspace",
+            str(workspace),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+        bufsize=0,
+    )
+
+    try:
+        assert process.stdin is not None
+        process.stdin.write(
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(workspace.resolve())},
+            )
+        )
+        process.stdin.flush()
+        assert _read_process_event(process).type == "runtime.ready"
+        process.stdin.write(_command("session.start", "cmd_session", {"task": "Interrupt me"}))
+        process.stdin.flush()
+        assert _read_process_event(process).type == "session.started"
+        assert _read_process_event(process).type == "assistant.delta"
+        # Observing the next event proves the previous delta's awaited transcript fsync returned.
+        assert _read_process_event(process).type == "assistant.delta"
+
+        transcript_directory = xdg_state / "code-assist-harness" / "transcripts"
+        deadline = time.monotonic() + 2
+        transcript_paths: list[Path] = []
+        while time.monotonic() < deadline:
+            transcript_paths = list(transcript_directory.glob("*.jsonl"))
+            if transcript_paths and len(transcript_paths[0].read_bytes().splitlines()) >= 3:
+                break
+            time.sleep(0.01)
+        assert len(transcript_paths) == 1
+
+        process.terminate()
+        process.wait(timeout=5)
+        replay = replay_transcript(transcript_paths[0])
+
+        assert len(replay.records) >= 3
+        assert not replay.complete
+        assert replay.state.status == "running"
+        assert transcript_paths[0].read_bytes().endswith(b"\n")
+        assert not list(transcript_directory.glob("*.summary.txt"))
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def test_runtime_reports_invalid_workspace_only_on_stderr(tmp_path: Path) -> None:
