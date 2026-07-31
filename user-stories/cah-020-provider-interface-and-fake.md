@@ -1,12 +1,11 @@
 # CAH-020 - Define the provider interface and fake provider
 
-- **Status:** In progress
+- **Status:** Done
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-010, CAH-011
 - **Lesson:** [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md)
-- **Visual lesson:** Pending generation and validation at
-  `docs/lessons/assets/cah-020-provider-interface-and-fake.pptx`; Windows-native artifact-tool
-  execution permission is still required
+- **Visual lesson:**
+  [A stable socket for model streams](../docs/lessons/assets/cah-020-provider-interface-and-fake.pptx)
 
 ## User story
 
@@ -92,8 +91,8 @@ cancellation, and normalization boundaries. Document the fake script format for 
 
 - The written lesson records the concrete provider types, fake script API, cancellation contract,
   failure paths, tests, and implementation code samples.
-- **PENDING — visual validation:** record the final slide count, slide-by-slide rendered-image
-  inspection, and presentation overflow-test result after the deck is generated.
+- The ten-slide visual lesson was rendered and inspected slide by slide at full resolution; the
+  presentation overflow test passed with no reported overflow.
 - `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` passes: 263 Python tests, 30 Python
   protocol-fixture tests, 24 repository-policy tests, 208 TUI tests, 29 TypeScript
   protocol-fixture tests, and 4 real Node/Python boundary tests, plus Python lint/format and

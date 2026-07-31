@@ -27,18 +27,18 @@ harness library.
 | Blocked | Work cannot continue until a named dependency or external decision is resolved. |
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
-CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, CAH-007, CAH-010, and
-CAH-011 are
+CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, CAH-007, CAH-010,
+CAH-011, and CAH-020 are
 **Done**: the architecture baseline, documentation standard, Ink shell, supervised Python process,
 protocol version 1 boundary, deterministic mocked-session slice, authoritative cancellation
 lifecycle, fixture-backed walking-skeleton guide, offline repository/CI gate, and equivalent
 cross-language session reducers are implemented and validated. The Python runtime now also writes
 private, redacted, replayable session transcripts and honest summaries unless explicitly disabled.
-The CAH-020 branch now exposes provider-neutral request and stream contracts plus a strict
-programmable fake, and its repository-wide gate passes, while required visual evidence remains
-pending. M0 is complete and M1 is in progress. CAH-021 follows CAH-020; the current `MockSession` and
-TUI do not yet use the provider port, and a real provider, workspace reads, tools, policy, and
-agent-loop behavior remain unimplemented.
+CAH-020 exposes provider-neutral request and stream contracts plus a strict programmable fake, with
+its required written and visual learning evidence verified. M0 is complete and M1 is in progress.
+CAH-021 is the next dependency-ready unit; the current `MockSession` and TUI do not yet use the
+provider port, and a real provider, workspace reads, tools, policy, and agent-loop behavior remain
+unimplemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -55,7 +55,7 @@ agent-loop behavior remain unimplemented.
 | 9 | [CAH-007: Establish repository-wide checks](cah-007-establish-repository-checks.md) | [Repository-wide checks](../docs/lessons/cah-007-repository-checks.md) | M0 | Done | CAH-009 |
 | 10 | [CAH-010: Implement session state as a reducer](cah-010-session-state-reducer.md) | [Session state reducer](../docs/lessons/cah-010-session-state-reducer.md) | M1 | Done | CAH-004, CAH-006, CAH-007 |
 | 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md) | M1 | Done | CAH-010 |
-| 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | In progress | CAH-010, CAH-011 |
+| 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | Done | CAH-010, CAH-011 |
 | 13 | [CAH-021: Complete one model turn](cah-021-complete-one-model-turn.md) | [One model turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Planned | CAH-020 |
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Planned | CAH-021 |
 

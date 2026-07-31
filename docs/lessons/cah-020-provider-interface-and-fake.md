@@ -2,20 +2,18 @@
 
 - **Unit:** CAH-020
 - **Milestone:** M1 - Conversational core
-- **Lesson status:** Implementation companion
-- **Implementation status:** In progress; the provider-neutral port and strict fake are implemented
-  and tested without a provider SDK, API key, or network request, while visual generation and
-  validation await Windows-native artifact-tool execution permission
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; the provider-neutral port and strict fake are implemented and
+  tested without a provider SDK, API key, or network request
 - **Story:** [CAH-020](../../user-stories/cah-020-provider-interface-and-fake.md)
-- **Visual companion:** Pending generation and validation at
-  `assets/cah-020-provider-interface-and-fake.pptx`
+- **Visual companion:**
+  [A stable socket for model streams](assets/cah-020-provider-interface-and-fake.pptx)
 - **Related architecture:** [ADR 0001](../adr/0001-own-the-agent-loop.md),
   [Agent loop](../agent-loop.md), and [Evaluation](../evaluation.md)
 
-> This lesson describes the implemented CAH-020 provider contract and fake. The repository-wide
-> gate passes, but the lesson becomes verified only after the visual companion is rendered,
-> inspected, and overflow-tested. The current TUI still runs `MockSession`; CAH-021 will connect a
-> provider operation to one real harness model turn.
+> This lesson describes the shipped CAH-020 provider contract and fake. The code samples below are
+> excerpts from the implementation and tests, not aspirational pseudocode. The current TUI still
+> runs `MockSession`; CAH-021 will connect a provider operation to one real harness model turn.
 
 ## Quick summary
 
