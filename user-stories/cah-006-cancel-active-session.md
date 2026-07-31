@@ -52,7 +52,8 @@ idempotency, cleanup, and terminal-event invariant. Document the key binding and
 
 ## Out of scope
 
-- Provider-operation cancellation; CAH-020 and CAH-021 apply the established lifecycle to providers.
+- Provider-operation cancellation; CAH-020 defines that operation contract and CAH-021 will
+  integrate it with the established session lifecycle.
 - Tool or subprocess cancellation.
 - Persisted cancellation records before CAH-011.
 

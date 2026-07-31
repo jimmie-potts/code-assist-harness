@@ -38,8 +38,9 @@ are checked against the shared protocol validators and the real process-boundary
 adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
 evidence. CAH-010 begins M1 with replayable in-memory lifecycle state, and CAH-011 adds durable local
 evidence without moving lifecycle authority into storage. CAH-020 adds the provider port and strict
-network-free fake. CAH-021 is next; a provider-backed turn, real provider adapter, workspace reads,
-tools, policy, and agent behavior remain unimplemented.
+network-free fake. CAH-021 is next and will prove one provider-neutral turn with that fake; CAH-022
+then adds hard limits before CAH-023 introduces the OpenAI Responses adapter. All three remain
+planned. Workspace reads, tools, policy, and broader agent behavior also remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -110,9 +111,10 @@ See [architecture.md](docs/architecture.md) for the complete target structure an
 - Node 22.22.1, pinned in `.node-version`; the enforced TUI range is `>=22.13.0 <23`
 - npm 9 or newer
 
-An OpenAI API key is not needed for the walking skeleton or default tests. A future live-provider
-adapter will read `OPENAI_API_KEY` from the environment; credentials and `.env` files must never be
-committed.
+An OpenAI API key is not needed for the walking skeleton or default tests. Planned CAH-023 will let
+the adapter consume `OPENAI_API_KEY` only when OpenAI is explicitly selected; CAH-011 may inspect a
+recognized credential value solely to seed transcript redaction. Credentials and `.env` files must
+never be committed.
 
 ## Setup, launch, and checks
 
@@ -295,9 +297,9 @@ user-stories/             Roadmap, implementation stories, and planning notes
 The Python runtime, supervised TUI, protocol messages and fixtures, deterministic mocked streaming,
 cooperative session cancellation, conversation projection, transcript persistence and replay,
 provider-neutral request and stream contracts, strict programmable fake, documentation, and backlog
-exist today. Broader evaluation, a real provider adapter, workspace reads, tools, policy, transcript
-browsing/export/retention, and the provider-backed agent path remain planned and are introduced only
-by the story that needs them.
+exist today. The provider-neutral turn, hard limits, OpenAI adapter, broader evaluation, workspace
+reads, tools, policy, transcript browsing/export/retention, and provider-backed runtime path remain
+planned and are introduced only by the story that needs them.
 
 ## Documentation map
 

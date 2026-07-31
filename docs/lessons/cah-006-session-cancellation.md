@@ -41,6 +41,28 @@ only changes the TUI, Python can continue consuming resources and later emit con
 CAH-006 establishes user control, runtime ownership, and terminal-state discipline before expensive
 provider or tool operations are introduced.
 
+## Junior engineer foundation
+
+An asynchronous task can pause at `await` while another task runs. That makes a cancellation race
+possible: the user can request cancellation while a response task is between checkpoints or while
+an event sink is writing. `asyncio.Event` is a one-way signal for that intent, while `asyncio.Lock`
+creates a critical section in which only one task can inspect and update the outcome at a time.
+
+```python
+stop_requested = asyncio.Event()
+
+async def do_work() -> None:
+    if stop_requested.is_set():
+        return
+    await one_bounded_step()
+```
+
+`set()` wakes tasks waiting on the event; it does not forcibly interrupt arbitrary code or prove
+cleanup finished. A common beginner misconception is that calling `Task.cancel()` or setting an
+event means the session is already cancelled. In this design the request is only intent. The
+Python-owned `session.cancelled` event is the acknowledgement that cancellation won the serialized
+terminal race.
+
 ## Key concepts
 
 **Cancellation request:** `session.cancel` expresses intent for one Python-owned session ID. It is
@@ -94,8 +116,9 @@ The successful tape remains `session.started`, three `assistant.delta` events,
 emits `session.cancelled` at the next sequence. The terminal cancellation alone uses the cancel
 command correlation ID.
 
-CAH-006 exercises the deterministic mock only. CAH-020 and CAH-021 will apply the lifecycle to a
-provider operation; later tool stories must add subprocess-tree propagation and cleanup.
+CAH-006 exercises the deterministic mock only. CAH-020 defines the provider-operation cancellation
+contract, and CAH-021 will integrate it with this lifecycle; later tool stories must add
+subprocess-tree propagation and cleanup.
 
 ## Practical walkthrough
 
@@ -122,6 +145,80 @@ provider operation; later tool stories must add subprocess-tree propagation and 
 10. Ctrl+C remains whole-application exit. `runApplication` enters its shared cleanup path,
     `runtime.shutdown` drains this bounded mock, and bounded process-group escalation remains the
     fallback for a child that does not close.
+
+## Implementation code samples
+
+### Sample 1: cancellation selects one terminal outcome under the session lock
+
+From [`mock_session.py`](../../src/code_assist_harness/mock_session.py):
+
+```python
+async with self._state_lock:
+    if self._cancel_command_id is not None:
+        return "already_requested"
+    if self._terminal_outcome is not None:
+        return "terminal"
+
+    cancellation = CancelRequested(command_id=command_id, session_id=self._session_id)
+    if self._lifecycle_state.status == "starting":
+        # A direct caller may cancel after allocation but before ``run`` publishes
+        # session.started. Preserve the legal matrix by reducing this fact immediately
+        # after the started event rather than inventing starting -> cancelling.
+        self._deferred_cancellation = cancellation
+    else:
+        await self._reduce_lifecycle(cancellation)
+    self._cancel_command_id = command_id
+    self._terminal_outcome = "cancelled"
+    self._cancellation_requested.set()
+    return "accepted"
+```
+
+The lock makes the checks and selection indivisible relative to delta and completion writes. The
+first branch makes a repeated request idempotent. The second preserves an already-selected terminal
+outcome. A request that arrives before `session.started` is remembered for the first legal reducer
+transition; otherwise the reducer accepts it immediately. Only after those checks does the method
+record the cancel command, select the outcome, and wake the checkpoint-blocked run task.
+
+### Sample 2: a deterministic failure-path test blocks before output
+
+From [`test_runtime.py`](../../tests/test_runtime.py):
+
+```python
+def test_mock_session_cancels_before_the_first_delta_and_repeats_idempotently() -> None:
+    async def scenario() -> tuple[list[bytes], str, str, SessionState]:
+        lines: list[bytes] = []
+        checkpoint_reached = asyncio.Event()
+        blocked_checkpoint = asyncio.Event()
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def checkpoint(_index: int, _delta: str) -> None:
+            checkpoint_reached.set()
+            await blocked_checkpoint.wait()
+
+        session = MockSessionRunner(OrderedEventWriter(sink), checkpoint).create(
+            _session_start("cmd_session")
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(checkpoint_reached.wait(), timeout=1)
+        first_result = await session.request_cancellation("cmd_cancel")
+        repeated_result = await session.request_cancellation("cmd_cancel")
+        await asyncio.wait_for(running, timeout=1)
+        return lines, first_result, repeated_result, session.lifecycle_state
+
+    lines, first_result, repeated_result, lifecycle = asyncio.run(scenario())
+    events = _event_lines(b"".join(lines))
+
+    assert first_result == "accepted"
+    assert repeated_result == "already_requested"
+    assert [event.type for event in events] == ["session.started", "session.cancelled"]
+    assert [event.sequence for event in events] == [1, 2]
+```
+
+The injected checkpoint, rather than a short sleep, proves the exact scheduling state before the
+request. The assertions then connect API outcomes to wire evidence: one accepted request, one
+harmless repeat, no assistant output, and one contiguous terminal sequence.
 
 ## Failure scenarios to study
 

@@ -101,6 +101,8 @@ resolution, and the presentation overflow test passed with no reported overflow.
 
 - CAH-021 will build one `ProviderRequest`, consume one operation, translate its events into the
   existing session lifecycle, and preserve the exactly-one-terminal invariant.
-- CAH-022 will enforce turn, elapsed-time, and output limits before another costly operation begins.
+- CAH-022 will charge model-turn admission before provider start, enforce an independent
+  provider-work deadline, and check assistant-output and observed-tool-call limits before accepting
+  observations.
 - A real OpenAI Responses API adapter, instruction discovery, context selection, tool execution,
   policy, automatic retry, provider selection, and live evaluations remain later work.

@@ -85,7 +85,8 @@ cancellation, and normalization boundaries. Document the fake script format for 
   handoff.
 - The current `MockSession`, Python runtime, protocol, and TUI are intentionally unchanged.
   [CAH-021](cah-021-complete-one-model-turn.md) is the next unit and will connect this port to one
-  model-free provider turn.
+  injected provider-neutral turn. CAH-022 will add hard limits before
+  [CAH-023](cah-023-add-openai-responses-adapter.md) activates the real adapter.
 
 ## Completion evidence
 

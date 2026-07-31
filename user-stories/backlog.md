@@ -38,7 +38,9 @@ bounded trusted lifecycle inputs and honest summaries under private XDG state, s
 side-effect-free replay and local opt-out, and reports persistence loss without becoming a second
 source of truth. CAH-020 now supplies provider-neutral request and stream types plus a strict,
 network-free programmable fake. CAH-021 is the next dependency-ready unit and will connect that port
-to one model-free turn.
+to one provider-neutral, fake-backed turn. CAH-022 will put hard limits around that turn before
+CAH-023 adds and activates the OpenAI Responses adapter. None of those three planned behaviors exists
+in the current runtime.
 
 ## Epic backlog
 
@@ -78,12 +80,14 @@ which now supplies the provider port used by the next provider-loop unit.
 
 - Define provider-neutral request and stream types.
 - Build a programmable fake provider before the OpenAI adapter.
-- Execute one turn, stream text, and later interpret tool calls across multiple turns.
-- Enforce step, time, output, and tool-call limits.
+- Execute one provider-neutral turn and stream text before introducing a network adapter.
+- Enforce model-turn admission, provider-work deadline, output, and observed tool-call limits.
+- Add the OpenAI Responses adapter only after the provider-neutral turn and hard limits pass.
 - Keep OpenAI SDK types and future LangChain adapters outside core domain types.
 
-Implementation-ready stories at the start of this epic: CAH-020, CAH-021, and CAH-022.
-CAH-020 is complete. CAH-021 is next; CAH-022 comes after one provider turn is integrated.
+Implementation-ready stories in this epic: CAH-020, CAH-021, CAH-022, and CAH-023. CAH-020 is
+complete. CAH-021 is next, CAH-022 follows the provider-neutral turn, and CAH-023 follows hard-limit
+enforcement. M1 is complete only after the explicitly configured Responses adapter is verified.
 
 ### E3 - Repository context and read-only tools
 

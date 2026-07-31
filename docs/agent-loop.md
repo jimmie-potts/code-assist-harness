@@ -141,8 +141,9 @@ only bounded differing field paths rather than conversation or instruction conte
 and retryable observation. It has no raw exception, response, header, environment, or credential
 field; retryability does not authorize the loop to retry. Malformed tool arguments remain serialized
 text at this boundary so later tool validation can return a structured harness result. Provider
-contract tests run without vendor modules, framework packages, API keys, or network access. The
-OpenAI adapter is a later story and will target the Responses API at this boundary.
+contract tests run without vendor modules, framework packages, API keys, or network access. Planned
+CAH-021 will consume this port for one fake-backed turn, CAH-022 will enforce hard limits, and
+CAH-023 will then target the OpenAI Responses API at this boundary.
 
 ## State and terminal outcomes
 
@@ -183,9 +184,13 @@ every provider or executor stopping immediately after cancellation.
 
 ## Limits and failures
 
-Configuration will include maximum model turns, tool calls, output size, and elapsed time. Each
-limit is checked before starting the next operation that could incur work. Reaching a limit produces
-a distinct stable failure code and an understandable TUI message; it is not reported as provider
+Configuration will include maximum model turns, a provider-work deadline, assistant output bytes,
+and observed provider tool calls. Model-turn admission is charged before provider work starts;
+output and tool-call limits are checked before an observation is admitted for publication. An
+independent deadline watcher can stop provider work while an already-admitted publication is
+blocked, but that publication finishes atomically before the latched deadline selects the terminal
+outcome. The deadline bounds provider work, not event-sink latency. Reaching a limit produces a
+distinct stable failure code and an understandable TUI message; it is not reported as provider
 failure.
 
 Failures are converted at their ownership boundary:
@@ -221,18 +226,37 @@ implementation lives in `provider/fake.py`. Focused tests exercise every event v
 logical delays, normalized failures, mismatch privacy, malformed tool arguments, omitted work, and
 cancellation before output and between deltas without a provider dependency or network request.
 
-### CAH-021 — Complete one model turn
+### CAH-021 — Run one provider-neutral turn
 
-> As a user, I want one task answered through a provider so that the first conversational capability
-> is available.
+> As an agent-loop developer, I want one provider-neutral turn to run through the harness-owned
+> lifecycle so that orchestration is proven before network integration.
 
-This is the next dependency-ready unit. Finish it when deltas, completion, provider failure, and
-cancellation all flow through the fake-provider path and terminal event invariants hold.
+This is the next dependency-ready unit. It builds one request from a task and injected instruction
+tuple, starts one fake-provider operation, enforces a strict text/completion grammar, keeps optional
+usage as bounded local metadata, rejects tool requests as unavailable, and preserves cancellation and
+terminal invariants. An admitted event publication is shielded through the ordered wire write,
+Python reducer, and transcript-observer attempt so cancellation cannot split those views. The story
+adds a runtime injection seam without replacing the launched `MockSession`.
 
 ### CAH-022 — Enforce loop limits
 
-> As a user, I want the harness to stop predictably at configured limits so that faulty sequences
-> cannot run indefinitely.
+> As a user, I want provider work to stop predictably at configured limits so that faulty sequences
+> cannot consume provider resources indefinitely.
 
-Complete this story when every limit is covered by deterministic tests and the transcript identifies
-the exact limit reached.
+Complete this story when provider-turn admission, an independent provider-work deadline, cumulative
+accepted UTF-8 output, and observed tool calls are enforced before CAH-023 can activate network work.
+The deadline may stop provider activity while an already-admitted local publication finishes; it is
+not a sink-latency promise. Every limit must have deterministic fake-clock and fake-provider
+evidence, awaited cleanup, one terminal winner, and bounded transcript evidence.
+
+### CAH-023 — Add the OpenAI Responses adapter
+
+> As an explicitly configured user, I want the bounded provider-neutral turn to use OpenAI Responses
+> so that the first real model capability is available without leaking SDK types into the harness.
+
+Complete this story when one text-only foreground Responses stream is explicitly configured with the
+allowlisted `gpt-4.1-mini-2025-04-14` snapshot, `background=false`, and `store=false`; its request
+omits tools and rejects reasoning/tool events; one exact assistant-text trace and SDK failures are
+normalized behind the provider port; foreground cancellation suppresses pending observations and
+joins operation-owned stream/client cleanup; default tests use SDK fakes with network denied; and a
+separately selected credentialed smoke test remains outside the canonical gate and default CI.

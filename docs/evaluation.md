@@ -46,7 +46,7 @@ Python script model.
 | Provider exception | The fake can emit a normalized provider failure; CAH-021 must translate it into one structured session failure before transcript persistence. |
 | Invalid protocol line | The runtime survives when possible and reports a safe protocol error. |
 | Unknown tool | Dispatch is rejected and the model receives a structured result. |
-| Step-limit exhaustion | The loop stops before another provider call. |
+| Hard-limit exhaustion | CAH-022 stops before a disallowed operation or observation is accepted. |
 | Rejected approval | No side effect occurs and the loop receives the rejection. |
 | Workspace escape | The tool is denied before filesystem access. |
 | Stale edit | The file remains unchanged and a conflict is reported. |
@@ -137,16 +137,18 @@ fixtures test unsupported versions, bad discriminators, missing fields, and malf
 
 The walking-skeleton tests start the real Node parent and Python child with mocked runtime behavior.
 They assert ordered streamed completion, authoritative cancellation, another session after a
-terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. Later
-integrations begin with the CAH-020 fake provider in CAH-021 and may later add a fake or restricted
-executor. The current `MockSession` integration does not consume the provider port.
+terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. CAH-021 will
+integrate the CAH-020 fake through an injected Python runtime seam while leaving this launched mock
+honest. CAH-022 will add deterministic budget tests, and CAH-023 will activate the bounded path at
+the composition root. A later unit may add a fake or restricted executor.
 
 ### Live-provider smoke evaluations
 
-Live OpenAI evaluations are optional, explicitly selected, credential-gated, and excluded from
-default validation and CI. They may measure retrieval quality, unnecessary reads, plan grounding,
-tool-call success, unsafe attempts, and final-summary accuracy. Their variability must not weaken
-deterministic harness gates.
+CAH-023 will add one minimal live OpenAI smoke evaluation that is optional, explicitly selected,
+credential-gated, and excluded from default validation and default CI even when credentials are
+present. Later live evaluations may measure
+retrieval quality, unnecessary reads, plan grounding, tool-call success, unsafe attempts, and
+final-summary accuracy. Their variability must not weaken deterministic harness gates.
 
 ## Replay and diagnosis
 
@@ -211,7 +213,11 @@ Complete this story when an isolated runner reports event and file-state differe
 > As a learner, I want known relevant files, source ranges, budgets, and unnecessary reads measured
 > so that context-engineering changes can be compared.
 
-### Future story — Add optional live-provider smoke evaluation
+### CAH-023 (Planned) — Add optional live-provider smoke evaluation
 
 > As a maintainer, I want an explicit non-default provider smoke suite so that the real adapter can
 > be checked without making ordinary development depend on credentials or network access.
+
+This evaluation slice is assigned to
+[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md); broader live quality evaluation
+remains future work.
