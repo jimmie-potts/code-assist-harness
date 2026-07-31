@@ -7,8 +7,8 @@ and stream values, an async operation port with explicit cleanup, and a programm
 proves request order, stream order, failure normalization, and cancellation without credentials or
 network access.
 
-The implemented package is not connected to the current `MockSession` runtime. CAH-021 follows this
-unit and becomes dependency-ready after CAH-020's required visual lesson is generated and validated.
+The implemented package is not connected to the current `MockSession` runtime. With CAH-020's
+required visual lesson generated and validated, CAH-021 is the next dependency-ready unit.
 
 ## Locked decisions
 
@@ -79,18 +79,14 @@ operation but leaves unfinished script evidence for `assert_complete()`.
 
 ## Lesson evidence
 
-The implementation-companion
-[written lesson](../../docs/lessons/cah-020-provider-interface-and-fake.md) explains the
+The verified [written lesson](../../docs/lessons/cah-020-provider-interface-and-fake.md) explains the
 implemented port, strict fake, cancellation cleanup, safe mismatch behavior, production comparison,
 and exact implementation excerpts.
 
-The visual companion is pending generation and validation at
-`docs/lessons/assets/cah-020-provider-interface-and-fake.pptx`. Its Windows-native artifact-tool
-build currently awaits execution permission.
-
-- **PENDING — rendered slides:** record the final slide count and confirm every image was inspected
-  at full resolution.
-- **PENDING — overflow validation:** record the presentation overflow-test result.
+The ten-slide visual companion,
+[A stable socket for model streams](../../docs/lessons/assets/cah-020-provider-interface-and-fake.pptx),
+was rendered with the artifact tool. All ten slide images were inspected individually at full
+resolution, and the presentation overflow test passed with no reported overflow.
 
 ## Validation evidence
 

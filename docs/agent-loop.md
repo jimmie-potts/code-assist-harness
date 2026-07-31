@@ -1,8 +1,8 @@
 # Agent Loop
 
-> Status: proposed model-loop design with the CAH-020 provider port and deterministic fake now
-> implemented. CAH-010 verifies the pure session-state and replay precursor in Python and
-> TypeScript; no provider-backed loop exists yet, and the current `MockSession` path is unchanged.
+> Status: proposed model-loop design with the CAH-020 provider port and deterministic fake complete.
+> CAH-010 verifies the pure session-state and replay precursor in Python and TypeScript; no
+> provider-backed loop exists yet, and the current `MockSession` path is unchanged.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -215,8 +215,7 @@ the cancellation race, and an authoritative `session.failed` terminal.
 > As an agent-loop developer, I want provider-neutral streaming types and a deterministic fake so
 > that orchestration can be tested without OpenAI.
 
-The implementation is delivered, while the story remains in progress until its required visual
-lesson is generated and validated. Harness-owned immutable request and stream values live in
+This story is complete. Harness-owned immutable request and stream values live in
 `provider/models.py`, the structural async port lives in `provider/port.py`, and the strict scripted
 implementation lives in `provider/fake.py`. Focused tests exercise every event variant, ordering,
 logical delays, normalized failures, mismatch privacy, malformed tool arguments, omitted work, and
@@ -227,9 +226,8 @@ cancellation before output and between deltas without a provider dependency or n
 > As a user, I want one task answered through a provider so that the first conversational capability
 > is available.
 
-This story follows CAH-020 and becomes dependency-ready after CAH-020's required visual evidence is
-complete. Finish it when deltas, completion, provider failure, and cancellation all flow through the
-fake-provider path and terminal event invariants hold.
+This is the next dependency-ready unit. Finish it when deltas, completion, provider failure, and
+cancellation all flow through the fake-provider path and terminal event invariants hold.
 
 ### CAH-022 — Enforce loop limits
 

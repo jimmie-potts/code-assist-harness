@@ -36,8 +36,9 @@ M1 with pure Python and TypeScript lifecycle reducers, one reviewed transition m
 fixtures, and integration through the existing mock and TUI paths. CAH-011 now persists redacted,
 bounded trusted lifecycle inputs and honest summaries under private XDG state, supports strict
 side-effect-free replay and local opt-out, and reports persistence loss without becoming a second
-source of truth. CAH-020 is implementing provider-neutral request and stream types plus a strict,
-network-free programmable fake. CAH-021 follows and will connect that port to one model-free turn.
+source of truth. CAH-020 now supplies provider-neutral request and stream types plus a strict,
+network-free programmable fake. CAH-021 is the next dependency-ready unit and will connect that port
+to one model-free turn.
 
 ## Epic backlog
 
@@ -82,7 +83,7 @@ which now supplies the provider port used by the next provider-loop unit.
 - Keep OpenAI SDK types and future LangChain adapters outside core domain types.
 
 Implementation-ready stories at the start of this epic: CAH-020, CAH-021, and CAH-022.
-CAH-020 is in progress. CAH-021 follows; CAH-022 comes after one provider turn is integrated.
+CAH-020 is complete. CAH-021 is next; CAH-022 comes after one provider turn is integrated.
 
 ### E3 - Repository context and read-only tools
 
