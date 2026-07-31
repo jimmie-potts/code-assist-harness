@@ -127,9 +127,13 @@ identifiers, and user or assistant text.
 
 ## Limit
 
-A hard bound on work, such as model turns, tool calls, output size, tool duration, or total session
-time. A limit is checked before beginning another costly operation and produces a distinct failure
-code when exhausted.
+A hard bound on work, such as model turns, tool calls, output size, tool duration, or provider-work
+time. Planned CAH-022 charges model-turn admission before provider start, checks an independent
+monotonic provider-work deadline, reserves cumulative UTF-8 output before emission, and counts tool
+request observations before handling them. The deadline starts supervised provider cancellation; a
+conforming provider stops, while failed or timed-out cleanup remains explicitly unconfirmed. It does
+not claim that a blocked local event or transcript sink has finished. The current runtime does not
+yet enforce those limits.
 
 ## Lesson
 
@@ -177,8 +181,9 @@ rejected explicitly instead of being interpreted optimistically.
 
 An adapter that accepts harness-level model requests and emits provider-neutral stream events.
 Provider SDK objects and raw responses remain inside the adapter. The implemented deterministic
-fake uses the same port without an SDK or network access; OpenAI will be the first real provider
-adapter. The current M0 `MockSession` is a runtime fixture, not a provider consumer.
+fake uses the same port without an SDK or network access; planned CAH-023 will add the first real
+adapter for one exact text-only foreground OpenAI Responses stream after hard limits exist. The
+current M0 `MockSession` is a runtime fixture, not a provider consumer.
 
 ## Provider operation
 
@@ -197,8 +202,10 @@ context-selection policy.
 
 One harness-owned observation produced by an active provider operation. CAH-020 supports text
 deltas, completed text, serialized tool-call requests, usage reports, normal completion, and
-normalized failure. These are Python domain values, not protocol-v1 session events; CAH-021 owns
-their translation into session lifecycle events.
+normalized failure. These are Python domain values, not protocol-v1 session events. Planned CAH-021
+will translate accepted text and terminal observations into the existing lifecycle while reducing
+optional bounded usage through a transcript-only `model.usage_observed` evidence record in transcript
+version 2. That record does not change protocol v1 or the shared lifecycle reducers.
 
 ## Reducer
 

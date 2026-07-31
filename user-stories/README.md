@@ -36,9 +36,10 @@ cross-language session reducers are implemented and validated. The Python runtim
 private, redacted, replayable session transcripts and honest summaries unless explicitly disabled.
 CAH-020 exposes provider-neutral request and stream contracts plus a strict programmable fake, with
 its required written and visual learning evidence verified. M0 is complete and M1 is in progress.
-CAH-021 is the next dependency-ready unit; the current `MockSession` and TUI do not yet use the
-provider port, and a real provider, workspace reads, tools, policy, and agent-loop behavior remain
-unimplemented.
+CAH-021 is the next dependency-ready unit and will prove one provider-neutral turn with the strict
+fake. CAH-022 will add hard limits before CAH-023 introduces the OpenAI Responses adapter. The
+current `MockSession` and TUI do not yet use the provider port, and all three units remain Planned;
+workspace reads, tools, policy, and broader agent-loop behavior are also unimplemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -56,8 +57,9 @@ unimplemented.
 | 10 | [CAH-010: Implement session state as a reducer](cah-010-session-state-reducer.md) | [Session state reducer](../docs/lessons/cah-010-session-state-reducer.md) | M1 | Done | CAH-004, CAH-006, CAH-007 |
 | 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md) | M1 | Done | CAH-010 |
 | 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | Done | CAH-010, CAH-011 |
-| 13 | [CAH-021: Complete one model turn](cah-021-complete-one-model-turn.md) | [One model turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Planned | CAH-020 |
+| 13 | [CAH-021: Run one provider-neutral turn](cah-021-complete-one-model-turn.md) | [One provider-neutral turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Planned | CAH-020 |
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Planned | CAH-021 |
+| 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Planned | CAH-022 |
 
 See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
 
@@ -103,3 +105,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-30 CAH-020 provider interface and fake provider](notes/2026-07-30-cah-020-provider-interface-and-fake.md)
   records the provider-neutral port, strict fake script, logical checkpoint and cancellation
   behavior, content-safe mismatch diagnostics, test evidence, and handoff to CAH-021.
+- [2026-07-31 CAH-021 story split](notes/2026-07-31-cah-021-story-split.md) records why the
+  provider-neutral turn, hard limits, and OpenAI adapter are three dependency-ordered units and
+  locks their planned-versus-implemented boundary.

@@ -264,7 +264,9 @@ history without becoming the lifecycle source of truth.
 [CAH-020](../user-stories/cah-020-provider-interface-and-fake.md) now defines and tests the
 provider-neutral interface and deterministic fake independently of this M0 runtime.
 [CAH-021](../user-stories/cah-021-complete-one-model-turn.md) is next and will connect that boundary
-to one model-free turn while preserving the existing lifecycle invariants.
+to one injected provider-neutral turn while preserving the existing lifecycle invariants and visible
+mock. [CAH-022](../user-stories/cah-022-enforce-loop-limits.md) will then add hard limits before
+[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md) activates a real provider.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

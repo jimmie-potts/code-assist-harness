@@ -102,5 +102,7 @@ fake with exact request matching, logical delay gates, and explicit cancellation
 
 That package is deliberately not connected to the current `MockSession` runtime or TUI. It imports
 without a provider SDK or orchestration framework, and default tests remain model-free and
-network-free. CAH-021 is next and will consume the port for one turn; CAH-022 follows with hard loop
-limits. The real OpenAI adapter, tool loop, and broader orchestration remain future work.
+network-free. CAH-021 is next and will consume the port for one injected, fake-backed turn while the
+launched mock remains unchanged. CAH-022 follows with hard loop limits, then CAH-023 adds the OpenAI
+Responses adapter and explicit runtime activation. All three remain Planned; the tool loop and
+broader orchestration remain future work.

@@ -13,7 +13,8 @@
 
 > This lesson describes the shipped CAH-020 provider contract and fake. The code samples below are
 > excerpts from the implementation and tests, not aspirational pseudocode. The current TUI still
-> runs `MockSession`; CAH-021 will connect a provider operation to one real harness model turn.
+> runs `MockSession`; planned CAH-021 will prove one injected provider-neutral turn without changing
+> that launched path.
 
 ## Quick summary
 
@@ -157,7 +158,7 @@ agent loop (next) │ ProviderRequest               │
                     ┌────────────┴────────────┐
                     v                         v
              FakeProvider               OpenAI adapter
-             implemented                future CAH-021
+             implemented                future CAH-023
              no network                 SDK stays here
 ```
 
@@ -182,9 +183,9 @@ Important invariants:
 - mismatch diagnostics name only exchange ordinals and field paths, never request content; and
 - raw provider payloads are not provider events or transcript inputs.
 
-Deliberately deferred work includes model selection, tool definitions, repository-instruction
-discovery, event-to-session mapping, the OpenAI adapter, retries, hard limits, and runtime/TUI
-integration.
+Deliberately deferred work includes CAH-021 event-to-session mapping, CAH-022 hard limits, CAH-023
+OpenAI and runtime composition, model selection, tool definitions, repository-instruction discovery,
+retries, and broader TUI integration.
 
 ## Practical walkthrough
 
@@ -200,8 +201,9 @@ integration.
    then await `operation.cancel()`. The scripted suffix must not appear.
 6. Call `fake.assert_complete()` at test teardown. A missing request or partial stream turns the
    test red instead of silently passing.
-7. Keep `MockSession` in the current runtime. CAH-021 will replace that source only after it can map
-   this provider stream into authoritative session events.
+7. Keep `MockSession` in the launched runtime. CAH-021 will add an injected turn seam and map this
+   stream into authoritative session events; CAH-023 will activate it with explicit provider and
+   model configuration after hard limits exist.
 
 ## Implementation code samples
 
