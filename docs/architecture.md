@@ -32,8 +32,10 @@ through one developer/CI entry point. CAH-010 begins M1 with equivalent pure Pyt
 session-lifecycle reducers, shared transition and replay fixtures, structured invariant failures,
 and integration through the mock runtime and TUI projection. CAH-011 adds private XDG transcript
 storage, privacy-aware typed sanitization, honest terminal summaries, strict side-effect-free replay,
-local opt-out, and recoverable persistence warnings. Provider, tool, workspace-read, policy, and
-agent behavior remain target architecture; CAH-020 is next.
+local opt-out, and recoverable persistence warnings. CAH-020 adds immutable provider-neutral request
+and stream values, an explicit asynchronous operation port, and a strict deterministic fake without
+changing the `MockSession` runtime or TUI. CAH-021 is next; the provider-backed turn, real provider
+adapter, tool, workspace-read, policy, and agent behavior remain target architecture.
 
 ## Product boundary
 
@@ -197,6 +199,10 @@ src/code_assist_harness/
 ├── session_state.py    Pure one-session lifecycle reducer and replay
 ├── persistence/
 │   └── transcript.py   Private JSONL append, sanitization, summary, and strict replay
+├── provider/
+│   ├── models.py       Immutable provider-neutral requests, events, usage, and failures
+│   ├── port.py         Single-consumer async operation and cleanup protocols
+│   └── fake.py         Ordered request scripts, logical gates, and cancellation checkpoints
 ├── protocol/
 │   ├── models.py       Strict Pydantic v2 wire models
 │   ├── codec.py        Two-stage parsing and safe serialization
@@ -204,8 +210,9 @@ src/code_assist_harness/
 └── __init__.py         Intentional package surface
 ```
 
-Future `core/`, `context/`, `providers/`, `tools/`, and `safety/` paths remain
-conceptual and will be introduced only by their owning stories.
+The provider package is intentionally independent of the runtime. CAH-020 proves the port and fake
+at their own boundary; CAH-021 will compose them into one session turn. Future `core/`, `context/`,
+`tools/`, and `safety/` paths remain conceptual and will be introduced only by their owning stories.
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 
@@ -263,10 +270,18 @@ The explicit loop performs these bounded steps:
    permit another costly operation.
 8. Emit exactly one completed, cancelled, or failed terminal event.
 
-At most one provider operation is active for a session. OpenAI will be the first real adapter and
-will target the Responses API, but OpenAI SDK objects remain inside that adapter. CAH-020 will add a
-deterministic fake provider for loop tests; the current M0 `MockSession` is a runtime fixture rather
-than a provider. Default validation never makes a live model or network request.
+At most one provider operation is active for a session. CAH-020 implements the structural
+`Provider` and `ProviderOperation` protocols: one harness-owned request starts a single-consumer
+stream with explicit awaited cancellation and cleanup. Its immutable event union covers text
+deltas, completed text, serialized tool requests, usage, normal completion, and normalized failure.
+Cancellation closes iteration instead of fabricating a failure event.
+
+The first implementation is a strict deterministic fake. It matches ordered requests, emits
+scripted events, exposes named logical delay and cancellation checkpoints, and fails on mismatches,
+omitted requests, or unconsumed steps. Diagnostics report only bounded differing field paths, not
+request contents. OpenAI will be the first real adapter and will target the Responses API, but SDK
+objects remain inside that adapter. The current M0 `MockSession` is still a separate runtime fixture
+rather than a provider consumer. Default validation never makes a live model or network request.
 
 ## Concurrency and cancellation
 
@@ -275,7 +290,8 @@ bounded chunk at a time. `CommandLineReader` validates each completed line indep
 `OrderedEventWriter` holds one lock across sequence allocation, validation, serialization, and sink
 completion. The accepted mock runs in one child task so the command reader remains available for an
 overlapping `session.start`, `session.cancel`, or `runtime.shutdown`. Shutdown waits for the bounded
-three-delta task; later units add provider operations, tool supervision, and deadlines to the same
+three-delta task. CAH-020 defines provider-operation cancellation independently; CAH-021 will attach
+that operation to the session task, and later units add tool supervision and deadlines to the same
 loop. Small, bounded filesystem operations may run directly; blocking work moves to a worker thread
 when needed.
 

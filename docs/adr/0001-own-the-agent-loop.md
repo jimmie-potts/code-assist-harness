@@ -94,6 +94,13 @@ provider-neutral, but abstraction beyond demonstrated needs is deferred.
 
 ## Implementation status
 
-This is an accepted target decision. At acceptance time, the repository contained only the Python
-scaffold and no agent loop or provider adapter. Stories CAH-020 through CAH-022 introduce the
-provider interface, one-turn loop, and hard limits after the model-free walking skeleton exists.
+This remains the accepted target decision. At acceptance time, the repository contained only the
+Python scaffold and no agent loop or provider adapter. CAH-020 now implements the first part of the
+decision in `src/code_assist_harness/provider/`: immutable harness-owned request and stream values,
+structural async provider-operation protocols, normalized safe failures, and a strict programmable
+fake with exact request matching, logical delay gates, and explicit cancellation checkpoints.
+
+That package is deliberately not connected to the current `MockSession` runtime or TUI. It imports
+without a provider SDK or orchestration framework, and default tests remain model-free and
+network-free. CAH-021 is next and will consume the port for one turn; CAH-022 follows with hard loop
+limits. The real OpenAI adapter, tool loop, and broader orchestration remain future work.

@@ -154,11 +154,21 @@ defines what must be delivered; the lesson explains what the unit teaches, why i
 exists, how to study its failure paths, and how a production organization might expand the design.
 
 Follow `docs/lessons/lesson-template.md`. Each lesson includes status metadata, a quick summary,
-learning objectives, why the unit matters, key concepts, architecture and invariants, a practical
-walkthrough, failure scenarios, a production expansion, a direct local-versus-production
-comparison, trade-offs and graduation signals, exercises, key takeaways, a local glossary, and
-further reading. CAH-007 and lessons completed going forward link a visual PPTX companion and record
-the rendered-slide and overflow validation evidence in the story note.
+learning objectives, why the unit matters, a junior-engineer foundation, key concepts, architecture
+and invariants, a practical walkthrough, failure scenarios, a production expansion, a direct
+local-versus-production comparison, trade-offs and graduation signals, exercises, key takeaways, a
+local glossary, and further reading. Explain prerequisite concepts in plain language before relying
+on their abstractions, including small concrete examples and common beginner misconceptions.
+
+After implementation code exists, every completed lesson also includes exact, repository-backed code
+samples that trace the important path and at least one failure or test path. Keep samples focused,
+link them to their source files, and explain each sample line-by-line or in small logical chunks so a
+junior engineer can connect syntax to behavior. Planned lessons may use clearly labeled pseudocode,
+but must not present it as shipped code.
+
+CAH-007 and lessons completed going forward link a visual PPTX companion and record the
+rendered-slide and overflow validation evidence in the story note. The deck should introduce the
+same junior-level foundations before the deeper architecture.
 
 Production-tool examples are illustrative rather than approved dependencies. Include three to five
 representative tools with official references, describe the capability being compared, and discuss

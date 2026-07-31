@@ -30,13 +30,16 @@ flushes every accepted record, and can replay a validated complete tape through 
 storage failure becomes one recoverable TUI warning without changing the session outcome. Use
 `--no-transcript` to disable only these local files.
 The application does **not** yet run an agent loop, read the workspace, or integrate with OpenAI.
-CAH-009 documents that first end-to-end execution in the
+It now exposes immutable provider-neutral request and stream contracts plus a deterministic fake,
+but the current `MockSession` runtime and TUI do not use that boundary yet. CAH-009 documents the
+first end-to-end mocked execution in the
 [walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
 are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
 adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
 evidence. CAH-010 begins M1 with replayable in-memory lifecycle state, and CAH-011 adds durable local
-evidence without moving lifecycle authority into storage. CAH-020 is next; provider, workspace-read,
-tool, policy, and agent behavior remain unimplemented.
+evidence without moving lifecycle authority into storage. CAH-020 adds the provider port and strict
+network-free fake. CAH-021 is next; a provider-backed turn, real provider adapter, workspace reads,
+tools, policy, and agent behavior remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -277,7 +280,7 @@ duplicating its check list in workflow YAML.
 ## Current and planned project layout
 
 ```text
-src/code_assist_harness/  Runtime, reducers, Pydantic protocol boundary, and transcript persistence
+src/code_assist_harness/  Runtime, reducers, protocol, persistence, and provider-neutral boundary
 tests/                    Current Python tests mirroring source modules
 tui/                      Current supervised Ink app, Zod protocol boundary, metadata, and tests
 scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
@@ -291,9 +294,10 @@ user-stories/             Roadmap, implementation stories, and planning notes
 
 The Python runtime, supervised TUI, protocol messages and fixtures, deterministic mocked streaming,
 cooperative session cancellation, conversation projection, transcript persistence and replay,
-documentation, and backlog exist today. Broader evaluation, provider, workspace-read, tool, policy,
-transcript browsing/export/retention, and agent paths remain planned and are introduced only by the
-story that needs them.
+provider-neutral request and stream contracts, strict programmable fake, documentation, and backlog
+exist today. Broader evaluation, a real provider adapter, workspace reads, tools, policy, transcript
+browsing/export/retention, and the provider-backed agent path remain planned and are introduced only
+by the story that needs them.
 
 ## Documentation map
 

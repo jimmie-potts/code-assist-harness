@@ -26,6 +26,8 @@ presentation events; the completed assistant message is recorded separately.
 A first-class lifecycle operation that begins with a request and, when it wins the terminal race,
 ends with an authoritative acknowledgement. The request alone does not prove work stopped.
 Successful cancellation prevents later session output and ends in `cancelled` rather than `failed`.
+At the lower provider boundary, awaiting `ProviderOperation.cancel()` is the cleanup barrier; it
+closes that operation's stream but does not itself select or emit the session terminal event.
 
 ## Cancellation acknowledgement
 
@@ -96,6 +98,13 @@ The interface responsible for running an already validated and approved subproce
 environment, timeout, output, and cancellation controls. The MVP implementation runs restricted
 host processes; a future implementation may use a container behind the same interface.
 
+## Fake provider
+
+The CAH-020 deterministic implementation of the provider port. It matches an ordered script of
+exact harness-owned requests and explicit emit, logical-delay, or cancellation-checkpoint steps.
+It is strict rather than permissive: omitted requests, unexpected requests, unfinished operations,
+and unconsumed steps fail the test without exposing request contents in the diagnostic.
+
 ## Harness core
 
 The provider-neutral Python domain and orchestration logic: session state, agent loop, context,
@@ -131,13 +140,22 @@ glossary. A lesson is educational context, not evidence that planned behavior ha
 ## Model turn
 
 One provider request and its complete streamed response. A model turn may produce assistant text,
-one or more tool-call requests, usage information, a provider failure, or cancellation.
+one or more tool-call requests, usage information, or a provider failure, and may end early through
+operation cancellation. Cancellation closes the provider stream rather than appearing as a
+provider stream event.
 
 ## NDJSON
 
 Newline-delimited JSON: exactly one complete JSON object followed by a newline for each protocol
 message. The TUI writes protocol commands to child stdin, and Python writes events to child
 stdout.
+
+## Normalized provider failure
+
+A harness-owned safe representation of a provider error: one stable failure code, one bounded
+single-line message, and a retryable observation. It excludes the SDK exception, raw response,
+request, headers, environment, and credentials. A provider adapter must normalize at its boundary;
+the loop decides whether and how a session fails or retries.
 
 ## Plan
 
@@ -158,9 +176,29 @@ rejected explicitly instead of being interpreted optimistically.
 ## Provider
 
 An adapter that accepts harness-level model requests and emits provider-neutral stream events.
-Provider SDK objects and raw responses remain inside the adapter. The planned deterministic fake
-will implement the same port; OpenAI will be the first real provider adapter. The current M0
-`MockSession` is a runtime fixture, not a provider.
+Provider SDK objects and raw responses remain inside the adapter. The implemented deterministic
+fake uses the same port without an SDK or network access; OpenAI will be the first real provider
+adapter. The current M0 `MockSession` is a runtime fixture, not a provider consumer.
+
+## Provider operation
+
+One single-consumer asynchronous response stream returned by a provider. Its `cancel()` method is
+idempotent and waits for cleanup, while `wait_closed()` observes cleanup without requesting it.
+After either natural closure or awaited cancellation, no later provider event may be emitted.
+
+## Provider request
+
+The immutable harness-owned input for exactly one model turn. CAH-020 represents a non-empty ordered
+conversation plus ordered caller-supplied repository instructions. The request deliberately excludes
+provider credentials, SDK values, provider-specific response objects, instruction discovery, and
+context-selection policy.
+
+## Provider stream event
+
+One harness-owned observation produced by an active provider operation. CAH-020 supports text
+deltas, completed text, serialized tool-call requests, usage reports, normal completion, and
+normalized failure. These are Python domain values, not protocol-v1 session events; CAH-021 owns
+their translation into session lifecycle events.
 
 ## Reducer
 

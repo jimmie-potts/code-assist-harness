@@ -34,6 +34,13 @@ After completing this unit, you should be able to:
 
 Explain what later work depends on this unit and which failure or ambiguity it prevents.
 
+## Junior engineer foundation
+
+Break down the prerequisite ideas before introducing the repository abstraction. Define unfamiliar
+syntax and runtime behavior in plain language, walk through one tiny concrete example, and call out
+at least one common beginner misconception. Assume the reader can code but has not yet built this
+kind of system.
+
 ## Key concepts
 
 Define the core concepts and connect each one to this repository. Prefer a small example over a
@@ -48,6 +55,13 @@ Use a compact diagram or table only when it makes the relationship clearer.
 
 Describe the intended implementation sequence, what to inspect while building it, and how to know
 the concept is working. Link to the user story rather than duplicating all acceptance criteria.
+
+## Implementation code samples
+
+After code exists, include focused exact excerpts from the repository for the important path and at
+least one failure or test path. Link every excerpt to its source, then explain the syntax and control
+flow line-by-line or in small logical chunks. Planned lessons may use clearly labeled pseudocode;
+never present planned code as implemented evidence.
 
 ## Failure scenarios to study
 
