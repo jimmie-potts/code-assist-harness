@@ -103,12 +103,27 @@ exact request matching, logical delay gates, and explicit cancellation checkpoin
 CAH-021 implements the next vertical slice in `provider_session.py`. One injected provider-neutral
 turn builds an exact request, claims one operation, validates a strict streamed-success grammar,
 maps bounded failure and unavailable-tool outcomes, records optional transcript-only usage, and
-selects one terminal outcome before awaited cleanup. A shared decision lock and finalizer serialize
-accepted event transactions, cancellation, teardown, and cleanup diagnostics. `run_runtime` exposes
-the injection seam, but `main()` deliberately supplies no provider: the launched `MockSession`, TUI,
-and protocol version 1 remain unchanged.
+selects one terminal outcome before awaited cleanup. A shared decision lock and finalizer keep each
+wire write, reducer acceptance, and observer attempt in one ordered, non-interleaved publication
+transaction with respect to cancellation, teardown, and cleanup diagnostics. An ordinary later sink
+or observer failure does not roll back an earlier accepted view. `run_runtime` exposes the injection
+seam, but `main()` deliberately supplies no provider: the launched `MockSession`, TUI, and protocol
+version 1 remain unchanged.
 
-The implementation imports without a provider SDK or orchestration framework, and default tests
-remain model-free and network-free. CAH-022 is next with configurable hard limits; CAH-023 then adds
-the OpenAI Responses adapter and explicit runtime activation. The tool loop and broader orchestration
-remain future work.
+CAH-022 completes the next bounded slice. One immutable four-field limits value is shared by the
+runner while each allocated provider session receives a fresh tracker. Admission is charged before
+provider start, UTF-8 output before publication, and tool requests before handling. The absolute
+provider-work deadline is captured at session allocation and wins an exact event/deadline tie; it may
+start cancellation while an admitted publication is blocked, but it does not bound local sink
+latency. Provider cleanup uses one shared supervised task and a fixed five-second local grace. Limit
+failures retain distinct stable codes and one terminal winner.
+
+The transcript writer now emits version 3 with optional provider usage and provider-backed
+`loop.limits_observed` evidence, while replay accepts versions 1, 2, and 3; a mock version-3 tape may
+omit the limit record. The implementation imports without a provider SDK or orchestration framework,
+and default tests remain model-free and network-free. See the
+[CAH-022 story](../../user-stories/cah-022-enforce-loop-limits.md),
+[lesson](../lessons/cah-022-loop-limits.md), and
+[visual companion](../lessons/assets/cah-022-loop-limits.pptx). CAH-023 is next and will add the OpenAI
+Responses adapter and explicit runtime activation. The tool loop and broader orchestration remain
+future work.

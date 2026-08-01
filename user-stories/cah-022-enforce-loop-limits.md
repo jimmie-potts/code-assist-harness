@@ -1,9 +1,10 @@
 # CAH-022 - Enforce loop limits
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-021
 - **Lesson:** [Loop limits](../docs/lessons/cah-022-loop-limits.md)
+- **Implementation note:** [CAH-022 hard loop limits](notes/2026-07-31-cah-022-loop-limits.md)
 
 ## User story
 
@@ -33,7 +34,9 @@
   - `max_assistant_output_bytes`: default `4096`, allowed `1..8192`; and
   - `max_observed_tool_calls`: default `1`, allowed `1..64`.
 - One model turn is charged immediately before `Provider.start()`. Tests may seed an exhausted
-  tracker to prove denial until multi-turn orchestration exists.
+  tracker to prove denial until multi-turn orchestration exists. The runner injects one immutable
+  limits value into every provider-backed session, while each allocated session owns a fresh
+  mutable tracker; counters never carry across session IDs.
 - The integer timeout configuration is converted without truncating the clock:
   `deadline = monotonic_now() + provider_work_timeout_seconds`. This happens when the provider-backed
   session object is allocated for an accepted command, before lifecycle observers/transcript setup
@@ -85,6 +88,12 @@
   in-process implementation must; it does not claim remote/provider cleanup succeeded. An
   implementation that suppresses `CancelledError` cannot be contained by this port and requires a
   future process-isolation or escalation policy.
+- Provider cleanup has exactly one loop-owned task per session. The deadline watcher may create that
+  shared task in cancellation mode so cleanup begins without the publication lock; the finalizer
+  only joins the same task and never invokes the provider cleanup API concurrently. When cleanup
+  completion and the grace wake are observed together, an already-completed cleanup task wins;
+  otherwise the grace expires, the local cleanup task is cancelled, and it is reaped under the
+  cancellation-responsive provider contract above.
 - CAH-022 advances the transcript writer to version 3. A provider-backed session writes at most one
   transcript-only `loop.limits_observed` record. With persistence enabled and healthy through the
   terminal write, it writes exactly one immediately before its terminal session event. A disabled
@@ -100,9 +109,12 @@
   observed count to equal its configured maximum plus one, while every other value requires the
   observed count to remain at or below that maximum.
 - Replay accepts transcript versions 1, 2, and 3. It validates the version-3 record's session,
-  cardinality, order, configured ranges, and counter bounds, exposes it beside CAH-021 usage in the
-  replay-evidence projection, and derives the human summary from that projection. Mock sessions may
-  use version 3 without a limit record because they do not enter the provider-backed path.
+  cardinality, order, configured ranges, counter bounds, and agreement with the adjacent terminal.
+  A non-null exhausted limit requires the exact matching stable `session.failed` code; null exhaustion
+  forbids all four limit-failure codes, and version 3 forbids those codes without a preceding limit
+  record. Replay exposes the record beside CAH-021 usage in the evidence projection and derives the
+  human summary from it. Mock sessions may use version 3 without a limit record because they do not
+  enter the provider-backed path.
 
 ## Acceptance criteria
 
@@ -151,9 +163,13 @@
 
 ## Documentation impact
 
-Update the agent-loop, safety, configuration, evaluation, protocol-failure, and glossary documents
-with units, defaults, validation, accounting moments, race semantics, and stable codes. Complete the
-linked written lesson and required visual lesson when the unit is implemented.
+Update `README.md`, `docs/architecture.md`, `docs/agent-loop.md`, `docs/safety-model.md`,
+`docs/evaluation.md`, `docs/protocol.md`, `docs/glossary.md`, `docs/walking-skeleton.md`, ADR 0001's
+implementation status, the story and lesson indexes, and the backlog with units, defaults,
+validation, accounting moments, race semantics, and stable codes. Complete the linked written
+lesson, add a durable implementation note, and create
+`docs/lessons/assets/cah-022-loop-limits.pptx`. The story note records slide-by-slide render
+inspection and presentation-overflow validation evidence.
 
 ## Out of scope
 
@@ -164,3 +180,47 @@ linked written lesson and required visual lesson when the unit is implemented.
   cancellation.
 - Protocol-sink, transcript-sink, or whole-session terminal-latency timeouts.
 - An interface that lets an active session weaken its own limits.
+
+## Delivered evidence
+
+- `src/code_assist_harness/loop_limits.py` implements the immutable strict configuration, fresh
+  per-session first-exhaustion tracker, bounded counters, and replay-safe evidence snapshot.
+- `src/code_assist_harness/provider_session.py` charges work before provider start or observation
+  acceptance, enforces the captured monotonic deadline with an independent watcher, resolves
+  deadline/event and terminal races, owns one supervised cleanup task, and publishes one stable
+  outcome.
+- `src/code_assist_harness/runtime.py` composes limits and paired timing seams, allocates fresh session
+  accounting, and connects loop evidence to the transcript without changing the launched mock path.
+- `src/code_assist_harness/persistence/transcript.py` writes transcript version 3, records at most one
+  `loop.limits_observed` entry immediately before a provider-backed terminal, validates replay
+  placement and bounds, preserves version-1/version-2 compatibility, and projects evidence into the
+  summary.
+- Deterministic tests cover every configuration boundary, all four limit winners, UTF-8 accounting,
+  setup and stream expiry, exact races, blocked publication, shared cleanup and grace behavior,
+  fresh session counters, transcript mutations, append rollback, and replayable incomplete prefixes.
+- No provider SDK, live network request, credential, tool execution, retry, or additional model turn
+  was introduced.
+
+## Completion evidence
+
+- Focused validation passed with 257 tests:
+  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_loop_limits.py tests/test_provider_session.py tests/test_runtime.py tests/test_transcript.py`.
+- The canonical non-live gate passed with
+  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check`: 463 Python tests, 30 Python protocol-
+  fixture tests, 24 repository-policy tests, 208 TUI tests, 29 TypeScript protocol-fixture tests,
+  and 4 real Node/Python boundary tests passed; Python lint/format and TUI typecheck/lint also passed.
+- The linked written lesson is verified against the implementation and centers the system-design,
+  agent-loop, harness-ownership, race, cleanup, and evidence boundaries.
+- The linked 9-slide visual companion
+  [`docs/lessons/assets/cah-022-loop-limits.pptx`](../docs/lessons/assets/cah-022-loop-limits.pptx)
+  includes a diagram locating CAH-022 in the architecture. Every rendered slide was inspected, each
+  slide contains a repository-backed `[Sources]` speaker-notes block, and the presentation overflow
+  test passed with no overflow detected.
+
+## Deferred work
+
+- CAH-023 adds the OpenAI Responses adapter and validated provider/model configuration while reusing
+  this provider-neutral safety boundary.
+- Provider credentials, instruction discovery, context selection, tool execution, policy,
+  approvals, retries, multiple turns, distributed quotas, sink-latency timeouts, and process-level
+  containment remain later work.

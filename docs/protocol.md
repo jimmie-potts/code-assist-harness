@@ -3,7 +3,9 @@
 > Status: CAH-006 implements protocol version 1 readiness, deterministic mocked streaming, and
 > cooperative session cancellation across the real Node-to-`uv`-to-Python boundary. CAH-009
 > documents that execution with normalized message tapes. CAH-010 derives equivalent lifecycle
-> state from validated v1 events without changing the wire contract.
+> state from validated v1 events. CAH-021 and CAH-022 reuse that wire contract for the separately
+> injected provider turn and its hard-limit failures; the launched `main()` path remains `MockSession`.
+> CAH-023 is the next unit and will add the first live adapter without changing that ownership split.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -185,16 +187,39 @@ and becomes a sanitized visible warning. CAH-011 uses this existing envelope for
 transcript, and does not alter an active or terminal session outcome. A nonrecoverable runtime error,
 malformed message, or invalid session tape still fails closed.
 
-CAH-021 also uses that recoverable envelope for `provider_cleanup_failed` when an injected provider's
-promised cleanup barrier or subsequent local read reaping raises. The loop cancels and awaits any
-pending local read after the cleanup attempt; that join requires the iterator to respond to task
-cancellation. A successful barrier return is trusted and does not create a warning merely because
-that wrapper task was still scheduled. The fixed, payload-free warning is correlated to the
-originating `session.start`, emitted at most once after the cleanup attempt, and precedes any already-
-selected session terminal. If runtime teardown won first, the warning may appear without a fabricated
-session terminal. It is not a session event, lifecycle-reducer input, or transcript record, and it
-cannot replace the selected session outcome. An iterator that suppresses cancellation remains an
-in-process containment limit rather than a protocol-visible outcome.
+The injected provider path also uses that recoverable envelope for `provider_cleanup_failed` when a
+cleanup barrier or subsequent local read reaping raises or exceeds its local grace. Provider cleanup
+has one shared loop-owned task per session; a deadline watcher may start it in cancellation mode and
+the finalizer joins that same task rather than invoking cleanup concurrently. Every `cancel()` or
+`wait_closed()` await is supervised by a fixed five-second grace. Cleanup completion wins an exact
+cleanup/grace tie; otherwise the local cleanup awaitable is cancelled and reaped. This requires the
+provider to propagate task cancellation and does not claim remote cleanup succeeded.
+
+The fixed, payload-free warning is correlated to the originating `session.start`, emitted at most
+once after the cleanup attempt, and precedes any already-selected session terminal. If runtime
+teardown won first, the warning may appear without a fabricated session terminal. It is not a session
+event, lifecycle-reducer input, or transcript record, and it cannot replace the selected session
+outcome. An iterator or cleanup awaitable that suppresses cancellation remains an in-process
+containment limit rather than a protocol-visible outcome.
+
+CAH-022's four hard-limit failures use the existing `session.failed` envelope and therefore do not
+change protocol version 1. Their stable payload codes are `model_turn_limit_exceeded`,
+`provider_work_deadline_exceeded`, `assistant_output_limit_exceeded`, and
+`tool_call_limit_exceeded`. The bounded messages contain neither configured values nor provider
+content. The provider-work deadline is not a protocol-sink timeout: its watcher may start cancellation
+while an already-admitted publication is blocked, but that ordered, non-interleaved publication
+transaction completes its wire/reducer/observer work before the latched deadline selects the
+terminal. An ordinary later failure does not roll back an earlier accepted view. At an exact provider
+event/deadline tie, the deadline wins and the observation is not published.
+
+Transcript compatibility is a separate local-storage contract, not an NDJSON protocol revision. The
+writer now emits transcript version 3, replay accepts internally consistent versions 1, 2, and 3, and
+provider-backed version-3 tapes may contain one `loop.limits_observed` evidence record immediately
+before the terminal session event. Its exhausted-limit value and that terminal must agree exactly:
+each exhausted class maps to its stable `session.failed` code, while null exhaustion forbids those
+codes. Version 3 also rejects a reserved limit-failure code without the preceding record. A
+mock-session version-3 tape may omit the record because the launched mock does not enter the
+provider-backed path. The evidence consumes no protocol sequence number and is never sent to the TUI.
 
 A cancel command for the wrong currently active session produces recoverable `session_mismatch`.
 When no session is active, a command naming neither the most recent terminal session nor an active

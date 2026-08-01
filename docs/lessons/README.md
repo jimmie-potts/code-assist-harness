@@ -51,8 +51,13 @@ clarify or reinforce the concept; they must never weaken accuracy, legibility, o
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Verified against implementation |
 | 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | Verified against implementation |
 | 13 | CAH-021 | [One provider-neutral turn](cah-021-one-model-turn.md) | Verified against implementation |
-| 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Planned |
+| 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Verified against implementation |
 | 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Planned |
+
+The CAH-022 lesson includes a validated
+[loop-limits visual companion](assets/cah-022-loop-limits.pptx). CAH-023 is the next
+dependency-ready learning unit; the launched application still uses `MockSession` until that adapter
+and its composition-root activation are implemented.
 
 ## Required lesson structure
 

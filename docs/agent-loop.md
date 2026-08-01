@@ -1,8 +1,8 @@
 # Agent Loop
 
 > Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn through
-> an injected runtime seam and the CAH-020 deterministic fake. The launched `main()` path and TUI
-> remain on `MockSession`; CAH-022 is next and owns configurable hard limits.
+> an injected runtime seam and the CAH-020 deterministic fake; CAH-022 hard-bounds that injected path.
+> The launched `main()` path and TUI remain on `MockSession`, with no live adapter. CAH-023 is next.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -61,11 +61,14 @@ through its authoritative Python terminal event and back to rendering.
 
 CAH-021 adds a parallel composition seam for tests and later adapters. When `run_runtime` receives an
 injected `Provider`, `ProviderSessionRunner` creates one `ProviderSession` instead of a `MockSession`.
-The session starts exactly one operation and claims its stream exactly once. Each accepted lifecycle
-publication is one shielded transaction under the session decision lock: ordered protocol write,
-Python reduction, and transcript-observer attempt all settle before cancellation or teardown may
-select an outcome. This is a real provider-neutral orchestration slice, but `main()` deliberately
-injects no provider, so it does not alter the visible mock or the TypeScript protocol-v1 projection.
+CAH-022 gives each created session a fresh mutable limit tracker under one immutable limits value. The
+session starts at most one operation and claims its stream exactly once when admission succeeds. Each
+accepted lifecycle publication is a shielded, ordered, non-interleaved transaction under the session
+decision lock: protocol write, Python reduction, and transcript-observer attempt settle before
+cancellation or teardown may select an outcome. An ordinary later sink or observer failure does not
+roll back an earlier accepted view. The slice is real provider-neutral orchestration, but `main()`
+deliberately injects no provider, so it does not alter the visible mock or the TypeScript protocol-v1
+projection.
 
 ## Bounded loop
 
@@ -148,8 +151,8 @@ and retryable observation. It has no raw exception, response, header, environmen
 field; retryability does not authorize the loop to retry. Malformed tool arguments remain serialized
 text at this boundary so later tool validation can return a structured harness result. Provider
 contract tests run without vendor modules, framework packages, API keys, or network access. CAH-021
-now consumes this port for one fake-backed turn. CAH-022 will enforce configurable hard limits, and
-CAH-023 will then target the OpenAI Responses API at this boundary.
+consumes this port for one fake-backed turn, and CAH-022 enforces its four configurable hard limits.
+CAH-023 will next target the OpenAI Responses API at this boundary.
 
 ## Implemented one-turn grammar
 
@@ -171,29 +174,34 @@ triggers cancellation. Empty text cannot authorize usage or provider completion,
 an empty `assistant.completed` event.
 
 The turn rejects a delta in full before emission when cumulative accepted assistant text would exceed
-8,192 UTF-8 bytes. This fixed compatibility ceiling keeps protocol lines bounded; it is not the
-configurable output budget, model-turn limit, tool-observation limit, or provider-work deadline owned
-by CAH-022. A `ProviderFailed` observation becomes one normalized `session.failed` outcome, while a
-tool request becomes `tool_unavailable`, triggers operation cancellation, and never exposes or parses
-its arguments.
+the configured UTF-8 output budget. This check runs before the fixed 8,192-byte
+protocol-compatibility ceiling, so `assistant_output_limit_exceeded` wins when both would reject the
+same delta. A `ProviderFailed` observation becomes one normalized `session.failed` outcome. A tool
+request is counted before any handling; the first admitted request still becomes `tool_unavailable`,
+triggers operation cancellation, and never exposes or parses its arguments.
 
 Optional usage is bounded to non-negative JavaScript-safe integers and recorded outside lifecycle
 state as `model.usage_observed`. It consumes neither a protocol-v1 sequence number nor a reducer
-transition. Transcript version 2 stores the observation before the terminal record and replay exposes
-it through a separate evidence projection; version-1 tapes remain replayable. Usage admission shares
-the decision lock, so an admitted evidence write settles before cancellation competes, while a
-terminal outcome that wins first suppresses later usage.
+transition. The version-3 writer stores the observation before the terminal record, and replay of
+versions 1, 2, and 3 exposes it through a separate evidence projection. Usage admission shares the
+decision lock, so an admitted evidence write settles before cancellation competes, while a terminal
+outcome that wins first suppresses later usage.
 
-Completion, normalized failure, user cancellation, invalid response, and runtime teardown select one
-shared outcome before cleanup. User cancellation calls and awaits `ProviderOperation.cancel()`.
-Shutdown, stdin EOF, or outer-task cancellation use teardown: they cancel and join active provider
-work without fabricating `session.cancelled`, leaving an incomplete replayable transcript prefix when
-teardown wins. After the cleanup attempt, the loop cancels and awaits any pending local read. For a
-cancellation-responsive iterator, that join prevents local task scheduling from hanging
-finalization. A successful cleanup return is trusted; a cleanup or reaping exception emits at most
-one start-correlated, payload-free `provider_cleanup_failed` diagnostic before any selected terminal
-and cannot rewrite that outcome. An iterator that suppresses task cancellation requires stronger
-process isolation beyond CAH-021.
+Completion, normalized failure, user cancellation, invalid response, limit exhaustion, and runtime
+teardown select one shared outcome before cleanup. User cancellation calls and awaits
+`ProviderOperation.cancel()`. Shutdown, stdin EOF, or outer-task cancellation use teardown: they
+cancel and join active provider work without fabricating `session.cancelled`, leaving an incomplete
+replayable transcript prefix when teardown wins.
+
+Provider cleanup uses exactly one loop-owned task per session. The deadline watcher may start that
+task in cancellation mode, and the finalizer joins the same task instead of invoking cleanup again.
+Every `cancel()` or `wait_closed()` await is supervised by a fixed five-second local grace. A cleanup
+task already complete when the grace wakes wins the tie; otherwise its local awaitable is cancelled
+and reaped. The loop also cancels and awaits any pending local read. A cleanup failure or grace expiry
+emits at most one start-correlated, payload-free `provider_cleanup_failed` diagnostic before any
+selected terminal and cannot rewrite that outcome. These bounds require cancellation-responsive
+provider awaitables; an implementation that suppresses task cancellation requires stronger process
+isolation.
 
 ## State and terminal outcomes
 
@@ -230,20 +238,57 @@ CAH-006 proves the first cancellation/completion race rule: a `MockSession` lock
 valid terminal selection win, repeated or recent-terminal requests become no-ops, and the TUI waits
 for Python's event instead of treating a local request as acknowledgement. CAH-021 applies the rule
 to provider completion, normalized failure, user cancellation, and runtime teardown through one
-decision lock and shared finalizer. Deadlines and tool execution remain later extensions. It is not
-safe to rely on every provider or executor stopping immediately after cancellation.
+decision lock and shared finalizer. CAH-022 adds limit exhaustion and a separately latched provider
+deadline to that competition. Tool execution remains a later extension. It is not safe to rely on
+every provider or executor stopping immediately after cancellation.
 
 ## Limits and failures
 
-CAH-021 enforces only the fixed 8,192-byte protocol-compatibility ceiling described above.
-Configuration will include maximum model turns, a provider-work deadline, assistant output bytes,
-and observed provider tool calls. Model-turn admission is charged before provider work starts;
-output and tool-call limits are checked before an observation is admitted for publication. An
-independent deadline watcher can stop provider work while an already-admitted publication is
-blocked, but that publication finishes atomically before the latched deadline selects the terminal
-outcome. The deadline bounds provider work, not event-sink latency. Reaching a limit produces a
-distinct stable failure code and an understandable TUI message; it is not reported as provider
-failure.
+CAH-022 implements an immutable four-field `LoopLimits` configuration for injected provider-backed
+sessions. It rejects booleans and out-of-range values rather than clamping or disabling a budget:
+
+| Field | Default | Allowed range | Accounting point |
+| --- | ---: | ---: | --- |
+| `max_model_turns` | `1` | `1..16` | Immediately before `Provider.start()` |
+| `provider_work_timeout_seconds` | `120` | `1..3600` | Absolute deadline captured at session allocation |
+| `max_assistant_output_bytes` | `4096` | `1..8192` | Cumulative UTF-8 bytes before delta publication |
+| `max_observed_tool_calls` | `1` | `1..64` | Each tool request before parsing or handling |
+
+`ProviderSessionRunner` shares the immutable configuration but creates a fresh mutable tracker for
+every session ID, so counts never leak across sequential sessions. Model-turn denial starts and
+cancels nothing. An over-budget output delta is rejected in full. A tool-call attempt is counted
+before its decision, so the rejecting observation is retained as the configured maximum plus one.
+Provider-reported usage remains observational metadata and cannot replace these counters.
+
+The provider-work deadline is `monotonic_now() + provider_work_timeout_seconds`, captured when the
+accepted command allocates the session before transcript setup or observer attachment. A separate
+watcher races each provider-stream wait and checks the clock again after it wakes. At an exact
+event/deadline tie, `monotonic_now() >= deadline` makes expiry win and the event is not admitted.
+Admission and deadline latching share a small guard: latch-first starts no operation; admission-first
+installs exactly one lazy operation for the watcher to cancel.
+
+The watcher does not acquire the publication lock before latching expiry and starting the shared
+cleanup task. It can therefore request provider cancellation while an already-admitted wire or
+transcript sink is blocked. That ordered, non-interleaved publication transaction still completes its
+wire write, reducer acceptance, and transcript-observer attempt before terminal selection sees the
+latch. An ordinary later failure does not roll back an earlier accepted view. The deadline is not a
+terminal-latency timeout: it bounds provider work, not local sink latency.
+
+Each limit produces one safe `session.failed` payload with a distinct stable code:
+
+- `model_turn_limit_exceeded`
+- `provider_work_deadline_exceeded`
+- `assistant_output_limit_exceeded`
+- `tool_call_limit_exceeded`
+
+With healthy persistence through terminal publication, the version-3 transcript writes one
+`loop.limits_observed` record immediately before the terminal session event. It includes the four
+configured values, admitted model turns and assistant bytes, observed tool calls, and the exhausted
+limit if any. Writer and replay require an exhausted limit to match the exact adjacent
+`session.failed` code and forbid a loop-limit failure code when no limit was exhausted. Replay accepts
+versions 1, 2, and 3; version 3 also forbids a reserved limit-failure code without the evidence
+record. A version-3 mock tape may omit this evidence because the launched `MockSession` does not use
+the provider loop.
 
 Failures are converted at their ownership boundary:
 
@@ -298,11 +343,15 @@ tests prove the injected composition seam and transcript-mode parity without rep
 > As a user, I want provider work to stop predictably at configured limits so that faulty sequences
 > cannot consume provider resources indefinitely.
 
-Complete this story when provider-turn admission, an independent provider-work deadline, cumulative
-accepted UTF-8 output, and observed tool calls are enforced before CAH-023 can activate network work.
-The deadline may stop provider activity while an already-admitted local publication finishes; it is
-not a sink-latency promise. Every limit must have deterministic fake-clock and fake-provider
-evidence, awaited cleanup, one terminal winner, and bounded transcript evidence.
+This story is complete. `loop_limits.py` owns the immutable configuration, validation, per-session
+tracker, bounded observation, and stable exhausted-limit vocabulary. `provider_session.py` enforces
+all four accounting points, exact deadline ties, blocked-publication cancellation, one supervised
+cleanup task with a fixed five-second grace, and one terminal winner. `transcript.py` writes version 3
+and restores `loop.limits_observed` evidence while retaining version-1 and version-2 replay. Runtime
+tests prove fresh trackers and deadline capture before transcript setup. See the
+[story](../user-stories/cah-022-enforce-loop-limits.md),
+[implementation-backed lesson](lessons/cah-022-loop-limits.md), and
+[visual companion](lessons/assets/cah-022-loop-limits.pptx).
 
 ### CAH-023 — Add the OpenAI Responses adapter
 

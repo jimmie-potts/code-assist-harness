@@ -10,7 +10,7 @@ import stat
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import uuid4
 
 from pydantic import (
@@ -22,14 +22,27 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
     ValidationError,
+    model_validator,
 )
 
+from ..loop_limits import (
+    LOOP_LIMIT_FAILURE_CODES,
+    MAX_ASSISTANT_OUTPUT_BYTES,
+    MAX_MODEL_TURNS,
+    MAX_OBSERVED_TOOL_CALLS,
+    MAX_PROVIDER_WORK_TIMEOUT_SECONDS,
+    LoopLimitExhaustion,
+    LoopLimitsObserved,
+    loop_limit_failure_code,
+)
 from ..model_evidence import MAX_MODEL_USAGE_TOKENS, ModelUsageObserved
 from ..protocol import (
     AssistantCompletedEvent,
     AssistantDeltaEvent,
     AssistantTextPayload,
     CommandId,
+    SessionCancelledEvent,
+    SessionCompletedEvent,
     SessionEvent,
     SessionFailedEvent,
     SessionFailedPayload,
@@ -49,7 +62,7 @@ from ..session_state import (
     reduce_session_state,
 )
 
-TRANSCRIPT_VERSION = 2
+TRANSCRIPT_VERSION = 3
 """Version written for new local transcripts, independent of protocol v1."""
 
 MAX_TRANSCRIPT_LINE_BYTES = 128 * 1024
@@ -192,7 +205,7 @@ class _TranscriptModel(BaseModel):
 
 
 TranscriptVersion = Annotated[
-    Literal[1, 2],
+    Literal[1, 2, 3],
     BeforeValidator(_validate_transcript_version_type),
 ]
 """Transcript envelopes accepted by the current side-effect-free replay reader."""
@@ -267,16 +280,46 @@ class SessionEventRecord(_TranscriptRecordBase):
 
 
 class ModelUsageObservedRecord(_TranscriptRecordBase):
-    """One version-2 provider usage observation outside lifecycle state."""
+    """One version-2-or-3 provider usage observation outside lifecycle state."""
 
-    transcript_version: Literal[2]
+    transcript_version: Annotated[
+        Literal[2, 3],
+        BeforeValidator(_validate_transcript_version_type),
+    ]
     kind: Literal["model.usage_observed"]
     input_tokens: Annotated[int, Field(ge=0, le=MAX_MODEL_USAGE_TOKENS)]
     output_tokens: Annotated[int, Field(ge=0, le=MAX_MODEL_USAGE_TOKENS)]
 
 
+class LoopLimitsObservedRecord(_TranscriptRecordBase):
+    """One version-3 snapshot of harness-owned limits and bounded counters."""
+
+    transcript_version: Annotated[
+        Literal[3],
+        BeforeValidator(_validate_transcript_version_type),
+    ]
+    kind: Literal["loop.limits_observed"]
+    max_model_turns: Annotated[int, Field(ge=1, le=MAX_MODEL_TURNS)]
+    provider_work_timeout_seconds: Annotated[
+        int,
+        Field(ge=1, le=MAX_PROVIDER_WORK_TIMEOUT_SECONDS),
+    ]
+    max_assistant_output_bytes: Annotated[int, Field(ge=1, le=MAX_ASSISTANT_OUTPUT_BYTES)]
+    max_observed_tool_calls: Annotated[int, Field(ge=1, le=MAX_OBSERVED_TOOL_CALLS)]
+    model_turns_started: Annotated[int, Field(ge=0, le=MAX_MODEL_TURNS)]
+    assistant_output_bytes: Annotated[int, Field(ge=0, le=MAX_ASSISTANT_OUTPUT_BYTES)]
+    tool_calls_observed: Annotated[int, Field(ge=0, le=MAX_OBSERVED_TOOL_CALLS + 1)]
+    exhausted_limit: LoopLimitExhaustion | None
+
+    @model_validator(mode="after")
+    def validate_counter_relationships(self) -> Self:
+        """Apply the domain's cross-field evidence invariants to untrusted JSON."""
+        _loop_limits_observation(self)
+        return self
+
+
 type TranscriptRecord = Annotated[
-    DomainFactRecord | SessionEventRecord | ModelUsageObservedRecord,
+    DomainFactRecord | SessionEventRecord | ModelUsageObservedRecord | LoopLimitsObservedRecord,
     Field(discriminator="kind"),
 ]
 
@@ -388,6 +431,7 @@ class TranscriptEvidence:
     """Validated non-lifecycle observations restored from one transcript."""
 
     model_usage: ModelUsageObserved | None = None
+    loop_limits: LoopLimitsObserved | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,6 +713,15 @@ class SessionTranscript:
                 return None
             try:
                 safe_update = self._sanitizer.sanitize_update(update)
+                if self._evidence.loop_limits is None and _uses_loop_limit_failure_code(
+                    safe_update
+                ):
+                    raise TranscriptPersistenceError("transcript_write_failed")
+                if self._evidence.loop_limits is not None and (
+                    not _is_terminal_update(safe_update)
+                    or not _loop_limits_match_terminal(self._evidence.loop_limits, safe_update)
+                ):
+                    raise TranscriptPersistenceError("transcript_write_failed")
                 if self._evidence.model_usage is not None and isinstance(
                     safe_update,
                     AssistantDeltaEvent,
@@ -739,6 +792,7 @@ class SessionTranscript:
                 if (
                     observation.session_id != self._session_id
                     or self._evidence.model_usage is not None
+                    or self._evidence.loop_limits is not None
                     or self._state.status != "running"
                     or not self._state.assistant_text
                     or self._state.assistant_completed
@@ -755,7 +809,73 @@ class SessionTranscript:
                     output_tokens=observation.output_tokens,
                 )
                 self._append_record(record)
-                self._evidence = TranscriptEvidence(model_usage=observation)
+                self._evidence = TranscriptEvidence(
+                    model_usage=observation,
+                    loop_limits=self._evidence.loop_limits,
+                )
+            except TranscriptPersistenceError as error:
+                self._latch_failure(error.code)
+            except (OSError, RuntimeError, ValueError, ValidationError):
+                self._latch_failure("transcript_write_failed")
+            return self._take_failure()
+
+    async def record_loop_limits(
+        self,
+        observation: LoopLimitsObserved,
+    ) -> TranscriptPersistenceFailure | None:
+        """Append one bounded loop-limit snapshot immediately before a session terminal.
+
+        Args:
+            observation: Session-bound configuration and counters captured during terminal
+                preparation by the provider-backed session.
+
+        Returns:
+            The first payload-free persistence failure, or ``None`` after success and after any
+            already-reported failure.
+
+        Raises:
+            TypeError: If ``observation`` is not validated loop-limit evidence.
+
+        Note:
+            A successful append may remain as the final record of an incomplete replayable prefix
+            when the following terminal append fails.
+        """
+        if not isinstance(observation, LoopLimitsObserved):
+            raise TypeError("transcript loop limits require a validated observation")
+        async with self._lock:
+            if self._failure is not None:
+                return self._take_failure()
+            if self._closed:
+                return None
+            try:
+                if (
+                    observation.session_id != self._session_id
+                    or self._evidence.loop_limits is not None
+                    or self._state.session_id != self._session_id
+                    or self._state.status in TERMINAL_SESSION_STATUSES
+                ):
+                    raise TranscriptPersistenceError("transcript_write_failed")
+                record = LoopLimitsObservedRecord(
+                    transcript_version=TRANSCRIPT_VERSION,
+                    record_order=self._next_record_order,
+                    recorded_at=self._clock(),
+                    workspace_id=self._workspace_id,
+                    session_id=self._session_id,
+                    kind="loop.limits_observed",
+                    max_model_turns=observation.max_model_turns,
+                    provider_work_timeout_seconds=(observation.provider_work_timeout_seconds),
+                    max_assistant_output_bytes=observation.max_assistant_output_bytes,
+                    max_observed_tool_calls=observation.max_observed_tool_calls,
+                    model_turns_started=observation.model_turns_started,
+                    assistant_output_bytes=observation.assistant_output_bytes,
+                    tool_calls_observed=observation.tool_calls_observed,
+                    exhausted_limit=observation.exhausted,
+                )
+                self._append_record(record)
+                self._evidence = TranscriptEvidence(
+                    model_usage=self._evidence.model_usage,
+                    loop_limits=observation,
+                )
             except TranscriptPersistenceError as error:
                 self._latch_failure(error.code)
             except (OSError, RuntimeError, ValueError, ValidationError):
@@ -917,6 +1037,7 @@ def replay_transcript(
     expected_session_id: str | None = None
     scoped_workspace_id: str | None = None
     assistant_content_bytes = 0
+    pending_loop_limits: LoopLimitsObserved | None = None
     if expected_workspace is not None:
         try:
             scoped_workspace_id = stable_workspace_id(expected_workspace)
@@ -981,9 +1102,30 @@ def replay_transcript(
                     raise TranscriptReplayError("session_mismatch", line_number)
                 if not _record_matches_session(record):
                     raise TranscriptReplayError("session_mismatch", line_number)
+                if pending_loop_limits is not None:
+                    if (
+                        not isinstance(record, SessionEventRecord)
+                        or not _is_terminal_update(record.input)
+                        or not _loop_limits_match_terminal(pending_loop_limits, record.input)
+                    ):
+                        raise TranscriptReplayError(
+                            "lifecycle_invariant_failed",
+                            line_number,
+                        )
+                    pending_loop_limits = None
+                elif (
+                    expected_transcript_version == 3
+                    and isinstance(record, SessionEventRecord)
+                    and _uses_loop_limit_failure_code(record.input)
+                ):
+                    raise TranscriptReplayError(
+                        "lifecycle_invariant_failed",
+                        line_number,
+                    )
                 if isinstance(record, ModelUsageObservedRecord):
                     if (
                         evidence.model_usage is not None
+                        or evidence.loop_limits is not None
                         or state.status != "running"
                         or not state.assistant_text
                         or state.assistant_completed
@@ -1000,7 +1142,31 @@ def replay_transcript(
                         )
                     except (TypeError, ValueError):
                         raise TranscriptReplayError("invalid_record", line_number) from None
-                    evidence = TranscriptEvidence(model_usage=model_usage)
+                    evidence = TranscriptEvidence(
+                        model_usage=model_usage,
+                        loop_limits=evidence.loop_limits,
+                    )
+                    records.append(record)
+                    continue
+                if isinstance(record, LoopLimitsObservedRecord):
+                    if (
+                        evidence.loop_limits is not None
+                        or state.session_id != record.session_id
+                        or state.status in TERMINAL_SESSION_STATUSES
+                    ):
+                        raise TranscriptReplayError(
+                            "lifecycle_invariant_failed",
+                            line_number,
+                        )
+                    try:
+                        loop_limits = _loop_limits_observation(record)
+                    except (TypeError, ValueError):
+                        raise TranscriptReplayError("invalid_record", line_number) from None
+                    evidence = TranscriptEvidence(
+                        model_usage=evidence.model_usage,
+                        loop_limits=loop_limits,
+                    )
+                    pending_loop_limits = loop_limits
                     records.append(record)
                     continue
                 update = _record_update(record)
@@ -1105,6 +1271,8 @@ def _build_record(
 def _record_update(record: TranscriptRecord) -> SessionUpdate:
     if isinstance(record, SessionEventRecord):
         return record.input
+    if not isinstance(record, DomainFactRecord):
+        raise AssertionError(f"evidence record has no lifecycle update: {record.kind}")
     value = record.input
     if isinstance(value, TaskSubmittedInput):
         return TaskSubmitted(command_id=value.command_id, task=value.task)
@@ -1118,7 +1286,7 @@ def _record_update(record: TranscriptRecord) -> SessionUpdate:
 
 
 def _record_matches_session(record: TranscriptRecord) -> bool:
-    if isinstance(record, ModelUsageObservedRecord):
+    if isinstance(record, ModelUsageObservedRecord | LoopLimitsObservedRecord):
         return True
     if isinstance(record, SessionEventRecord):
         return record.input.session_id == record.session_id
@@ -1127,8 +1295,57 @@ def _record_matches_session(record: TranscriptRecord) -> bool:
     return record.input.session_id == record.session_id
 
 
+def _is_terminal_update(update: SessionUpdate) -> bool:
+    """Return whether one lifecycle update is a terminal session event."""
+    return isinstance(update, SessionCompletedEvent | SessionCancelledEvent | SessionFailedEvent)
+
+
+def _is_terminal_record(record: TranscriptRecord) -> bool:
+    """Return whether one persisted record is a terminal session event."""
+    return isinstance(record, SessionEventRecord) and _is_terminal_update(record.input)
+
+
+def _loop_limits_match_terminal(
+    observation: LoopLimitsObserved,
+    terminal: SessionUpdate,
+) -> bool:
+    """Return whether bounded limit evidence agrees with its adjacent terminal update."""
+    if observation.exhausted is None:
+        return not (
+            isinstance(terminal, SessionFailedEvent)
+            and terminal.payload.code in LOOP_LIMIT_FAILURE_CODES
+        )
+    return isinstance(
+        terminal, SessionFailedEvent
+    ) and terminal.payload.code == loop_limit_failure_code(observation.exhausted)
+
+
+def _uses_loop_limit_failure_code(update: SessionUpdate) -> bool:
+    """Return whether one session failure uses a reserved loop-limit terminal code."""
+    return (
+        isinstance(update, SessionFailedEvent) and update.payload.code in LOOP_LIMIT_FAILURE_CODES
+    )
+
+
+def _loop_limits_observation(record: LoopLimitsObservedRecord) -> LoopLimitsObserved:
+    """Project one flat version-3 record into validated domain evidence."""
+    return LoopLimitsObserved(
+        session_id=record.session_id,
+        max_model_turns=record.max_model_turns,
+        provider_work_timeout_seconds=record.provider_work_timeout_seconds,
+        max_assistant_output_bytes=record.max_assistant_output_bytes,
+        max_observed_tool_calls=record.max_observed_tool_calls,
+        model_turns_started=record.model_turns_started,
+        assistant_output_bytes=record.assistant_output_bytes,
+        tool_calls_observed=record.tool_calls_observed,
+        exhausted=record.exhausted_limit,
+    )
+
+
 def _encode_record(record: TranscriptRecord) -> bytes:
-    line = record.model_dump_json(exclude_none=True).encode("utf-8")
+    line = record.model_dump_json(
+        exclude_none=not isinstance(record, LoopLimitsObservedRecord)
+    ).encode("utf-8")
     if len(line) > MAX_TRANSCRIPT_LINE_BYTES:
         raise TranscriptPersistenceError("transcript_write_failed")
     return line + b"\n"
@@ -1149,6 +1366,21 @@ def _build_summary(
             f"Model output tokens: {usage.output_tokens}",
         ]
     )
+    loop_limits = evidence.loop_limits
+    loop_limit_lines = (
+        ["Loop limits: unavailable"]
+        if loop_limits is None
+        else [
+            f"Maximum model turns: {loop_limits.max_model_turns}",
+            (f"Provider work timeout seconds: {loop_limits.provider_work_timeout_seconds}"),
+            f"Maximum assistant output bytes: {loop_limits.max_assistant_output_bytes}",
+            f"Maximum observed tool calls: {loop_limits.max_observed_tool_calls}",
+            f"Model turns started: {loop_limits.model_turns_started}",
+            f"Assistant output bytes: {loop_limits.assistant_output_bytes}",
+            f"Tool calls observed: {loop_limits.tool_calls_observed}",
+            f"Exhausted loop limit: {loop_limits.exhausted or 'none'}",
+        ]
+    )
     lines = [
         "Code Assist Harness session summary",
         "",
@@ -1157,6 +1389,7 @@ def _build_summary(
         f"Task: {task}",
         f"Outcome: {state.status}",
         *usage_lines,
+        *loop_limit_lines,
         "Changed files: unavailable - file-edit tools are not implemented in CAH-011.",
         "Check results: unavailable - validation tools are not implemented in CAH-011.",
     ]

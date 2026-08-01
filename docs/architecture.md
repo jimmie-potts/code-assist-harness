@@ -35,11 +35,12 @@ storage, privacy-aware typed sanitization, honest terminal summaries, strict sid
 local opt-out, and recoverable persistence warnings. CAH-020 adds immutable provider-neutral request
 and stream values, an explicit asynchronous operation port, and a strict deterministic fake without
 changing the launched `MockSession` runtime or TUI. CAH-021 adds `ProviderSession`, one strict
-fake-backed turn, an injected-provider runtime seam, transcript-v2 usage evidence, and v1/v2 replay.
-The launched `main()` composition remains the deterministic mock and protocol v1 is unchanged.
-CAH-022 is next and will add configurable hard limits before CAH-023 adds and activates the OpenAI
-Responses adapter. Tool execution, workspace reads, policy, and broader agent behavior remain target
-architecture.
+fake-backed turn, an injected-provider runtime seam, and bounded usage evidence. CAH-022 adds four
+validated hard limits, per-session accounting, deterministic deadline and cleanup supervision, and
+transcript-v3 loop-limit evidence with v1/v2/v3 replay. The launched `main()` composition remains the
+deterministic mock and protocol v1 is unchanged. CAH-023 is the next dependency-ready unit and will
+add and activate the OpenAI Responses adapter. Tool execution, workspace reads, policy, and broader
+agent behavior remain target architecture.
 
 ## Product boundary
 
@@ -167,10 +168,11 @@ paths using normalized protocol examples checked by the Python and TypeScript te
 Tests and later composition roots may instead inject a `Provider` into `run_runtime`:
 
 ```text
-validated session.start -> ProviderSessionRunner creates ProviderSession
-  -> one ProviderRequest -> one ProviderOperation -> strict provider observation grammar
-  -> OrderedEventWriter + Python reducer + transcript observer as one admitted transaction
-  -> one completed, failed, or cancelled terminal after provider cleanup
+validated session.start -> ProviderSessionRunner creates ProviderSession + fresh limit tracker
+  -> capture provider-work deadline -> admit one ProviderRequest -> one ProviderOperation
+  -> strict provider observation grammar + four hard-limit checks
+  -> ordered, non-interleaved publication transaction: wire + reducer + transcript observer
+  -> one completed, failed, or cancelled terminal after supervised provider cleanup
 ```
 
 This provider-backed path is implemented and network-free with `FakeProvider`. It is not selected by
@@ -213,6 +215,7 @@ The implemented Python boundary is separated from later domain subsystems:
 src/code_assist_harness/
 ├── runtime.py          Command loop, active-session routing, cancellation, and shutdown
 ├── mock_session.py     Fixed response, cooperative checkpoints, reducer integration, and terminals
+├── loop_limits.py      Immutable hard limits, per-session counters, and bounded observations
 ├── model_evidence.py   Bounded transcript-only provider usage evidence
 ├── provider_session.py One strict provider turn, outcome selection, and cleanup
 ├── session_state.py    Pure one-session lifecycle reducer and replay
@@ -232,9 +235,9 @@ src/code_assist_harness/
 The provider package remains independent of orchestration. `provider_session.py` consumes its port
 through harness-owned values and `runtime.py` selects that runner only when a caller injects a
 provider. The launched mock therefore remains honest while tests prove the real orchestration seam.
-CAH-022 will add the safety budget, and CAH-023 will select the concrete OpenAI adapter at the
-composition root. Future `core/`, `context/`, `tools/`, and `safety/` paths remain conceptual and will
-be introduced only by their owning stories.
+CAH-022 now supplies the safety budget to injected provider sessions, and CAH-023 will select the
+concrete OpenAI adapter at the composition root. Future `core/`, `context/`, `tools/`, and `safety/`
+paths remain conceptual and will be introduced only by their owning stories.
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 
@@ -301,22 +304,44 @@ Cancellation closes iteration instead of fabricating a failure event.
 The first implementation is a strict deterministic fake. It matches ordered requests, emits
 scripted events, exposes named logical delay and cancellation checkpoints, and fails on mismatches,
 omitted requests, or unconsumed steps. Diagnostics report only bounded differing field paths, not
-request contents. CAH-021's `ProviderSession` now builds one request from the accepted task and an
-ordered, already-resolved instruction tuple, starts and claims one operation, and admits provider
+request contents. `ProviderSession` builds one request from the accepted task and an ordered,
+already-resolved instruction tuple, starts and claims at most one operation, and admits provider
 observations through one decision lock. A valid success is one or more deltas, exactly matching
 completed text, optional usage, and provider completion in that order. Candidate completion is
 buffered until the full grammar selects completion and the cleanup barrier has been attempted. A
 cleanup-contract failure adds a separate bounded diagnostic without rewriting that selection.
-Invalid grammar becomes `provider_invalid_response`; normalized provider failure remains bounded; a
-tool request becomes `tool_unavailable` without parsing or execution. An empty completed-text
-candidate is retained only so a following tool request reaches that classification; it cannot admit
-usage or complete successfully. Cumulative accepted text has a fixed 8,192-byte UTF-8 compatibility
-ceiling until CAH-022 supplies configurable limits.
+Invalid grammar becomes
+`provider_invalid_response`; normalized provider failure remains bounded; a tool request becomes
+`tool_unavailable` without parsing or execution. An empty completed-text candidate is retained only
+so a following tool request reaches that classification; it cannot admit usage or complete
+successfully.
 
-Planned CAH-023 will add the first real adapter against foreground OpenAI Responses streaming after
-CAH-022's hard limits; SDK objects remain inside that adapter. The launched M0 `MockSession` is still
-a separate runtime fixture rather than a provider consumer. Default validation never makes a live
-model or network request.
+CAH-022 wraps that turn in an immutable `LoopLimits` value and gives each allocated provider session
+a fresh `LoopLimitTracker`. The four configured integers default to one model turn, 120 seconds of
+provider work, 4,096 accepted assistant-output bytes, and one observed tool call. Model-turn admission
+is charged before `Provider.start()`, UTF-8 output is reserved before publication, and tool requests
+are counted before unavailable-tool handling. The rejecting tool observation remains counted; the
+rejecting output delta is not admitted. The configurable output budget runs before the fixed
+8,192-byte protocol-compatibility ceiling.
+
+Each limit selects one bounded `session.failed` payload with a distinct stable code:
+`model_turn_limit_exceeded`, `provider_work_deadline_exceeded`,
+`assistant_output_limit_exceeded`, or `tool_call_limit_exceeded`. Provider-reported token usage is
+observational evidence only and never replaces these harness-owned counters or authorizes more work.
+
+The absolute provider-work deadline is captured when an accepted command allocates its provider
+session, before transcript setup and observer attachment. An independent watcher races every stream
+wait and rereads the monotonic clock afterward; at an exact event/deadline tie, expiry wins and the
+observation is not admitted. The watcher can latch expiry and start provider cancellation while an
+already-admitted publication is blocked. That ordered, non-interleaved publication transaction
+completes its wire write, reducer acceptance, and transcript-observer attempt before the deadline
+terminal is selected. An ordinary later sink failure does not roll back an earlier accepted view, and
+the deadline does not bound local sink latency.
+
+CAH-023 is the next unit and will add the first real adapter against foreground OpenAI Responses
+streaming; SDK objects remain inside that adapter. The launched M0 `MockSession` is still a separate
+runtime fixture rather than a provider consumer. Default validation never makes a live model or
+network request.
 
 ## Concurrency and cancellation
 
@@ -325,19 +350,24 @@ bounded chunk at a time. `CommandLineReader` validates each completed line indep
 `OrderedEventWriter` holds one lock across sequence allocation, validation, serialization, and sink
 completion. The accepted mock runs in one child task so the command reader remains available for an
 overlapping `session.start`, `session.cancel`, or `runtime.shutdown`. Shutdown waits for the bounded
-three-delta task. For an injected provider, `ProviderSession` shields each admitted wire-write,
-reducer, and observer transaction from interruption and selects completion, failure, cancellation,
-or teardown through one guard and shared finalizer. Cancellation calls and awaits operation cleanup.
-Teardown from shutdown, EOF, or outer cancellation emits no fabricated session terminal when it wins.
-After the cleanup attempt, the loop cancels and joins any pending local provider read. That join
-finishes in-process only when the iterator responds to task cancellation. A cleanup or read-reaping
-exception adds at most one payload-free `provider_cleanup_failed` runtime error without rewriting an
-already-selected outcome; a successful barrier return remains the port's cleanup confirmation.
-CAH-022 will add deadline and budget supervision for cancellation-responsive cleanup, and stronger
-process isolation is required to contain an iterator that suppresses cancellation. CAH-023 will
-activate the bounded path with a concrete adapter. Later units add tool supervision to the same loop.
-Small, bounded filesystem operations may run directly; blocking work moves to a worker thread when
-needed.
+three-delta task. For an injected provider, `ProviderSession` shields each ordered, non-interleaved
+publication transaction from interruption and selects completion, failure, cancellation, deadline
+expiry, or teardown through one guard and shared finalizer. The transaction contains the wire write,
+reducer acceptance, and observer attempt; an ordinary later failure does not roll back an earlier
+accepted view. Cancellation calls and awaits operation cleanup. Teardown from shutdown, EOF, or outer
+cancellation emits no fabricated session terminal when it wins.
+
+Provider cleanup has exactly one loop-owned task per session. A deadline watcher may create it in
+cancellation mode without waiting for the publication lock; the finalizer joins that same task and
+never invokes the provider cleanup API concurrently. Each `cancel()` or `wait_closed()` await is
+raced against one fixed five-second local grace through the injected monotonic waiter. Cleanup
+completion wins an exact tie; otherwise grace expiry cancels and reaps the local cleanup awaitable
+and emits at most one payload-free `provider_cleanup_failed` runtime error without rewriting the
+selected outcome. The loop also cancels and joins any pending local provider read. These in-process
+joins require the provider awaitables to propagate task cancellation; stronger process isolation is
+required for an implementation that suppresses it. CAH-023 will activate the bounded path with a
+concrete adapter. Later units add tool supervision to the same loop. Small, bounded filesystem
+operations may run directly; blocking work moves to a worker thread when needed.
 
 CAH-006 implements mock cancellation as a lifecycle operation rather than an exception leaked to the
 TUI. Each `MockSession` owns an `asyncio.Event` and a state lock. A matching request selects
@@ -426,17 +456,27 @@ and random transcript ID prevent repeating mock session IDs from colliding witho
 files into repositories or exposing personal paths in filenames. Record timestamps are descriptive;
 neither they nor event timestamps replace the two explicit order fields.
 
-The writer now emits transcript version 2 for every session. Replay accepts internally consistent
-version-1 and version-2 tapes and rejects a mixed-version tape. Lifecycle records still contain the
-current user task, assistant output, cancellation intent, minimal approval facts when a producer
-exists, and terminal failures. A provider-backed v2 tape may additionally contain one bounded
+The writer now emits transcript version 3 for every session. Replay accepts internally consistent
+version-1, version-2, and version-3 tapes and rejects a mixed-version tape. Lifecycle records still
+contain the current user task, assistant output, cancellation intent, minimal approval facts when a
+producer exists, and terminal failures. A provider-backed tape may contain one bounded
 `model.usage_observed` record after `ProviderSession` has reconciled and buffered the provider's
 `ProviderTextCompleted` observation but before the `assistant.completed` and session-terminal
 records. The buffered provider observation is not itself a transcript record, so replay validates
 the observable window instead: one session-bound usage record while the session is running, after
-non-empty assistant text, and before assistant completion. Usage is restored through a separate
-evidence projection and included in the summary; it is not a protocol-v1 event, reducer input,
-sequence consumer, billing proof, or limit authority.
+non-empty assistant text, and before assistant completion.
+
+A healthy, terminal provider-backed version-3 tape also contains exactly one
+`loop.limits_observed` record immediately before its terminal session event. It records the four
+configured limits, admitted model turns and assistant bytes, observed tool calls, and an optional
+exhausted-limit enum; it contains no monotonic timestamp or raw provider value. Replay validates its
+session, position, cardinality, ranges, counters, and agreement with the adjacent terminal: an
+exhausted budget requires its exact stable failure code, while no exhaustion forbids those codes.
+In version 3, a reserved limit-failure code also requires this preceding record. Replay restores the
+record beside usage in the separate evidence projection used by the summary. A
+mock-session version-3 tape may omit that record because
+`MockSession` does not enter the provider-backed loop. Neither evidence kind is a protocol-v1 event,
+reducer input, sequence consumer, billing proof, or authority to admit more work.
 
 Later tool stories may add bounded tool metadata and results through the same typed boundary. Raw
 provider payloads and environment mappings are excluded. Recognized environment values are used only

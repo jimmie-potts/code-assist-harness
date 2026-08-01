@@ -1,7 +1,8 @@
 # Safety Model
 
-> Status: proposed design. These controls describe the intended MVP and are not yet a sandbox or a
-> claim that untrusted code can be executed safely.
+> Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
+> injected provider-session path; the launched `main()` path remains `MockSession`, and this is not a
+> sandbox or a claim that untrusted code can be executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
 repository content are untrusted inputs. Safety therefore comes from defense in depth: bounded
@@ -101,13 +102,30 @@ when they could technically be expressed as file or command operations.
 ## Cancellation and bounded work
 
 Cancellation will be checked before provider calls, tool execution, edit application, and another
-loop step. Provider calls and executors will receive cancellation signals and deadlines. Since
-external work may finish concurrently, the session terminal-state guard ensures exactly one
-completed, cancelled, or failed event wins.
+loop step. Since external work may finish concurrently, the session terminal-state guard ensures
+exactly one completed, cancelled, or failed event wins.
 
-Turn, tool-call, output, file-size, search-result, command-duration, and session-duration limits
-constrain both mistakes and deliberate abuse. A limit failure identifies the exact limit without
-including sensitive data.
+CAH-022 implements four hard limits for injected provider-backed sessions: model-turn admission,
+provider-work time, cumulative accepted UTF-8 output, and observed provider tool calls. The immutable
+configuration is validated before use, while every allocated session owns a fresh tracker. Admission
+is charged before `Provider.start()`, output before publication, and tool requests before parsing or
+handling. The stable safe failure codes are `model_turn_limit_exceeded`,
+`provider_work_deadline_exceeded`, `assistant_output_limit_exceeded`, and
+`tool_call_limit_exceeded`; none includes configured values or provider content.
+
+The monotonic provider-work deadline is captured at session allocation, before transcript setup and
+observer attachment, and an independent watcher can start provider cancellation while an admitted
+publication is blocked. An exact event/deadline tie belongs to the deadline. The already-admitted,
+ordered, non-interleaved publication transaction still completes its wire/reducer/observer work; an
+ordinary later failure does not roll back an earlier accepted view. The deadline is not a local
+sink-latency bound.
+
+Every provider cleanup await uses the session's one shared supervised cleanup task and a fixed
+five-second local grace. A completed cleanup wins an exact cleanup/grace tie; otherwise the local
+awaitable is cancelled and reaped and `provider_cleanup_failed` is emitted at most once without
+replacing the selected terminal outcome. This requires provider awaitables to propagate task
+cancellation and does not prove remote cleanup succeeded. File-size, search-result,
+command-duration, whole-session, and later tool-execution limits remain future controls.
 
 ## Transcripts and privacy
 
@@ -119,17 +137,24 @@ and random transcript ID rather than a personal path in the filename. Applicatio
 `0700`; transcript and summary files are `0600`; each accepted record is flushed and fsynced.
 
 Lifecycle records include user tasks, assistant text, validated session events, cancellation intent,
-and the approval wait/resume facts introduced by CAH-010. CAH-021 moves new transcripts to version 2
-and permits one `model.usage_observed` record containing only a session ID and non-negative,
-JavaScript-safe input/output token counts. Those provider-supplied counters are bounded local
-evidence, not a protocol event, lifecycle input, billing proof, or limit authority; replay exposes
-them separately from session state, and `--no-transcript` suppresses them with the rest of the local
-record. Typed tool metadata, tool results, approval decision details, changed-file paths, and
-validation outcomes remain future fields; the current summary reports those unavailable rather than
-inventing them. Raw provider payloads and environment mappings are excluded. Values discovered under
-recognized secret-like environment names and recognized credential syntax are redacted before a
-lifecycle input is persisted. Redaction is a safety net, so producers should avoid emitting secrets
-in the first place.
+and the approval wait/resume facts introduced by CAH-010. The current writer emits transcript version
+3, while replay accepts internally consistent versions 1, 2, and 3. Provider-backed tapes may contain
+one `model.usage_observed` record with bounded JavaScript-safe token counts and, with healthy
+persistence through terminal publication, exactly one `loop.limits_observed` record immediately
+before the terminal session event. Loop evidence contains the four configured limits, harness-owned
+counters, and an optional exhausted-limit enum, but no monotonic timestamp or raw provider value.
+Writer and replay cross-check that enum against the exact adjacent terminal failure code, preventing
+contradictory summaries; version 3 also rejects a reserved limit-failure code without the record. A
+version-3 mock tape may omit it because `MockSession` does not use the provider path.
+
+These typed observations are bounded local evidence, not protocol events, lifecycle inputs, billing
+proof, or authority to admit more work; replay exposes them separately from session state, and
+`--no-transcript` suppresses them with the rest of the local record. Typed tool metadata, tool
+results, approval decision details, changed-file paths, and validation outcomes remain future fields;
+the current summary reports those unavailable rather than inventing them. Raw provider payloads and
+environment mappings are excluded. Values discovered under recognized secret-like environment names
+and recognized credential syntax are redacted before a lifecycle input is persisted. Redaction is a
+safety net, so producers should avoid emitting secrets in the first place.
 
 The CLI implements `--no-transcript`, which disables local JSONL and summary files without changing
 the event tape. It does not govern future provider-side storage. A first transcript failure becomes

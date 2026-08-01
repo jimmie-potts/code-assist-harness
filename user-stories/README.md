@@ -28,7 +28,7 @@ harness library.
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
 CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, CAH-007, CAH-010,
-CAH-011, CAH-020, and CAH-021 are
+CAH-011, CAH-020, CAH-021, and CAH-022 are
 **Done**: the architecture baseline, documentation standard, Ink shell, supervised Python process,
 protocol version 1 boundary, deterministic mocked-session slice, authoritative cancellation
 lifecycle, fixture-backed walking-skeleton guide, offline repository/CI gate, and equivalent
@@ -36,11 +36,12 @@ cross-language session reducers are implemented and validated. The Python runtim
 private, redacted, replayable session transcripts and honest summaries unless explicitly disabled.
 CAH-020 exposes provider-neutral request and stream contracts plus a strict programmable fake.
 CAH-021 adds the first injected fake-backed turn, strict stream grammar, terminal and cleanup
-serialization, and transcript-v2 usage evidence with v1/v2 replay. M0 is complete and M1 is in
-progress. CAH-022 is the next dependency-ready unit and will add configurable hard limits before
-CAH-023 introduces and activates the OpenAI Responses adapter. The launched `main()` path and TUI
-still use `MockSession`; workspace reads, tool execution, policy, and broader multi-turn loop behavior
-are also unimplemented.
+serialization, and bounded usage evidence. CAH-022 adds four validated hard limits, fresh per-session
+tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop evidence with
+v1/v2/v3 replay. M0 is complete and M1 is in progress. CAH-023 is the next dependency-ready unit and
+will introduce and activate the OpenAI Responses adapter. The launched `main()` path and TUI still
+use `MockSession`; workspace reads, tool execution, policy, and broader multi-turn loop behavior are
+also unimplemented.
 
 ## Dependency-ordered implementation sequence
 
@@ -59,7 +60,7 @@ are also unimplemented.
 | 11 | [CAH-011: Write an append-only transcript](cah-011-append-only-transcript.md) | [Append-only transcript](../docs/lessons/cah-011-append-only-transcript.md) | M1 | Done | CAH-010 |
 | 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | Done | CAH-010, CAH-011 |
 | 13 | [CAH-021: Run one provider-neutral turn](cah-021-complete-one-model-turn.md) | [One provider-neutral turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Done | CAH-020 |
-| 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Planned | CAH-021 |
+| 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Done | CAH-021 |
 | 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Planned | CAH-022 |
 
 See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
@@ -112,3 +113,7 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-07-31 CAH-021 one provider-neutral turn](notes/2026-07-31-cah-021-one-model-turn.md) records
   the strict stream grammar, transaction and cleanup boundaries, transcript-v2 usage evidence,
   deterministic validation, and handoff to CAH-022.
+- [2026-07-31 CAH-022 loop limits](notes/2026-07-31-cah-022-loop-limits.md) records the four-field
+  budget, deadline and cleanup race semantics, stable failure codes, transcript-v3 evidence,
+  deterministic validation, and handoff to CAH-023. The linked
+  [visual lesson](../docs/lessons/assets/cah-022-loop-limits.pptx) accompanies the written lesson.

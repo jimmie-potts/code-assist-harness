@@ -7,6 +7,11 @@ from typing import cast
 
 import pytest
 
+from code_assist_harness.loop_limits import (
+    LoopLimits,
+    LoopLimitsObserved,
+    LoopLimitTracker,
+)
 from code_assist_harness.model_evidence import (
     MAX_MODEL_USAGE_TOKENS,
     ModelUsageObserved,
@@ -104,6 +109,7 @@ class _ControlledOperation:
         iteration_error: BaseException | None = None,
         block_iteration: bool = False,
         cancel_releases_iteration: bool = False,
+        block_cancel: bool = False,
         block_wait_closed: bool = False,
         wait_closed_error: str | None = None,
         cancel_error: str | None = None,
@@ -113,6 +119,7 @@ class _ControlledOperation:
         self._iteration_error = iteration_error
         self._block_iteration = block_iteration
         self._cancel_releases_iteration = cancel_releases_iteration
+        self._block_cancel = block_cancel
         self._block_wait_closed = block_wait_closed
         self._wait_closed_error = wait_closed_error
         self._cancel_error = cancel_error
@@ -123,6 +130,8 @@ class _ControlledOperation:
         self.wait_closed_started = asyncio.Event()
         self.release_wait_closed = asyncio.Event()
         self.cancel_started = asyncio.Event()
+        self.cancel_finished = asyncio.Event()
+        self.release_cancel = asyncio.Event()
         self.cancel_calls = 0
         self.wait_closed_calls = 0
 
@@ -150,11 +159,16 @@ class _ControlledOperation:
     async def cancel(self) -> str:
         self.cancel_calls += 1
         self.cancel_started.set()
-        if self._cancel_releases_iteration:
-            self.release_iteration.set()
-        if self._cancel_error is not None:
-            raise RuntimeError(self._cancel_error)
-        return "cancelled"
+        try:
+            if self._cancel_releases_iteration:
+                self.release_iteration.set()
+            if self._block_cancel:
+                await self.release_cancel.wait()
+            if self._cancel_error is not None:
+                raise RuntimeError(self._cancel_error)
+            return "cancelled"
+        finally:
+            self.cancel_finished.set()
 
     async def wait_closed(self) -> None:
         self.wait_closed_calls += 1
@@ -231,12 +245,86 @@ class _SingleOperationProvider:
         return self.operation
 
 
+class _MutableMonotonicClock:
+    """Advance absolute deadlines explicitly without sleeping on wall time."""
+
+    def __init__(self, initial: float = 0.0) -> None:
+        self._value = initial
+        self._waiters: list[tuple[float, asyncio.Future[None]]] = []
+        self._waiter_changed = asyncio.Event()
+
+    def now(self) -> float:
+        """Return the current injected monotonic value."""
+        return self._value
+
+    async def wait_until(self, deadline: float) -> None:
+        """Wait until :meth:`advance_to` reaches one absolute deadline."""
+        if self._value >= deadline:
+            return
+        future = asyncio.get_running_loop().create_future()
+        entry = (deadline, future)
+        self._waiters.append(entry)
+        self._waiter_changed.set()
+        try:
+            await future
+        finally:
+            if entry in self._waiters:
+                self._waiters.remove(entry)
+            self._waiter_changed.set()
+
+    async def wait_for_waiter(self, deadline: float) -> None:
+        """Wait until production has registered a waiter for ``deadline``."""
+        while not any(candidate == deadline for candidate, _future in self._waiters):
+            self._waiter_changed.clear()
+            if any(candidate == deadline for candidate, _future in self._waiters):
+                return
+            await self._waiter_changed.wait()
+
+    def advance_to(self, value: float) -> None:
+        """Move time forward and release every newly due waiter."""
+        if value < self._value:
+            raise ValueError("mutable monotonic clock cannot move backwards")
+        self._value = value
+        for deadline, future in tuple(self._waiters):
+            if deadline <= value and not future.done():
+                future.set_result(None)
+
+
+@pytest.mark.parametrize(
+    ("clock_value", "expected_error"),
+    [
+        pytest.param(True, TypeError, id="boolean"),
+        pytest.param("0", TypeError, id="string"),
+        pytest.param(float("nan"), ValueError, id="nan"),
+        pytest.param(float("inf"), ValueError, id="positive-infinity"),
+        pytest.param(float("-inf"), ValueError, id="negative-infinity"),
+    ],
+)
+def test_session_rejects_non_numeric_or_non_finite_monotonic_clock_reads(
+    clock_value: object,
+    expected_error: type[Exception],
+) -> None:
+    async def wait_until(_deadline: float) -> None:
+        return
+
+    with pytest.raises(expected_error, match="monotonic clock must return"):
+        ProviderSession(
+            OrderedEventWriter(lambda _line: wait_until(0.0)),
+            FakeProvider(()),
+            _session_start(),
+            "ses_invalid_clock",
+            monotonic_now=lambda: cast(float, clock_value),
+            monotonic_waiter=wait_until,
+        )
+
+
 def test_one_turn_builds_one_exact_request_and_completes_with_usage() -> None:
     async def scenario() -> tuple[
         list[bytes],
         _CapturingProvider,
         ProviderSession,
         list[ModelUsageObserved],
+        list[LoopLimitsObserved],
         list[tuple[SessionUpdate, SessionState]],
     ]:
         lines: list[bytes] = []
@@ -269,12 +357,16 @@ def test_one_turn_builds_one_exact_request_and_completes_with_usage() -> None:
 
         lifecycle: list[tuple[SessionUpdate, SessionState]] = []
         usage: list[ModelUsageObserved] = []
+        limits_observed: list[LoopLimitsObserved] = []
 
         async def observe_lifecycle(update: SessionUpdate, state: SessionState) -> None:
             lifecycle.append((update, state))
 
         async def observe_usage(observation: ModelUsageObserved) -> None:
             usage.append(observation)
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
 
         session = ProviderSession(
             OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
@@ -285,12 +377,13 @@ def test_one_turn_builds_one_exact_request_and_completes_with_usage() -> None:
         )
         await session.attach_lifecycle_observer(observe_lifecycle)
         await session.attach_model_usage_observer(observe_usage)
+        await session.attach_loop_limits_observer(observe_limits)
         result = await asyncio.wait_for(session.run(), timeout=1)
         assert result == "ses_provider_test"
         fake.assert_complete()
-        return lines, provider, session, usage, lifecycle
+        return lines, provider, session, usage, limits_observed, lifecycle
 
-    lines, provider, session, usage, lifecycle = asyncio.run(scenario())
+    lines, provider, session, usage, limits_observed, lifecycle = asyncio.run(scenario())
     events = _wire_events(lines)
 
     assert provider.start_calls == 1
@@ -326,10 +419,96 @@ def test_one_turn_builds_one_exact_request_and_completes_with_usage() -> None:
             output_tokens=7,
         )
     ]
+    assert limits_observed == [
+        LoopLimitsObserved(
+            session_id="ses_provider_test",
+            max_model_turns=1,
+            provider_work_timeout_seconds=120,
+            max_assistant_output_bytes=4096,
+            max_observed_tool_calls=1,
+            model_turns_started=1,
+            assistant_output_bytes=len(b"A provider-neutral answer."),
+            tool_calls_observed=0,
+            exhausted=None,
+        )
+    ]
     assert session.lifecycle_state.status == "completed"
     assert session.lifecycle_state.assistant_text == "A provider-neutral answer."
     assert session.lifecycle_state.last_sequence == 5
     assert lifecycle[-1][1] == session.lifecycle_state
+
+
+def test_seeded_model_turn_limit_denies_provider_start_and_records_exhaustion() -> None:
+    async def scenario() -> tuple[
+        list[bytes],
+        _SingleOperationProvider,
+        _ControlledOperation,
+        list[LoopLimitsObserved],
+    ]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        limits = LoopLimits(max_model_turns=1)
+        tracker = LoopLimitTracker(limits, model_turns_started=1)
+        operation = _ControlledOperation(())
+        provider = _SingleOperationProvider(operation)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            provider,
+            _session_start(),
+            "ses_turn_limit",
+            limits=limits,
+            limit_tracker=tracker,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        await asyncio.wait_for(session.run(), timeout=1)
+        return lines, provider, operation, limits_observed
+
+    lines, provider, operation, limits_observed = asyncio.run(scenario())
+
+    assert provider.start_calls == 0
+    assert operation.cancel_calls == 0
+    assert operation.wait_closed_calls == 0
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "model_turn_limit_exceeded",
+        "message": "The model-turn limit was reached.",
+    }
+    assert limits_observed[0].model_turns_started == 1
+    assert limits_observed[0].exhausted == "model_turns"
+
+
+def test_session_rejects_an_already_exhausted_injected_tracker_before_run() -> None:
+    limits = LoopLimits(max_model_turns=2, max_assistant_output_bytes=1)
+    tracker = LoopLimitTracker(
+        limits,
+        model_turns_started=1,
+        exhausted="assistant_output",
+    )
+    operation = _ControlledOperation(())
+    provider = _SingleOperationProvider(operation)
+
+    async def sink(_line: bytes) -> None:
+        return
+
+    with pytest.raises(ValueError, match="tracker must not be pre-exhausted"):
+        ProviderSession(
+            OrderedEventWriter(sink),
+            provider,
+            _session_start(),
+            "ses_pre_exhausted_tracker",
+            limits=limits,
+            limit_tracker=tracker,
+        )
+
+    assert provider.start_calls == 0
+    assert operation.cancel_calls == 0
 
 
 def test_candidate_completion_stays_buffered_until_provider_completion() -> None:
@@ -573,8 +752,9 @@ def test_stream_ending_without_a_provider_terminal_is_invalid_and_cancelled() ->
 
 
 def test_exact_utf8_output_ceiling_completes() -> None:
-    async def scenario() -> tuple[list[bytes], ProviderSession]:
+    async def scenario() -> tuple[list[bytes], ProviderSession, list[LoopLimitsObserved]]:
         lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
         exact = "🙂" * (MAX_PROVIDER_TURN_OUTPUT_BYTES // 4)
         fake = FakeProvider(
             (
@@ -592,26 +772,34 @@ def test_exact_utf8_output_ceiling_completes() -> None:
         async def sink(line: bytes) -> None:
             lines.append(line)
 
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
         session = ProviderSession(
             OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
             fake,
             _session_start(),
             "ses_exact_limit",
+            limits=LoopLimits(max_assistant_output_bytes=MAX_PROVIDER_TURN_OUTPUT_BYTES),
         )
+        await session.attach_loop_limits_observer(observe_limits)
         await asyncio.wait_for(session.run(), timeout=1)
         fake.assert_complete()
-        return lines, session
+        return lines, session, limits_observed
 
-    lines, session = asyncio.run(scenario())
+    lines, session, limits_observed = asyncio.run(scenario())
 
     assert len(session.lifecycle_state.assistant_text.encode("utf-8")) == 8192
     assert session.lifecycle_state.status == "completed"
     assert _event_types(lines)[-2:] == ["assistant.completed", "session.completed"]
+    assert limits_observed[0].assistant_output_bytes == MAX_PROVIDER_TURN_OUTPUT_BYTES
+    assert limits_observed[0].exhausted is None
 
 
 def test_delta_crossing_utf8_output_ceiling_is_rejected_in_full() -> None:
-    async def scenario() -> tuple[list[bytes], ProviderSession]:
+    async def scenario() -> tuple[list[bytes], ProviderSession, list[LoopLimitsObserved]]:
         lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
         accepted = "🙂" * (MAX_PROVIDER_TURN_OUTPUT_BYTES // 4)
         fake = FakeProvider(
             (
@@ -630,17 +818,22 @@ def test_delta_crossing_utf8_output_ceiling_is_rejected_in_full() -> None:
         async def sink(line: bytes) -> None:
             lines.append(line)
 
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
         session = ProviderSession(
             OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
             fake,
             _session_start(),
             "ses_over_limit",
+            limits=LoopLimits(max_assistant_output_bytes=MAX_PROVIDER_TURN_OUTPUT_BYTES),
         )
+        await session.attach_loop_limits_observer(observe_limits)
         await asyncio.wait_for(session.run(), timeout=1)
         fake.assert_complete()
-        return lines, session
+        return lines, session, limits_observed
 
-    lines, session = asyncio.run(scenario())
+    lines, session, limits_observed = asyncio.run(scenario())
     serialized = b"".join(lines).decode()
 
     assert _event_types(lines) == [
@@ -652,6 +845,12 @@ def test_delta_crossing_utf8_output_ceiling_is_rejected_in_full() -> None:
         "🙂" * (MAX_PROVIDER_TURN_OUTPUT_BYTES // 4)
     ).encode("utf-8")
     assert "x-secret-overflow" not in serialized
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "assistant_output_limit_exceeded",
+        "message": "Assistant output exceeded its byte limit.",
+    }
+    assert limits_observed[0].assistant_output_bytes == MAX_PROVIDER_TURN_OUTPUT_BYTES
+    assert limits_observed[0].exhausted == "assistant_output"
 
 
 @pytest.mark.parametrize("after_delta", [False, True])
@@ -753,8 +952,9 @@ def test_failure_after_candidate_completion_never_emits_assistant_completion() -
 def test_tool_request_uses_fixed_failure_without_exposing_arguments(
     empty_text_candidate: bool,
 ) -> None:
-    async def scenario() -> tuple[list[bytes], ProviderSession]:
+    async def scenario() -> tuple[list[bytes], ProviderSession, list[LoopLimitsObserved]]:
         lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
         prefix = (FakeProviderEmit(ProviderTextCompleted("")),) if empty_text_candidate else ()
         fake = FakeProvider(
             (
@@ -779,17 +979,21 @@ def test_tool_request_uses_fixed_failure_without_exposing_arguments(
         async def sink(line: bytes) -> None:
             lines.append(line)
 
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
         session = ProviderSession(
             OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
             fake,
             _session_start(),
             "ses_tool",
         )
+        await session.attach_loop_limits_observer(observe_limits)
         await asyncio.wait_for(session.run(), timeout=1)
         fake.assert_complete()
-        return lines, session
+        return lines, session, limits_observed
 
-    lines, session = asyncio.run(scenario())
+    lines, session, limits_observed = asyncio.run(scenario())
     serialized = b"".join(lines).decode()
 
     assert _event_types(lines) == ["session.started", "session.failed"]
@@ -800,6 +1004,514 @@ def test_tool_request_uses_fixed_failure_without_exposing_arguments(
     assert "read_secret" not in serialized
     assert "sk-secret-must-not-leak" not in serialized
     assert session.lifecycle_state.status == "failed"
+    assert limits_observed[0].tool_calls_observed == 1
+    assert limits_observed[0].exhausted is None
+
+
+def test_seeded_tool_limit_counts_rejecting_observation_before_tool_handling() -> None:
+    async def scenario() -> tuple[list[bytes], list[LoopLimitsObserved]]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        limits = LoopLimits(max_model_turns=2, max_observed_tool_calls=1)
+        tracker = LoopLimitTracker(
+            limits,
+            model_turns_started=1,
+            tool_calls_observed=1,
+        )
+        fake = FakeProvider(
+            (
+                FakeProviderExchange(
+                    _request(),
+                    (
+                        FakeProviderEmit(
+                            ProviderToolCallRequested(
+                                call_id="call_over_limit",
+                                name="must_not_be_inspected",
+                                arguments_json='{"secret":"sk-never-copy"}',
+                            )
+                        ),
+                        FakeProviderWaitForCancellation("reject-tool-limit"),
+                        FakeProviderEmit(ProviderCompleted()),
+                    ),
+                ),
+            )
+        )
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            fake,
+            _session_start(),
+            "ses_tool_limit",
+            limits=limits,
+            limit_tracker=tracker,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        await asyncio.wait_for(session.run(), timeout=1)
+        fake.assert_complete()
+        return lines, limits_observed
+
+    lines, limits_observed = asyncio.run(scenario())
+    serialized = b"".join(lines).decode()
+
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "tool_call_limit_exceeded",
+        "message": "The provider tool-call limit was reached.",
+    }
+    assert "must_not_be_inspected" not in serialized
+    assert "sk-never-copy" not in serialized
+    assert limits_observed[0].model_turns_started == 2
+    assert limits_observed[0].tool_calls_observed == 2
+    assert limits_observed[0].exhausted == "tool_calls"
+
+
+def test_silent_provider_deadline_cancels_once_and_records_limit_evidence() -> None:
+    async def scenario() -> tuple[
+        list[bytes],
+        _ControlledOperation,
+        ProviderSession,
+        list[LoopLimitsObserved],
+    ]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        clock = _MutableMonotonicClock()
+        operation = _ControlledOperation((), block_iteration=True)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_silent_deadline",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation, session, limits_observed
+
+    lines, operation, session, limits_observed = asyncio.run(scenario())
+
+    assert operation.cancel_calls == 1
+    assert operation.wait_closed_calls == 0
+    assert operation.cancel_finished.is_set()
+    assert operation.iteration_finished.is_set()
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+    assert session.lifecycle_state.status == "failed"
+    assert limits_observed[0].model_turns_started == 1
+    assert limits_observed[0].assistant_output_bytes == 0
+    assert limits_observed[0].exhausted == "provider_work"
+
+
+def test_exact_provider_event_deadline_tie_discards_the_ready_event() -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation, list[LoopLimitsObserved]]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        clock = _MutableMonotonicClock()
+        operation = _ControlledOperation(
+            (ProviderTextDelta("must-not-be-admitted"),),
+            block_iteration=True,
+        )
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_deadline_tie",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        operation.release_iteration.set()
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation, limits_observed
+
+    lines, operation, limits_observed = asyncio.run(scenario())
+    serialized = b"".join(lines).decode()
+
+    assert operation.cancel_calls == 1
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+    assert "must-not-be-admitted" not in serialized
+    assert limits_observed[0].assistant_output_bytes == 0
+    assert limits_observed[0].exhausted == "provider_work"
+
+
+def test_deadline_starts_provider_cancellation_while_delta_publication_is_blocked() -> None:
+    async def scenario() -> tuple[
+        list[bytes],
+        _ControlledOperation,
+        ProviderSession,
+        list[LoopLimitsObserved],
+        bool,
+    ]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        clock = _MutableMonotonicClock()
+        delta_sink_started = asyncio.Event()
+        release_delta_sink = asyncio.Event()
+        delta_text = "committed before deadline terminal"
+        operation = _ControlledOperation((ProviderTextDelta(delta_text),))
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+            if b'"type":"assistant.delta"' in line:
+                delta_sink_started.set()
+                await release_delta_sink.wait()
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_blocked_delta_deadline",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(delta_sink_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        await asyncio.wait_for(operation.cancel_started.wait(), timeout=1)
+        cancellation_started_while_blocked = not release_delta_sink.is_set()
+        release_delta_sink.set()
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation, session, limits_observed, cancellation_started_while_blocked
+
+    lines, operation, session, limits_observed, cancellation_started_while_blocked = asyncio.run(
+        scenario()
+    )
+
+    assert cancellation_started_while_blocked is True
+    assert operation.cancel_calls == 1
+    assert _event_types(lines) == ["session.started", "assistant.delta", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+    assert session.lifecycle_state.assistant_text == "committed before deadline terminal"
+    assert limits_observed[0].assistant_output_bytes == len(b"committed before deadline terminal")
+    assert limits_observed[0].exhausted == "provider_work"
+
+
+def test_deadline_latched_before_admission_starts_no_provider_operation() -> None:
+    async def scenario() -> tuple[
+        list[bytes],
+        _SingleOperationProvider,
+        _ControlledOperation,
+        list[LoopLimitsObserved],
+    ]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        clock = _MutableMonotonicClock()
+        started_sink_blocked = asyncio.Event()
+        release_started_sink = asyncio.Event()
+        operation = _ControlledOperation(())
+        provider = _SingleOperationProvider(operation)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+            if b'"type":"session.started"' in line:
+                started_sink_blocked.set()
+                await release_started_sink.wait()
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            provider,
+            _session_start(),
+            "ses_deadline_before_admission",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(started_sink_blocked.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        watcher = getattr(session, "_deadline_watcher_task")
+        assert isinstance(watcher, asyncio.Task)
+        await asyncio.wait_for(asyncio.shield(watcher), timeout=1)
+        release_started_sink.set()
+        await asyncio.wait_for(running, timeout=1)
+        return lines, provider, operation, limits_observed
+
+    lines, provider, operation, limits_observed = asyncio.run(scenario())
+
+    assert provider.start_calls == 0
+    assert operation.cancel_calls == 0
+    assert operation.wait_closed_calls == 0
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+    assert limits_observed[0].model_turns_started == 0
+    assert limits_observed[0].exhausted == "provider_work"
+
+
+@pytest.mark.parametrize(
+    ("crossing_boundary", "expected_cancel_calls"),
+    [
+        ("start_returns", 1),
+        ("start_raises", 0),
+        ("events_raises", 1),
+    ],
+)
+def test_synchronous_provider_boundary_crossing_selects_deadline_and_cancels_installed_work(
+    crossing_boundary: str,
+    expected_cancel_calls: int,
+) -> None:
+    async def scenario() -> tuple[list[bytes], int, int, list[LoopLimitsObserved]]:
+        lines: list[bytes] = []
+        limits_observed: list[LoopLimitsObserved] = []
+        clock = _MutableMonotonicClock()
+
+        class CrossingOperation:
+            def __init__(self) -> None:
+                self.events_calls = 0
+                self.cancel_calls = 0
+
+            def events(self) -> AsyncIterator[ProviderStreamEvent]:
+                self.events_calls += 1
+                if crossing_boundary == "events_raises":
+                    clock.advance_to(10.0)
+                    raise RuntimeError("provider events crossed the deadline")
+
+                async def generate() -> AsyncIterator[ProviderStreamEvent]:
+                    if False:
+                        yield ProviderCompleted()
+
+                return generate()
+
+            async def cancel(self) -> str:
+                self.cancel_calls += 1
+                return "cancelled"
+
+            async def wait_closed(self) -> None:
+                return
+
+        operation = CrossingOperation()
+
+        class CrossingProvider:
+            def __init__(self) -> None:
+                self.start_calls = 0
+
+            def start(self, _request_value: ProviderRequest) -> ProviderOperation:
+                self.start_calls += 1
+                if crossing_boundary.startswith("start_"):
+                    clock.advance_to(10.0)
+                if crossing_boundary == "start_raises":
+                    raise RuntimeError("provider start crossed the deadline")
+                return operation
+
+        provider = CrossingProvider()
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        async def observe_limits(observation: LoopLimitsObserved) -> None:
+            limits_observed.append(observation)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            provider,
+            _session_start(),
+            "ses_synchronous_deadline",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        await session.attach_loop_limits_observer(observe_limits)
+        await asyncio.wait_for(session.run(), timeout=1)
+        return lines, provider.start_calls, operation.cancel_calls, limits_observed
+
+    lines, start_calls, cancel_calls, limits_observed = asyncio.run(scenario())
+
+    assert start_calls == 1
+    assert cancel_calls == expected_cancel_calls
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+    assert limits_observed[0].model_turns_started == 1
+    assert limits_observed[0].exhausted == "provider_work"
+
+
+def test_deadline_cleanup_exception_is_diagnostic_and_does_not_rewrite_limit() -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation]:
+        lines: list[bytes] = []
+        clock = _MutableMonotonicClock()
+        operation = _ControlledOperation(
+            (),
+            block_iteration=True,
+            cancel_error="sk-secret-deadline-cleanup-error",
+        )
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_deadline_cleanup_error",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation
+
+    lines, operation = asyncio.run(scenario())
+
+    assert operation.cancel_calls == 1
+    assert _event_types(lines) == ["session.started", "runtime.error", "session.failed"]
+    assert _wire_events(lines)[-2]["payload"] == {
+        "code": "provider_cleanup_failed",
+        "message": "Provider cleanup could not be confirmed.",
+        "recoverable": True,
+    }
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+    assert "sk-secret-deadline-cleanup-error" not in b"".join(lines).decode()
+
+
+def test_deadline_cleanup_grace_cancels_and_reaps_one_shared_cancel_call() -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation]:
+        lines: list[bytes] = []
+        clock = _MutableMonotonicClock()
+        operation = _ControlledOperation((), block_iteration=True, block_cancel=True)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_deadline_cleanup_grace",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        await asyncio.wait_for(operation.cancel_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(15.0), timeout=1)
+        clock.advance_to(15.0)
+        await asyncio.wait_for(operation.cancel_finished.wait(), timeout=1)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation
+
+    lines, operation = asyncio.run(scenario())
+
+    assert operation.cancel_calls == 1
+    assert operation.cancel_finished.is_set()
+    assert _event_types(lines) == ["session.started", "runtime.error", "session.failed"]
+    assert _wire_events(lines)[-2]["payload"] == {
+        "code": "provider_cleanup_failed",
+        "message": "Provider cleanup could not be confirmed.",
+        "recoverable": True,
+    }
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
+
+
+def test_latched_deadline_beats_user_cancellation_and_shares_cleanup() -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation, str]:
+        lines: list[bytes] = []
+        clock = _MutableMonotonicClock()
+        operation = _ControlledOperation(
+            (),
+            block_iteration=True,
+            block_cancel=True,
+        )
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_deadline_before_cancel",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        await asyncio.wait_for(operation.cancel_started.wait(), timeout=1)
+        cancellation = asyncio.create_task(session.request_cancellation("cmd_cancel"))
+        operation.release_cancel.set()
+        cancellation_result = await asyncio.wait_for(cancellation, timeout=1)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation, cancellation_result
+
+    lines, operation, cancellation_result = asyncio.run(scenario())
+
+    assert cancellation_result == "terminal"
+    assert operation.cancel_calls == 1
+    assert _event_types(lines) == ["session.started", "session.failed"]
+    assert _wire_events(lines)[-1]["payload"] == {
+        "code": "provider_work_deadline_exceeded",
+        "message": "Provider work exceeded its time limit.",
+    }
 
 
 def test_usage_is_optional_and_accepts_safe_integer_bounds() -> None:
@@ -908,7 +1620,7 @@ def test_cancellation_before_output_closes_provider_and_is_idempotent() -> None:
 
 
 def test_preselected_cancellation_does_not_hang_when_session_start_cannot_publish() -> None:
-    async def scenario() -> tuple[str, ProviderSession]:
+    async def scenario() -> tuple[str, ProviderSession, bool]:
         async def failing_sink(_line: bytes) -> None:
             raise OSError("injected protocol sink failure")
 
@@ -923,12 +1635,44 @@ def test_preselected_cancellation_does_not_hang_when_session_start_cannot_publis
         with pytest.raises(OSError, match="protocol sink failure"):
             await asyncio.wait_for(session.run(), timeout=1)
         fake.assert_complete()
-        return result, session
+        watcher = getattr(session, "_deadline_watcher_task")
+        watcher_settled = watcher is None or watcher.done()
+        return result, session, watcher_settled
 
-    result, session = asyncio.run(scenario())
+    result, session, watcher_settled = asyncio.run(scenario())
 
     assert result == "accepted"
+    assert watcher_settled is True
     assert session.lifecycle_state.status == "starting"
+
+
+def test_preselected_teardown_before_run_never_leaves_a_deadline_watcher() -> None:
+    async def scenario() -> tuple[list[bytes], str, _SingleOperationProvider, bool]:
+        lines: list[bytes] = []
+        operation = _ControlledOperation(())
+        provider = _SingleOperationProvider(operation)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            provider,
+            _session_start(),
+            "ses_preselected_teardown",
+        )
+        teardown_result = await session.request_teardown()
+        await asyncio.wait_for(session.run(), timeout=1)
+        watcher = getattr(session, "_deadline_watcher_task")
+        watcher_settled = watcher is None or watcher.done()
+        return lines, teardown_result, provider, watcher_settled
+
+    lines, teardown_result, provider, watcher_settled = asyncio.run(scenario())
+
+    assert teardown_result == "accepted"
+    assert provider.start_calls == 0
+    assert watcher_settled is True
+    assert _event_types(lines) == ["session.started"]
 
 
 def test_conforming_cancel_waits_for_scheduled_iterator_close_without_a_diagnostic() -> None:
@@ -1009,6 +1753,65 @@ def test_successful_cleanup_return_reaps_a_still_pending_read(
     assert result == "accepted"
     assert operation.cancel_calls == 1
     assert operation.iteration_finished.is_set()
+    assert _event_types(lines) == expected_types
+    assert session.lifecycle_state.status == expected_status
+
+
+@pytest.mark.parametrize(
+    ("request_kind", "expected_types", "expected_status"),
+    [
+        ("user_cancellation", ["session.started", "session.cancelled"], "cancelled"),
+        ("teardown", ["session.started"], "running"),
+    ],
+)
+def test_blocked_cleanup_retains_and_reaps_the_pending_read(
+    request_kind: str,
+    expected_types: list[str],
+    expected_status: str,
+) -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation, ProviderSession, str, bool]:
+        lines: list[bytes] = []
+        operation = _ControlledOperation((), block_iteration=True, block_cancel=True)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_blocked_cleanup_pending_read",
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        if request_kind == "user_cancellation":
+            request = asyncio.create_task(session.request_cancellation("cmd_cancel"))
+        else:
+            request = asyncio.create_task(session.request_teardown())
+        await asyncio.wait_for(operation.cancel_started.wait(), timeout=1)
+
+        watcher = getattr(session, "_deadline_watcher_task")
+
+        async def wait_for_watcher_stop() -> None:
+            while watcher is not None and not watcher.done():
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_watcher_stop(), timeout=1)
+        await asyncio.sleep(0)
+        pending_retained_while_cleanup_blocked = getattr(session, "_pending_event_task") is not None
+
+        operation.release_cancel.set()
+        result = await asyncio.wait_for(request, timeout=1)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation, session, result, pending_retained_while_cleanup_blocked
+
+    lines, operation, session, result, pending_retained = asyncio.run(scenario())
+
+    assert result == "accepted"
+    assert pending_retained is True
+    assert operation.cancel_calls == 1
+    assert operation.iteration_finished.is_set()
+    assert getattr(session, "_pending_event_task") is None
     assert _event_types(lines) == expected_types
     assert session.lifecycle_state.status == expected_status
 

@@ -25,30 +25,36 @@ The Python mock and TypeScript supervisor route their current event tapes throug
 the Ink conversation projection preserves completed, cancelled, and failed turns.
 Each accepted session now attempts an append-only transcript under the WSL XDG state directory and,
 after a successfully persisted terminal record, a human-readable summary. The writer emits transcript
-version 2; replay accepts internally consistent version-1 and version-2 tapes. Python redacts
-configured sensitive values and recognized credentials, bounds persisted text, writes owner-only
-artifacts, flushes every accepted record, and replays lifecycle state through the same reducer.
-Provider-backed version-2 tapes may also carry one bounded, transcript-only
-`model.usage_observed` record and restore it through a separate evidence projection. A storage
-failure becomes one recoverable TUI warning without changing the session outcome. Use
-`--no-transcript` to disable only these local files.
+version 3; replay accepts internally consistent version-1, version-2, and version-3 tapes. Python
+redacts configured sensitive values and recognized credentials, bounds persisted text, writes
+owner-only artifacts, flushes every accepted record, and replays lifecycle state through the same
+reducer. Provider-backed version-3 tapes may also carry bounded, transcript-only
+`model.usage_observed` and `loop.limits_observed` records, restored through a separate evidence
+projection. A mock-session version-3 tape may omit loop-limit evidence because the launched mock does
+not enter the provider-backed path. A storage failure becomes one recoverable TUI warning without
+changing the session outcome. Use `--no-transcript` to disable only these local files.
 The launched application does **not** yet read the workspace, integrate with OpenAI, or select a
 provider-backed session. It still composes `MockSession`, so the protocol-v1 TUI experience remains
 the deterministic three-delta mock. Beside that launched path, `ProviderSession` now implements one
 harness-owned provider-neutral turn, and `run_runtime` exposes an injected-provider seam used by
-network-free tests. The turn builds one exact request, enforces the locked text/completion grammar
-and an 8,192-byte assistant ceiling, admits optional bounded usage evidence, rejects tool requests,
-and serializes completion, failure, cancellation, teardown, and provider cleanup. CAH-009 documents the
+network-free tests. The turn builds one exact request, enforces the locked text/completion grammar,
+and applies four immutable hard limits: model-turn admission, provider-work time, cumulative accepted
+UTF-8 output, and observed provider tool calls. Each allocated provider session owns a fresh tracker,
+and the provider-work deadline excludes local event and transcript sink latency. Completion, failure,
+cancellation, deadline expiry, teardown, and one shared provider-cleanup task remain serialized around
+one terminal winner; every cleanup await has a fixed five-second local grace. CAH-009 documents the
 first end-to-end mocked execution in the
 [walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
 are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
 adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
 evidence. CAH-010 begins M1 with replayable in-memory lifecycle state, and CAH-011 adds durable local
 evidence without moving lifecycle authority into storage. CAH-020 adds the provider port and strict
-network-free fake, and CAH-021 completes the first injected provider-neutral turn. CAH-022 is the
-next unit and will add configurable hard limits before CAH-023 introduces and activates the OpenAI
-Responses adapter. Workspace reads, tool execution, policy, and broader multi-turn agent behavior
-also remain unimplemented.
+network-free fake, CAH-021 completes the first injected provider-neutral turn, and
+[CAH-022](user-stories/cah-022-enforce-loop-limits.md) completes its hard limits with a
+[written lesson](docs/lessons/cah-022-loop-limits.md) and
+[visual companion](docs/lessons/assets/cah-022-loop-limits.pptx). CAH-023 is the next unit and will
+introduce and activate the OpenAI Responses adapter. Workspace reads, tool execution, policy, and
+broader multi-turn agent behavior also remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -303,12 +309,12 @@ user-stories/             Roadmap, implementation stories, and planning notes
 ```
 
 The Python runtime, supervised TUI, protocol messages and fixtures, deterministic mocked streaming,
-cooperative session cancellation, conversation projection, transcript-v2 persistence with v1/v2
-replay, provider-neutral request and stream contracts, strict programmable fake, and one injected
-provider-backed session turn exist today. The launched TUI still selects the mock. Configurable hard
-limits, the OpenAI adapter and runtime activation, broader evaluation, workspace reads, tools,
-policy, and transcript browsing/export/retention remain planned and are introduced only by the story
-that needs them.
+cooperative session cancellation, conversation projection, transcript-v3 persistence with v1/v2/v3
+replay, provider-neutral request and stream contracts, strict programmable fake, and one hard-bounded
+injected provider-backed session turn exist today. The launched TUI still selects the mock. The
+OpenAI adapter and runtime activation, broader evaluation, workspace reads, tools, policy, and
+transcript browsing/export/retention remain planned and are introduced only by the story that needs
+them.
 
 ## Documentation map
 
@@ -324,6 +330,8 @@ that needs them.
 - [Unit lessons](docs/lessons/README.md)
 - [CAH-007 repository-check lesson](docs/lessons/cah-007-repository-checks.md)
 - [CAH-007 visual lesson](docs/lessons/assets/cah-007-repository-checks.pptx)
+- [CAH-022 loop-limit lesson](docs/lessons/cah-022-loop-limits.md)
+- [CAH-022 visual lesson](docs/lessons/assets/cah-022-loop-limits.pptx)
 - [User-story backlog](user-stories/README.md)
 
 Documentation is part of the product. Public Python APIs use Google-style docstrings, meaningful
