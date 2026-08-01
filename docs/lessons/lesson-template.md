@@ -16,6 +16,11 @@ Before marking the lesson verified, render the linked presentation slide by slid
 render, and run the presentation overflow test. Visual flair should make the concept memorable
 without weakening technical accuracy, status honesty, legibility, or caveats.
 
+Keep the lesson tight. Prioritize system design, agent-loop design, and harness ownership over a
+long inventory of implementation details. The written lesson and visual companion each include a
+compact architecture diagram that shows where this unit sits in the TUI, Python harness, provider,
+tool, and evidence boundaries that are relevant to it.
+
 ## Quick summary
 
 In two or three sentences, explain what this unit builds, the main concept it teaches, and the
@@ -49,7 +54,9 @@ generic textbook definition.
 ## Architecture and design
 
 Describe component ownership, data flow, boundaries, invariants, and deliberately deferred work.
-Use a compact diagram or table only when it makes the relationship clearer.
+Include one compact system architecture diagram that locates the current unit and highlights the
+decision or state it owns. Add another diagram only when it materially clarifies a distinct race or
+flow.
 
 ## Practical walkthrough
 

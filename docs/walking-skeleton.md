@@ -8,8 +8,9 @@
 > This guide follows the deterministic M0 mock that exists today. It does not describe a model,
 > repository context, tools, approvals, or edits. CAH-011 now records the same lifecycle, but the M0
 > trace below intentionally stays on the protocol path rather than following that persistence side
-> channel record by record. CAH-020 adds the provider port and fake, and CAH-021 adds a separately
-> tested injected-provider session. Neither changes the launched `MockSession` trace below.
+> channel record by record. CAH-020 adds the provider port and fake, CAH-021 adds a separately tested
+> injected-provider session, and CAH-022 hard-bounds that injected path. None changes the launched
+> `MockSession` trace below.
 
 ## What this slice proves
 
@@ -234,8 +235,8 @@ The commands use no API key, model, network call, or target-workspace write.
 ## Intentional M0 omissions
 
 The response text is fixed. `MockSession` is a runtime fixture, not a provider adapter or an agent
-loop. The CAH-020 provider package and CAH-021 `ProviderSession` exist beside this launched path but
-do not replace its response source. This walking-skeleton path does not yet:
+loop. The CAH-020 provider package, CAH-021 `ProviderSession`, and CAH-022 limits exist beside this
+launched path but do not replace its response source. This walking-skeleton path does not yet:
 
 - call OpenAI or any other provider;
 - discover, search, or read workspace content;
@@ -247,10 +248,11 @@ These omissions keep the first boundary deterministic. They must not be filled i
 prose before their owning stories implement and test them.
 
 The transcript writer observes this unchanged mock tape after reducer acceptance and writes a
-redacted local version-2 transcript plus terminal summary unless disabled. Replay accepts internally
-consistent version-1 and version-2 tapes, but the walking skeleton still does not browse, export,
-resume, or derive live authority from storage. Optional provider usage evidence exists only on the
-separately injected path and never changes this protocol-v1 trace.
+redacted local version-3 transcript plus terminal summary unless disabled. Replay accepts internally
+consistent version-1, version-2, and version-3 tapes, but the walking skeleton still does not browse,
+export, resume, or derive live authority from storage. A mock version-3 tape may omit
+`loop.limits_observed` because it never enters the provider-backed path. Optional provider usage and
+loop-limit evidence on the separately injected path never change this protocol-v1 trace.
 
 ## What comes next
 
@@ -267,8 +269,12 @@ history without becoming the lifecycle source of truth.
 provider-neutral interface and deterministic fake independently of this M0 runtime.
 [CAH-021](../user-stories/cah-021-complete-one-model-turn.md) now connects that boundary to one
 injected provider-neutral turn while preserving the existing lifecycle invariants and visible mock.
-[CAH-022](../user-stories/cah-022-enforce-loop-limits.md) is next and will add hard limits before
-[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md) activates a real provider.
+[CAH-022](../user-stories/cah-022-enforce-loop-limits.md) now adds four hard limits, deterministic
+deadline supervision, bounded cleanup, and transcript-v3 loop evidence around that injected turn; its
+[lesson](lessons/cah-022-loop-limits.md) and
+[visual companion](lessons/assets/cah-022-loop-limits.pptx) explain the shipped boundary.
+[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md) is next and will activate a real
+provider while `main()` and the TUI remain on `MockSession` today.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

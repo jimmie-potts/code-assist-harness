@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 
 import code_assist_harness.persistence.transcript as transcript_module
+from code_assist_harness.loop_limits import LoopLimitsObserved
 from code_assist_harness.model_evidence import (
     MAX_MODEL_USAGE_TOKENS,
     ModelUsageObserved,
@@ -124,6 +125,61 @@ async def _record_completed_turn_with_usage(
         await transcript.record_model_usage(observation),
         *[await transcript.record(update, state) for update, state in accepted[3:]],
     ]
+    return accepted[-1][1], failures
+
+
+def _loop_limits(**overrides: object) -> LoopLimitsObserved:
+    values: dict[str, object] = {
+        "session_id": SESSION_ID,
+        "max_model_turns": 1,
+        "provider_work_timeout_seconds": 120,
+        "max_assistant_output_bytes": 4096,
+        "max_observed_tool_calls": 1,
+        "model_turns_started": 1,
+        "assistant_output_bytes": len(b"Done"),
+        "tool_calls_observed": 0,
+        "exhausted": None,
+    }
+    values.update(overrides)
+    return LoopLimitsObserved(**values)  # type: ignore[arg-type]
+
+
+async def _record_completed_turn_with_limits(
+    transcript: SessionTranscript,
+    observation: LoopLimitsObserved,
+    *,
+    usage: ModelUsageObserved | None = None,
+) -> tuple[SessionState, list[object | None]]:
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Record loop-limit evidence"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.completed", 3, text="Done"),
+        _event("session.completed", 4),
+    ]
+    accepted = _accepted_updates(updates)
+    failures = [await transcript.record(update, state) for update, state in accepted[:3]]
+    if usage is not None:
+        failures.append(await transcript.record_model_usage(usage))
+    failures.extend(
+        [
+            await transcript.record(*accepted[3]),
+            await transcript.record_loop_limits(observation),
+            await transcript.record(*accepted[4]),
+        ]
+    )
+    return accepted[-1][1], failures
+
+
+async def _record_terminal_with_limits(
+    transcript: SessionTranscript,
+    observation: LoopLimitsObserved,
+    updates: list[SessionUpdate],
+) -> tuple[SessionState, list[object | None]]:
+    accepted = _accepted_updates(updates)
+    failures = [await transcript.record(update, state) for update, state in accepted[:-1]]
+    failures.append(await transcript.record_loop_limits(observation))
+    failures.append(await transcript.record(*accepted[-1]))
     return accepted[-1][1], failures
 
 
@@ -276,6 +332,7 @@ def test_completed_transcript_redacts_split_secrets_replays_and_summarizes(
     assert replay.complete
     assert replay.state.status == live_state.status
     assert replay.state.assistant_completed
+    assert replay.evidence.loop_limits is None
     assert FAKE_SECRET not in replay.state.task
     assert FAKE_SECRET not in replay.state.assistant_text
     assert b"FAKE_CAH_SECRET_VALUE_12345" not in transcript_bytes
@@ -284,7 +341,7 @@ def test_completed_transcript_redacts_split_secrets_replays_and_summarizes(
     assert FAKE_SECRET[14:].encode() not in transcript_bytes
     assert b"[REDACTED]" in transcript_bytes
     assert [record["record_order"] for record in records] == list(range(1, 7))
-    assert {record["transcript_version"] for record in records} == {2}
+    assert {record["transcript_version"] for record in records} == {3}
     assert [record["kind"] for record in records] == [
         "domain_fact",
         "session_event",
@@ -307,6 +364,7 @@ def test_completed_transcript_redacts_split_secrets_replays_and_summarizes(
     assert stored_completion == "".join(stored_deltas)
     assert "Outcome: completed" in transcript.summary_path.read_text(encoding="utf-8")
     assert "Model usage: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
+    assert "Loop limits: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
     assert "Changed files: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
     assert "Check results: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
 
@@ -378,7 +436,7 @@ def test_replay_rejects_boolean_transcript_versions(
     ("input_tokens", "output_tokens"),
     [(0, 0), (MAX_MODEL_USAGE_TOKENS, MAX_MODEL_USAGE_TOKENS)],
 )
-def test_model_usage_is_version_two_evidence_and_appears_in_the_summary(
+def test_model_usage_is_version_three_evidence_and_appears_in_the_summary(
     tmp_path: Path,
     input_tokens: int,
     output_tokens: int,
@@ -401,7 +459,7 @@ def test_model_usage_is_version_two_evidence_and_appears_in_the_summary(
     assert replay.complete
     assert replay.evidence.model_usage == observation
     assert usage_record == {
-        "transcript_version": 2,
+        "transcript_version": 3,
         "record_order": 4,
         "recorded_at": TIMESTAMP,
         "workspace_id": records[0]["workspace_id"],
@@ -413,6 +471,434 @@ def test_model_usage_is_version_two_evidence_and_appears_in_the_summary(
     assert f"Model input tokens: {input_tokens}" in summary
     assert f"Model output tokens: {output_tokens}" in summary
     assert "Model usage: unavailable" not in summary
+
+
+def test_replay_accepts_a_complete_version_two_tape_with_usage(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    usage = ModelUsageObserved(session_id=SESSION_ID, input_tokens=12, output_tokens=4)
+    asyncio.run(_record_completed_turn_with_usage(transcript, usage))
+    records = _read_json_records(transcript.transcript_path)
+    for record in records:
+        record["transcript_version"] = 2
+    _write_json_records(transcript.transcript_path, records)
+
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert replay.complete
+    assert replay.state.status == "completed"
+    assert replay.evidence.model_usage == usage
+    assert replay.evidence.loop_limits is None
+    assert {record.transcript_version for record in replay.records} == {2}
+
+
+def test_loop_limits_are_version_three_evidence_immediately_before_terminal(
+    tmp_path: Path,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    limits = _loop_limits()
+    usage = ModelUsageObserved(session_id=SESSION_ID, input_tokens=12, output_tokens=4)
+
+    live_state, failures = asyncio.run(
+        _record_completed_turn_with_limits(transcript, limits, usage=usage)
+    )
+    replay = replay_transcript(transcript.transcript_path)
+    records = _read_json_records(transcript.transcript_path)
+    summary = transcript.summary_path.read_text(encoding="utf-8")
+
+    assert failures == [None] * 7
+    assert live_state.status == "completed"
+    assert replay.complete
+    assert replay.evidence == transcript_module.TranscriptEvidence(
+        model_usage=usage,
+        loop_limits=limits,
+    )
+    assert [record["kind"] for record in records] == [
+        "domain_fact",
+        "session_event",
+        "session_event",
+        "model.usage_observed",
+        "session_event",
+        "loop.limits_observed",
+        "session_event",
+    ]
+    assert records[-2] == {
+        "transcript_version": 3,
+        "record_order": 6,
+        "recorded_at": TIMESTAMP,
+        "workspace_id": records[0]["workspace_id"],
+        "session_id": SESSION_ID,
+        "kind": "loop.limits_observed",
+        "max_model_turns": 1,
+        "provider_work_timeout_seconds": 120,
+        "max_assistant_output_bytes": 4096,
+        "max_observed_tool_calls": 1,
+        "model_turns_started": 1,
+        "assistant_output_bytes": 4,
+        "tool_calls_observed": 0,
+        "exhausted_limit": None,
+    }
+    assert "Maximum model turns: 1" in summary
+    assert "Provider work timeout seconds: 120" in summary
+    assert "Maximum assistant output bytes: 4096" in summary
+    assert "Maximum observed tool calls: 1" in summary
+    assert "Model turns started: 1" in summary
+    assert "Assistant output bytes: 4" in summary
+    assert "Tool calls observed: 0" in summary
+    assert "Exhausted loop limit: none" in summary
+
+
+def test_exhausted_loop_limit_is_preserved_in_failed_summary(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    limits = _loop_limits(
+        assistant_output_bytes=0,
+        tool_calls_observed=2,
+        exhausted="tool_calls",
+    )
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Reject an extra tool call"),
+        _event("session.started", 1),
+        _event(
+            "session.failed",
+            2,
+            failure_code="tool_call_limit_exceeded",
+            failure_message="The provider tool-call limit was reached.",
+        ),
+    ]
+    accepted = _accepted_updates(updates)
+
+    async def record_failure() -> list[object | None]:
+        return [
+            await transcript.record(*accepted[0]),
+            await transcript.record(*accepted[1]),
+            await transcript.record_loop_limits(limits),
+            await transcript.record(*accepted[2]),
+        ]
+
+    failures = asyncio.run(record_failure())
+    replay = replay_transcript(transcript.transcript_path)
+    records = _read_json_records(transcript.transcript_path)
+    summary = transcript.summary_path.read_text(encoding="utf-8")
+
+    assert failures == [None] * 4
+    assert replay.complete
+    assert replay.state.status == "failed"
+    assert replay.evidence.loop_limits == limits
+    assert records[-2]["exhausted_limit"] == "tool_calls"
+    assert "Tool calls observed: 2" in summary
+    assert "Exhausted loop limit: tool_calls" in summary
+
+
+@pytest.mark.parametrize(
+    ("terminal_kind", "expected_line"),
+    [("completed", 6), ("cancelled", 5), ("mismatched_failure", 4)],
+)
+def test_replay_rejects_loop_limit_evidence_that_contradicts_the_terminal(
+    tmp_path: Path,
+    terminal_kind: str,
+    expected_line: int,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    if terminal_kind == "completed":
+        observation = _loop_limits()
+        updates: list[SessionUpdate] = [
+            TaskSubmitted(command_id=START_COMMAND_ID, task="Reject contradictory completion"),
+            _event("session.started", 1),
+            _event("assistant.delta", 2, text="Done"),
+            _event("assistant.completed", 3, text="Done"),
+            _event("session.completed", 4),
+        ]
+    elif terminal_kind == "cancelled":
+        observation = _loop_limits(assistant_output_bytes=0)
+        updates = [
+            TaskSubmitted(command_id=START_COMMAND_ID, task="Reject contradictory cancellation"),
+            _event("session.started", 1),
+            CancelRequested(command_id=CANCEL_COMMAND_ID, session_id=SESSION_ID),
+            _event("session.cancelled", 2, correlation_id=CANCEL_COMMAND_ID),
+        ]
+    else:
+        observation = _loop_limits(
+            assistant_output_bytes=0,
+            tool_calls_observed=2,
+            exhausted="tool_calls",
+        )
+        updates = [
+            TaskSubmitted(command_id=START_COMMAND_ID, task="Reject mismatched limit failure"),
+            _event("session.started", 1),
+            _event(
+                "session.failed",
+                2,
+                failure_code="tool_call_limit_exceeded",
+                failure_message="The provider tool-call limit was reached.",
+            ),
+        ]
+    asyncio.run(_record_terminal_with_limits(transcript, observation, updates))
+    records = _read_json_records(transcript.transcript_path)
+    if terminal_kind in {"completed", "cancelled"}:
+        records[-2]["exhausted_limit"] = "provider_work"
+    else:
+        terminal_input = cast(dict[str, object], records[-1]["input"])
+        terminal_payload = cast(dict[str, object], terminal_input["payload"])
+        terminal_payload["code"] = "assistant_output_limit_exceeded"
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == "lifecycle_invariant_failed"
+    assert replay_error.value.line_number == expected_line
+
+
+@pytest.mark.parametrize(
+    ("terminal_kind", "exhausted"),
+    [
+        ("completed", "provider_work"),
+        ("cancelled", "provider_work"),
+        ("mismatched_failure", "provider_work"),
+        ("missing_exhaustion", None),
+    ],
+)
+def test_writer_rejects_loop_limit_evidence_that_contradicts_the_terminal(
+    tmp_path: Path,
+    terminal_kind: str,
+    exhausted: str | None,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    assistant_output_bytes = 0
+    if terminal_kind == "completed":
+        assistant_output_bytes = len(b"Done")
+        updates: list[SessionUpdate] = [
+            TaskSubmitted(command_id=START_COMMAND_ID, task="Reject contradictory completion"),
+            _event("session.started", 1),
+            _event("assistant.delta", 2, text="Done"),
+            _event("assistant.completed", 3, text="Done"),
+            _event("session.completed", 4),
+        ]
+    elif terminal_kind == "cancelled":
+        updates = [
+            TaskSubmitted(command_id=START_COMMAND_ID, task="Reject contradictory cancellation"),
+            _event("session.started", 1),
+            CancelRequested(command_id=CANCEL_COMMAND_ID, session_id=SESSION_ID),
+            _event("session.cancelled", 2, correlation_id=CANCEL_COMMAND_ID),
+        ]
+    else:
+        failure_code = (
+            "provider_work_deadline_exceeded"
+            if terminal_kind == "missing_exhaustion"
+            else "assistant_output_limit_exceeded"
+        )
+        updates = [
+            TaskSubmitted(command_id=START_COMMAND_ID, task="Reject contradictory failure"),
+            _event("session.started", 1),
+            _event(
+                "session.failed",
+                2,
+                failure_code=failure_code,
+                failure_message="A bounded limit failed.",
+            ),
+        ]
+    observation = _loop_limits(
+        assistant_output_bytes=assistant_output_bytes,
+        exhausted=exhausted,
+    )
+    accepted = _accepted_updates(updates)
+
+    async def record_contradiction() -> object | None:
+        for update, state in accepted[:-1]:
+            assert await transcript.record(update, state) is None
+        assert await transcript.record_loop_limits(observation) is None
+        return await transcript.record(*accepted[-1])
+
+    failure = asyncio.run(record_contradiction())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == "transcript_write_failed"
+    assert replay.evidence.loop_limits == observation
+    assert not replay.complete
+    assert not transcript.summary_path.exists()
+
+
+def test_writer_rejects_a_reserved_loop_failure_code_without_limit_evidence(
+    tmp_path: Path,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Require limit evidence"),
+        _event("session.started", 1),
+        _event(
+            "session.failed",
+            2,
+            failure_code="provider_work_deadline_exceeded",
+            failure_message="Provider work exceeded its time limit.",
+        ),
+    ]
+
+    _state, failures = asyncio.run(_record_updates(transcript, updates))
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failures[:2] == [None, None]
+    assert failures[-1] is not None
+    assert failures[-1].code == "transcript_write_failed"
+    assert replay.state.status == "running"
+    assert replay.evidence.loop_limits is None
+    assert not replay.complete
+
+
+@pytest.mark.parametrize("transcript_version", [1, 2, 3])
+def test_replay_requires_limit_evidence_for_reserved_codes_only_in_version_three(
+    tmp_path: Path,
+    transcript_version: int,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Replay a reserved failure"),
+        _event("session.started", 1),
+        _event("session.failed", 2),
+    ]
+    asyncio.run(_record_updates(transcript, updates))
+    records = _read_json_records(transcript.transcript_path)
+    for record in records:
+        record["transcript_version"] = transcript_version
+    terminal_input = cast(dict[str, object], records[-1]["input"])
+    terminal_payload = cast(dict[str, object], terminal_input["payload"])
+    terminal_payload["code"] = "provider_work_deadline_exceeded"
+    terminal_payload["message"] = "Provider work exceeded its time limit."
+    _write_json_records(transcript.transcript_path, records)
+
+    if transcript_version == 3:
+        with pytest.raises(TranscriptReplayError) as replay_error:
+            replay_transcript(transcript.transcript_path)
+        assert replay_error.value.code == "lifecycle_invariant_failed"
+        assert replay_error.value.line_number == 3
+    else:
+        replay = replay_transcript(transcript.transcript_path)
+        assert replay.complete
+        assert replay.state.status == "failed"
+        assert replay.evidence.loop_limits is None
+
+
+@pytest.mark.parametrize(
+    ("invalid_case", "expected_line"),
+    [
+        ("wrong_session", 5),
+        ("version_two", 5),
+        ("extra_field", 5),
+        ("model_limit_zero", 5),
+        ("model_limit_above_max", 5),
+        ("timeout_zero", 5),
+        ("timeout_above_max", 5),
+        ("output_limit_zero", 5),
+        ("output_limit_above_max", 5),
+        ("tool_limit_zero", 5),
+        ("tool_limit_above_max", 5),
+        ("boolean_config", 5),
+        ("model_counter_above_config", 5),
+        ("model_exhaustion_below_max", 5),
+        ("assistant_counter_above_config", 5),
+        ("tool_counter_without_exhaustion", 5),
+        ("tool_counter_two_beyond", 5),
+        ("tool_exhaustion_without_rejecting_call", 5),
+        ("other_exhaustion_with_rejecting_tool_call", 5),
+        ("provider_observation_without_model_turn", 5),
+        ("missing_exhaustion", 5),
+        ("unsupported_exhaustion", 5),
+    ],
+)
+def test_replay_rejects_invalid_loop_limit_records(
+    tmp_path: Path,
+    invalid_case: str,
+    expected_line: int,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    asyncio.run(_record_completed_turn_with_limits(transcript, _loop_limits()))
+    records = _read_json_records(transcript.transcript_path)
+    limit_record = records[4]
+    if invalid_case == "wrong_session":
+        limit_record["session_id"] = "ses_other"
+    elif invalid_case == "version_two":
+        limit_record["transcript_version"] = 2
+    elif invalid_case == "extra_field":
+        limit_record["provider_payload"] = "must-not-be-accepted"
+    elif invalid_case == "model_limit_zero":
+        limit_record["max_model_turns"] = 0
+    elif invalid_case == "model_limit_above_max":
+        limit_record["max_model_turns"] = 17
+    elif invalid_case == "timeout_zero":
+        limit_record["provider_work_timeout_seconds"] = 0
+    elif invalid_case == "timeout_above_max":
+        limit_record["provider_work_timeout_seconds"] = 3601
+    elif invalid_case == "output_limit_zero":
+        limit_record["max_assistant_output_bytes"] = 0
+    elif invalid_case == "output_limit_above_max":
+        limit_record["max_assistant_output_bytes"] = 8193
+    elif invalid_case == "tool_limit_zero":
+        limit_record["max_observed_tool_calls"] = 0
+    elif invalid_case == "tool_limit_above_max":
+        limit_record["max_observed_tool_calls"] = 65
+    elif invalid_case == "boolean_config":
+        limit_record["max_model_turns"] = True
+    elif invalid_case == "model_counter_above_config":
+        limit_record["model_turns_started"] = 2
+    elif invalid_case == "model_exhaustion_below_max":
+        limit_record["max_model_turns"] = 2
+        limit_record["exhausted_limit"] = "model_turns"
+    elif invalid_case == "assistant_counter_above_config":
+        limit_record["max_assistant_output_bytes"] = 3
+    elif invalid_case == "tool_counter_without_exhaustion":
+        limit_record["tool_calls_observed"] = 2
+    elif invalid_case == "tool_counter_two_beyond":
+        limit_record["tool_calls_observed"] = 3
+        limit_record["exhausted_limit"] = "tool_calls"
+    elif invalid_case == "tool_exhaustion_without_rejecting_call":
+        limit_record["tool_calls_observed"] = 1
+        limit_record["exhausted_limit"] = "tool_calls"
+    elif invalid_case == "other_exhaustion_with_rejecting_tool_call":
+        limit_record["tool_calls_observed"] = 2
+        limit_record["exhausted_limit"] = "provider_work"
+    elif invalid_case == "provider_observation_without_model_turn":
+        limit_record["model_turns_started"] = 0
+    elif invalid_case == "missing_exhaustion":
+        del limit_record["exhausted_limit"]
+    else:
+        limit_record["exhausted_limit"] = "tokens"
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == (
+        "session_mismatch" if invalid_case == "wrong_session" else "invalid_record"
+    )
+    assert replay_error.value.line_number == expected_line
+
+
+@pytest.mark.parametrize(
+    ("invalid_order", "expected_line"),
+    [("duplicate", 6), ("before_nonterminal", 5), ("after_terminal", 6)],
+)
+def test_replay_requires_a_loop_limit_record_to_be_immediately_before_terminal(
+    tmp_path: Path,
+    invalid_order: str,
+    expected_line: int,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    asyncio.run(_record_completed_turn_with_limits(transcript, _loop_limits()))
+    records = _read_json_records(transcript.transcript_path)
+    if invalid_order == "duplicate":
+        records.insert(5, dict(records[4]))
+    elif invalid_order == "before_nonterminal":
+        records.insert(3, records.pop(4))
+    else:
+        records.append(records.pop(4))
+    for record_order, record in enumerate(records, start=1):
+        record["record_order"] = record_order
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == "lifecycle_invariant_failed"
+    assert replay_error.value.line_number == expected_line
 
 
 @pytest.mark.parametrize(
@@ -593,6 +1079,105 @@ def test_writer_rejects_duplicate_model_usage_and_preserves_the_first_observatio
     assert replay.evidence.model_usage == observation
     assert [record.kind for record in replay.records].count("model.usage_observed") == 1
     assert not transcript.summary_path.exists()
+
+
+@pytest.mark.parametrize("invalid_case", ["before_start", "wrong_session"])
+def test_writer_rejects_loop_limits_without_its_running_session(
+    tmp_path: Path,
+    invalid_case: str,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Bind limits to one session"),
+        _event("session.started", 1),
+    ]
+    accepted = _accepted_updates(updates)
+    accepted_count = 1 if invalid_case == "before_start" else 2
+    observation = _loop_limits(
+        session_id="ses_other" if invalid_case == "wrong_session" else SESSION_ID,
+        assistant_output_bytes=0,
+    )
+
+    async def record_invalid_limits() -> object | None:
+        for update, state in accepted[:accepted_count]:
+            assert await transcript.record(update, state) is None
+        return await transcript.record_loop_limits(observation)
+
+    failure = asyncio.run(record_invalid_limits())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == "transcript_write_failed"
+    assert replay.evidence.loop_limits is None
+    assert len(replay.records) == accepted_count
+    assert not transcript.summary_path.exists()
+
+
+def test_writer_rejects_duplicate_loop_limits_and_preserves_the_first_snapshot(
+    tmp_path: Path,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Record loop limits once"),
+        _event("session.started", 1),
+    ]
+    accepted = _accepted_updates(updates)
+    observation = _loop_limits(assistant_output_bytes=0)
+
+    async def record_duplicate() -> tuple[object | None, object | None]:
+        for update, state in accepted:
+            assert await transcript.record(update, state) is None
+        first = await transcript.record_loop_limits(observation)
+        duplicate = await transcript.record_loop_limits(observation)
+        return first, duplicate
+
+    first_failure, duplicate_failure = asyncio.run(record_duplicate())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert first_failure is None
+    assert duplicate_failure is not None
+    assert duplicate_failure.code == "transcript_write_failed"
+    assert replay.evidence.loop_limits == observation
+    assert [record.kind for record in replay.records].count("loop.limits_observed") == 1
+    assert not replay.complete
+    assert not transcript.summary_path.exists()
+
+
+def test_writer_rejects_a_nonterminal_record_after_loop_limits(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Keep limits next to the terminal"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.completed", 3, text="Done"),
+    ]
+    accepted = _accepted_updates(updates)
+    observation = _loop_limits()
+
+    async def record_nonterminal_after_limits() -> object | None:
+        for update, state in accepted[:3]:
+            assert await transcript.record(update, state) is None
+        assert await transcript.record_loop_limits(observation) is None
+        return await transcript.record(*accepted[3])
+
+    failure = asyncio.run(record_nonterminal_after_limits())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == "transcript_write_failed"
+    assert replay.evidence.loop_limits == observation
+    assert replay.records[-1].kind == "loop.limits_observed"
+    assert not replay.complete
+    assert not transcript.summary_path.exists()
+
+
+def test_writer_rejects_unvalidated_loop_limit_values(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+
+    with pytest.raises(TypeError, match="validated observation"):
+        asyncio.run(transcript.record_loop_limits(cast(LoopLimitsObserved, object())))
+
+    asyncio.run(transcript.close())
 
 
 def test_unicode_content_is_bounded_before_json_and_remains_replayable(tmp_path: Path) -> None:
@@ -1025,6 +1610,132 @@ def test_model_usage_append_failure_rolls_back_to_the_lifecycle_prefix(
     assert replay.state.status == "running"
     assert replay.state.assistant_text == "Done"
     assert replay.evidence.model_usage is None
+    assert transcript.transcript_path.read_bytes().endswith(b"\n")
+    assert not transcript.summary_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("failing_operation", "expected_code"),
+    [("write", "transcript_write_failed"), ("flush", "transcript_flush_failed")],
+)
+def test_terminal_append_failure_preserves_a_replayable_loop_limits_prefix(
+    tmp_path: Path,
+    failing_operation: str,
+    expected_code: str,
+) -> None:
+    write_count = 0
+    flush_count = 0
+
+    def write(descriptor: int, contents: bytes) -> int:
+        nonlocal write_count
+        write_count += 1
+        if failing_operation == "write" and write_count == 6:
+            return os.write(descriptor, contents[: max(1, len(contents) // 2)])
+        if failing_operation == "write" and write_count == 7:
+            raise OSError("injected terminal write failure")
+        return os.write(descriptor, contents)
+
+    def flush(descriptor: int) -> None:
+        nonlocal flush_count
+        flush_count += 1
+        if failing_operation == "flush" and flush_count == 6:
+            raise OSError("injected terminal flush failure")
+        os.fsync(descriptor)
+
+    transcript = _create_transcript(
+        tmp_path,
+        operations=TranscriptFileOperations(write=write, flush=flush),
+    )
+    limits = _loop_limits()
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Preserve limit evidence"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.completed", 3, text="Done"),
+        _event("session.completed", 4),
+    ]
+    accepted = _accepted_updates(updates)
+
+    async def record_terminal_failure() -> object | None:
+        for update, state in accepted[:4]:
+            assert await transcript.record(update, state) is None
+        assert await transcript.record_loop_limits(limits) is None
+        return await transcript.record(*accepted[4])
+
+    failure = asyncio.run(record_terminal_failure())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == expected_code
+    assert [record.kind for record in replay.records] == [
+        "domain_fact",
+        "session_event",
+        "session_event",
+        "session_event",
+        "loop.limits_observed",
+    ]
+    assert replay.state.status == "running"
+    assert replay.state.assistant_completed
+    assert replay.evidence.loop_limits == limits
+    assert not replay.complete
+    assert transcript.transcript_path.read_bytes().endswith(b"\n")
+    assert not transcript.summary_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("failing_operation", "expected_code"),
+    [("write", "transcript_write_failed"), ("flush", "transcript_flush_failed")],
+)
+def test_loop_limits_append_failure_rolls_back_to_the_lifecycle_prefix(
+    tmp_path: Path,
+    failing_operation: str,
+    expected_code: str,
+) -> None:
+    write_count = 0
+    flush_count = 0
+
+    def write(descriptor: int, contents: bytes) -> int:
+        nonlocal write_count
+        write_count += 1
+        if failing_operation == "write" and write_count == 5:
+            return os.write(descriptor, contents[: max(1, len(contents) // 2)])
+        if failing_operation == "write" and write_count == 6:
+            raise OSError("injected loop-limit write failure")
+        return os.write(descriptor, contents)
+
+    def flush(descriptor: int) -> None:
+        nonlocal flush_count
+        flush_count += 1
+        if failing_operation == "flush" and flush_count == 5:
+            raise OSError("injected loop-limit flush failure")
+        os.fsync(descriptor)
+
+    transcript = _create_transcript(
+        tmp_path,
+        operations=TranscriptFileOperations(write=write, flush=flush),
+    )
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Roll back limit evidence"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.completed", 3, text="Done"),
+    ]
+    accepted = _accepted_updates(updates)
+
+    async def record_limits_failure() -> object | None:
+        for update, state in accepted:
+            assert await transcript.record(update, state) is None
+        return await transcript.record_loop_limits(_loop_limits())
+
+    failure = asyncio.run(record_limits_failure())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == expected_code
+    assert len(replay.records) == 4
+    assert replay.state.status == "running"
+    assert replay.state.assistant_completed
+    assert replay.evidence.loop_limits is None
     assert transcript.transcript_path.read_bytes().endswith(b"\n")
     assert not transcript.summary_path.exists()
 

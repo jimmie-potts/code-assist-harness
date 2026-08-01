@@ -5,9 +5,9 @@
 > normalized teaching tapes to that evidence. CAH-007 runs all current deterministic layers through
 > one offline repository gate and Linux workflow. CAH-010 adds equivalent pure lifecycle reducers
 > and shared transition/replay fixtures. CAH-020 adds the provider-neutral port and programmable
-> fake. CAH-021 uses them to prove one injected provider-backed session turn, including strict stream
-> grammar, usage evidence, races, and cleanup. Filesystem-backed `evals/` scenarios are not
-> implemented yet, and the launched TUI remains on the deterministic mock.
+> fake. CAH-021 proves one injected provider-backed turn, and CAH-022 proves four hard limits,
+> deadline races, bounded cleanup, and version-3 evidence around it. Filesystem-backed `evals/`
+> scenarios are not implemented yet, and the launched TUI remains on the deterministic mock.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -47,7 +47,7 @@ Python script model.
 | Provider exception | The injected turn translates a normalized provider failure into one structured session failure; unexpected start, iteration, or grammar failure becomes `provider_invalid_response`. |
 | Invalid protocol line | The runtime survives when possible and reports a safe protocol error. |
 | Unknown tool | Dispatch is rejected and the model receives a structured result. |
-| Hard-limit exhaustion | CAH-022 stops before a disallowed operation or observation is accepted. |
+| Hard-limit exhaustion | CAH-022 unit and runtime integration tests stop before a disallowed operation or observation is accepted; a reusable filesystem scenario remains planned. |
 | Rejected approval | No side effect occurs and the loop receives the rejection. |
 | Workspace escape | The tool is denied before filesystem access. |
 | Stale edit | The file remains unchanged and a conflict is reported. |
@@ -95,8 +95,22 @@ normalized and invalid failures, tool rejection, cancellation before and between
 wire and transcript observers, terminal races, teardown, and cleanup-contract violations. Every
 strict-fake path calls `assert_complete()`. `tests/test_runtime.py` injects the fake through
 `run_runtime`, proves transcript-enabled and disabled modes have identical wire outcomes, restores
-version-2 usage evidence, and verifies that shutdown, EOF, and outer-task cancellation join provider
+bounded usage evidence, and verifies that shutdown, EOF, and outer-task cancellation join provider
 cleanup without fabricating a terminal. These tests use no SDK, credentials, model, or network.
+
+CAH-022 adds deterministic safety-budget evidence without adding the filesystem scenario runner.
+`tests/test_loop_limits.py` covers the four validated fields, defaults, ranges, and seeded tracker
+boundaries. `tests/test_provider_session.py` uses injected clocks, deadline waiters, fake-provider
+gates, and blocked sinks without wall-clock sleeps. It proves admission before provider start,
+cumulative UTF-8 charging, tool observations before unavailable-tool handling, an exact
+event/deadline tie, cancellation beginning while an admitted publication is blocked, one terminal
+winner, and one shared cleanup task supervised by a fixed five-second grace. The ordered,
+non-interleaved publication transaction finishes; an ordinary later failure does not roll back an
+earlier accepted view, and the test does not claim to bound local sink latency.
+`tests/test_runtime.py` proves the deadline is captured before transcript setup,
+fresh counters across sequential provider sessions, transcript-mode wire parity, and version-3 loop
+evidence. `tests/test_transcript.py` retains version-1 and version-2 replay and validates version-3
+cardinality, order, ranges, prefixes, and mock omission.
 
 ## Assertion layers
 
@@ -149,9 +163,9 @@ fixtures test unsupported versions, bad discriminators, missing fields, and malf
 The walking-skeleton tests start the real Node parent and Python child with mocked runtime behavior.
 They assert ordered streamed completion, authoritative cancellation, another session after a
 terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. Separate Python
-integration tests now exercise the CAH-020 fake through CAH-021's injected runtime seam while leaving
-the launched mock honest. CAH-022 will add deterministic budget tests, and CAH-023 will activate the
-bounded path at the composition root. A later unit may add a fake or restricted executor.
+integration tests now exercise the CAH-020 fake through CAH-021's injected runtime seam and CAH-022's
+four hard limits while leaving the launched mock honest. CAH-023 is next and will activate the bounded
+path at the composition root. A later unit may add a fake or restricted executor.
 
 ### Live-provider smoke evaluations
 
@@ -169,12 +183,14 @@ environment values are never diagnostic artifacts.
 
 Because visible state is input-derived, replaying trusted domain facts and a stored validated event
 list reproduces the same terminal state. CAH-010 implements this fold in both languages and stops at
-the first structured invariant failure. The transcript writer now emits version 2, while replay
-accepts internally consistent versions 1 and 2, validates framing, schema, contiguous record order,
-workspace/session identity, embedded protocol events, reducer invariants, and version-2 usage
-placement. It returns lifecycle state plus a separate optional usage-evidence projection. Replay does
-not re-execute tools or provider calls, recover redacted or bounded values, resume work, treat usage
-as billing proof or limit authority, or trust later lines after a failure.
+the first structured invariant failure. The transcript writer now emits version 3, while replay
+accepts internally consistent versions 1, 2, and 3 and validates framing, schema, contiguous record
+order, workspace/session identity, embedded protocol events, reducer invariants, usage placement, and
+version-3 loop-limit cardinality, order, ranges, and counters. It returns lifecycle state plus a
+separate evidence projection containing optional usage and loop limits. A version-3 mock tape may omit
+limit evidence because it never enters the provider-backed loop. Replay does not re-execute tools or
+provider calls, recover redacted or bounded values, resume work, treat usage as billing proof or limit
+authority, or trust later lines after a failure.
 
 ## Definition of done for behavioral work
 

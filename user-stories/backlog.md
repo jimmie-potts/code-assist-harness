@@ -38,10 +38,11 @@ bounded trusted lifecycle inputs and honest summaries under private XDG state, s
 side-effect-free replay and local opt-out, and reports persistence loss without becoming a second
 source of truth. CAH-020 now supplies provider-neutral request and stream types plus a strict,
 network-free programmable fake. CAH-021 now connects that port to one provider-neutral, fake-backed
-turn through an injected runtime seam, with strict observation grammar, bounded usage evidence, and
-serialized terminal cleanup. The launched runtime still selects `MockSession`. CAH-022 is the next
-dependency-ready unit and will put configurable hard limits around the turn before CAH-023 adds and
-activates the OpenAI Responses adapter.
+turn through an injected runtime seam, with strict observation grammar and bounded usage evidence.
+CAH-022 now puts four validated hard limits, fresh per-session accounting, deterministic deadline and
+cleanup supervision, and transcript-v3 loop evidence around that turn. The launched runtime still
+selects `MockSession`; CAH-023 is the next dependency-ready unit and will add and activate the OpenAI
+Responses adapter.
 
 ## Epic backlog
 
@@ -72,9 +73,10 @@ replayable local record.
 - Write trusted domain facts and validated events to append-only, redacted transcripts.
 - Reconstruct visible state by replaying ordered lifecycle inputs from `idle`.
 
-CAH-010 and CAH-011 are complete. Their reducer and durable-evidence outcomes unlocked CAH-020 and
-CAH-021. The transcript writer now emits version 2, replay accepts versions 1 and 2, and optional
-provider usage remains a separate evidence projection rather than lifecycle state.
+CAH-010 and CAH-011 are complete. Their reducer and durable-evidence outcomes unlocked CAH-020 through
+CAH-022. The transcript writer now emits version 3, replay accepts versions 1, 2, and 3, and optional
+provider usage and provider-backed loop-limit observations remain a separate evidence projection
+rather than lifecycle state. A version-3 mock tape may omit loop evidence.
 
 ### E2 - Provider interface and explicit agent loop
 
@@ -87,9 +89,9 @@ provider usage remains a separate evidence projection rather than lifecycle stat
 - Add the OpenAI Responses adapter only after the provider-neutral turn and hard limits pass.
 - Keep OpenAI SDK types and future LangChain adapters outside core domain types.
 
-Implementation-ready stories in this epic: CAH-020, CAH-021, CAH-022, and CAH-023. CAH-020 and
-CAH-021 are complete. CAH-022 is next, and CAH-023 follows hard-limit enforcement. M1 is complete
-only after the explicitly configured Responses adapter is verified.
+Implementation-ready stories in this epic: CAH-020, CAH-021, CAH-022, and CAH-023. CAH-020 through
+CAH-022 are complete. CAH-023 is next after hard-limit enforcement. M1 is complete only after the
+explicitly configured Responses adapter is verified.
 
 ### E3 - Repository context and read-only tools
 

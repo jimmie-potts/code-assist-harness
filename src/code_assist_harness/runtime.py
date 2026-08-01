@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .loop_limits import LoopLimits, LoopLimitsObserved
 from .mock_session import MockSession, MockSessionRunner
 from .model_evidence import ModelUsageObserved
 from .persistence import SessionTranscript, TranscriptPersistenceError, TranscriptSettings
@@ -25,7 +26,12 @@ from .protocol import (
     SessionStartCommand,
 )
 from .provider import Provider, RepositoryInstruction
-from .provider_session import ProviderSession, ProviderSessionRunner
+from .provider_session import (
+    MonotonicClock,
+    MonotonicWaiter,
+    ProviderSession,
+    ProviderSessionRunner,
+)
 from .session_state import SessionState, SessionUpdate
 
 _READ_CHUNK_SIZE = 64 * 1024
@@ -170,6 +176,9 @@ async def run_runtime(
     transcript_settings: TranscriptSettings | None = None,
     provider: Provider | None = None,
     repository_instructions: tuple[RepositoryInstruction, ...] = (),
+    loop_limits: LoopLimits | None = None,
+    monotonic_now: MonotonicClock | None = None,
+    monotonic_waiter: MonotonicWaiter | None = None,
 ) -> None:
     """Validate commands and emit ordered protocol events until shutdown or pipe EOF.
 
@@ -178,7 +187,7 @@ async def run_runtime(
     line is still processed. Initialization succeeds only when its payload resolves to the same
     canonical workspace supplied by the supervisor. After readiness, one ``session.start`` runs the
     deterministic CAH-005 stream in a child task so the command reader can reject overlapping work
-    and honor orderly shutdown. Tests may inject a provider to run one CAH-021 provider-neutral
+    and honor orderly shutdown. Tests may inject a provider to run one CAH-022 provider-neutral
     turn; the launched ``main()`` path deliberately supplies none and remains on ``MockSession``.
     Python remains authoritative for every terminal event.
 
@@ -191,6 +200,9 @@ async def run_runtime(
         provider: Optional provider implementation for the test-oriented CAH-021 composition seam.
         repository_instructions: Ordered, already-resolved instructions supplied only to an injected
             provider session. Discovery and precedence remain later work.
+        loop_limits: Optional immutable hard budgets for injected provider-backed sessions.
+        monotonic_now: Optional provider-deadline clock, supplied with ``monotonic_waiter``.
+        monotonic_waiter: Optional absolute-deadline waiter paired with ``monotonic_now``.
 
     Raises:
         RuntimeConfigurationError: If ``workspace`` is not canonical or is no longer a directory.
@@ -208,6 +220,10 @@ async def run_runtime(
 
     if workspace != resolved_workspace or not resolved_workspace.is_dir():
         raise RuntimeConfigurationError("workspace must be a canonical existing directory")
+    if (monotonic_now is None) != (monotonic_waiter is None):
+        raise RuntimeConfigurationError(
+            "provider monotonic clock and waiter must be supplied together"
+        )
 
     settings = transcript_settings
     if transcript_enabled and settings is None:
@@ -217,8 +233,22 @@ async def run_runtime(
     session_runner: MockSessionRunner | ProviderSessionRunner
     if provider is None:
         session_runner = MockSessionRunner(writer)
+    elif monotonic_now is None or monotonic_waiter is None:
+        session_runner = ProviderSessionRunner(
+            writer,
+            provider,
+            repository_instructions,
+            limits=loop_limits,
+        )
     else:
-        session_runner = ProviderSessionRunner(writer, provider, repository_instructions)
+        session_runner = ProviderSessionRunner(
+            writer,
+            provider,
+            repository_instructions,
+            limits=loop_limits,
+            monotonic_now=monotonic_now,
+            monotonic_waiter=monotonic_waiter,
+        )
     transcript_available = transcript_enabled
     initialized = False
     active_session: MockSession | ProviderSession | None = None
@@ -427,6 +457,27 @@ async def run_runtime(
                                 )
 
                             await active_session.attach_model_usage_observer(_record_model_usage)
+
+                            async def _record_loop_limits(
+                                observation: LoopLimitsObserved,
+                            ) -> None:
+                                """Persist loop-budget evidence or emit the one safe warning."""
+                                nonlocal transcript_available
+                                failure = await transcript.record_loop_limits(observation)
+                                if failure is None:
+                                    return
+                                transcript_available = False
+                                await writer.emit_runtime(
+                                    "runtime.error",
+                                    {
+                                        "code": "transcript_persistence_failed",
+                                        "message": failure.message,
+                                        "recoverable": True,
+                                    },
+                                    correlation_id=start_command_id,
+                                )
+
+                            await active_session.attach_loop_limits_observer(_record_loop_limits)
                 active_session_task = asyncio.create_task(active_session.run())
                 continue
 

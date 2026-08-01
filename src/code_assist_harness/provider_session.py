@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from .loop_limits import (
+    ASSISTANT_OUTPUT_LIMIT_EXCEEDED_CODE,
+    MODEL_TURN_LIMIT_EXCEEDED_CODE,
+    PROVIDER_WORK_DEADLINE_EXCEEDED_CODE,
+    TOOL_CALL_LIMIT_EXCEEDED_CODE,
+    LoopLimits,
+    LoopLimitsObserved,
+    LoopLimitTracker,
+)
 from .model_evidence import ModelUsageObserved
 from .protocol import CommandId, OrderedEventWriter, SessionId, SessionStartCommand
 from .provider import (
@@ -35,18 +46,34 @@ from .session_state import (
 MAX_PROVIDER_TURN_OUTPUT_BYTES = 8192
 """Fixed protocol-fit ceiling applied before CAH-022 adds a configurable output budget."""
 
+PROVIDER_CLEANUP_GRACE_SECONDS = 5.0
+"""Fixed local grace for a cancellation-responsive provider cleanup awaitable."""
+
 PROVIDER_INVALID_RESPONSE_CODE = "provider_invalid_response"
 PROVIDER_INVALID_RESPONSE_MESSAGE = "The provider returned an invalid response."
 TOOL_UNAVAILABLE_CODE = "tool_unavailable"
 TOOL_UNAVAILABLE_MESSAGE = "Provider-requested tools are not available."
 PROVIDER_CLEANUP_FAILED_CODE = "provider_cleanup_failed"
 PROVIDER_CLEANUP_FAILED_MESSAGE = "Provider cleanup could not be confirmed."
+MODEL_TURN_LIMIT_EXCEEDED_MESSAGE = "The model-turn limit was reached."
+PROVIDER_WORK_DEADLINE_EXCEEDED_MESSAGE = "Provider work exceeded its time limit."
+ASSISTANT_OUTPUT_LIMIT_EXCEEDED_MESSAGE = "Assistant output exceeded its byte limit."
+TOOL_CALL_LIMIT_EXCEEDED_MESSAGE = "The provider tool-call limit was reached."
 
 type LifecycleObserver = Callable[[SessionUpdate, SessionState], Awaitable[None]]
 """Async observer called after one update enters authoritative lifecycle state."""
 
 type ModelUsageObserver = Callable[[ModelUsageObserved], Awaitable[None]]
 """Async observer for bounded usage evidence outside lifecycle state."""
+
+type LoopLimitsObserver = Callable[[LoopLimitsObserved], Awaitable[None]]
+"""Async observer for one terminal-adjacent loop-limit evidence record."""
+
+type MonotonicClock = Callable[[], float]
+"""Injected monotonic clock used for provider and cleanup deadlines."""
+
+type MonotonicWaiter = Callable[[float], Awaitable[None]]
+"""Injected waiter for one absolute deadline in the clock's domain."""
 
 type CancellationRequestResult = Literal["accepted", "already_requested", "terminal"]
 """Result of asking one provider-backed session to select user cancellation."""
@@ -65,6 +92,22 @@ class _SelectedOutcome:
     failure_code: str | None = None
     failure_message: str | None = None
     correlation_id: CommandId | None = None
+
+
+async def _wait_until_monotonic(deadline: float) -> None:
+    """Wait until one absolute system-monotonic deadline."""
+    await asyncio.sleep(max(0.0, deadline - time.monotonic()))
+
+
+def _read_monotonic_clock(clock: MonotonicClock) -> float:
+    """Return one finite numeric monotonic reading from an injected clock."""
+    value = clock()
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("provider session monotonic clock must return a number")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise ValueError("provider session monotonic clock must return a finite number")
+    return numeric
 
 
 async def _settle_shielded[ResultT](awaitable: Awaitable[ResultT]) -> ResultT:
@@ -124,6 +167,11 @@ class ProviderSession:
         command: SessionStartCommand,
         session_id: SessionId,
         repository_instructions: tuple[RepositoryInstruction, ...] = (),
+        *,
+        limits: LoopLimits | None = None,
+        limit_tracker: LoopLimitTracker | None = None,
+        monotonic_now: MonotonicClock | None = None,
+        monotonic_waiter: MonotonicWaiter | None = None,
     ) -> None:
         """Create one not-yet-started provider-backed session.
 
@@ -133,6 +181,10 @@ class ProviderSession:
             command: Accepted task command that correlates normal and failed events.
             session_id: Python-owned identity allocated before work starts.
             repository_instructions: Ordered, already-resolved guidance for this turn.
+            limits: Immutable provider-loop budgets shared by configuration value.
+            limit_tracker: Optional pre-seeded tracker for deterministic boundary tests.
+            monotonic_now: Clock used to capture and recheck absolute deadlines.
+            monotonic_waiter: Cancellation-responsive waiter for absolute deadlines.
         """
         if not isinstance(provider, Provider):
             raise TypeError("provider session requires a provider implementation")
@@ -143,6 +195,26 @@ class ProviderSession:
             for instruction in repository_instructions
         ):
             raise TypeError("repository instructions contain an unsupported value")
+        configured_limits = LoopLimits() if limits is None else limits
+        if not isinstance(configured_limits, LoopLimits):
+            raise TypeError("provider session limits must be LoopLimits")
+        tracker = LoopLimitTracker(configured_limits) if limit_tracker is None else limit_tracker
+        if not isinstance(tracker, LoopLimitTracker):
+            raise TypeError("provider session tracker must be LoopLimitTracker")
+        if tracker.limits != configured_limits:
+            raise ValueError("provider session tracker limits do not match configuration")
+        if tracker.exhausted is not None:
+            raise ValueError("provider session tracker must not be pre-exhausted")
+        if (monotonic_now is None) != (monotonic_waiter is None):
+            raise ValueError(
+                "provider session monotonic clock and waiter must be supplied together"
+            )
+        configured_clock = time.monotonic if monotonic_now is None else monotonic_now
+        configured_waiter = _wait_until_monotonic if monotonic_waiter is None else monotonic_waiter
+        if not callable(configured_clock):
+            raise TypeError("provider session monotonic clock must be callable")
+        if not callable(configured_waiter):
+            raise TypeError("provider session monotonic waiter must be callable")
 
         self._writer = writer
         self._provider = provider
@@ -153,11 +225,13 @@ class ProviderSession:
             repository_instructions=repository_instructions,
         )
         self._decision_lock = asyncio.Lock()
+        self._deadline_state_lock = asyncio.Lock()
         self._session_start_settled = asyncio.Event()
         self._session_started_successfully = False
         self._run_started = False
         self._lifecycle_observer: LifecycleObserver | None = None
         self._usage_observer: ModelUsageObserver | None = None
+        self._limits_observer: LoopLimitsObserver | None = None
         self._task_submitted = TaskSubmitted(
             command_id=command.command_id,
             task=command.payload.task,
@@ -171,10 +245,25 @@ class ProviderSession:
         self._operation: ProviderOperation | None = None
         self._events: AsyncIterator[ProviderStreamEvent] | None = None
         self._pending_event_task: asyncio.Task[ProviderStreamEvent] | None = None
+        self._cleanup_task: asyncio.Task[bool] | None = None
+        self._cleanup_mode: _CleanupMode | None = None
         self._selection: _SelectedOutcome | None = None
         self._finalization_task: asyncio.Task[None] | None = None
+        self._deadline_watcher_task: asyncio.Task[None] | None = None
+        self._deadline_latched = False
         self._terminal_emitted = False
         self._cleanup_diagnostic_emitted = False
+        self._limits_observed = False
+        self._pending_event_cleanup_failed = False
+
+        self._limits = configured_limits
+        self._limit_tracker = tracker
+        self._monotonic_now = configured_clock
+        self._monotonic_waiter = configured_waiter
+        self._provider_work_deadline = (
+            _read_monotonic_clock(configured_clock)
+            + configured_limits.provider_work_timeout_seconds
+        )
 
         self._accepted_text: list[str] = []
         self._accepted_text_bytes = 0
@@ -222,6 +311,21 @@ class ProviderSession:
             raise RuntimeError("a provider session accepts only one usage observer")
         self._usage_observer = observer
 
+    async def attach_loop_limits_observer(self, observer: LoopLimitsObserver) -> None:
+        """Attach one terminal-adjacent loop-limit evidence observer before work starts.
+
+        Args:
+            observer: Async evidence boundary called once immediately before a session terminal.
+
+        Raises:
+            RuntimeError: If work started or an observer was already attached.
+        """
+        if self._run_started:
+            raise RuntimeError("a limits observer must be attached before the session starts")
+        if self._limits_observer is not None:
+            raise RuntimeError("a provider session accepts only one limits observer")
+        self._limits_observer = observer
+
     async def run(self) -> SessionId:
         """Run one provider-neutral turn and settle its selected outcome.
 
@@ -236,6 +340,8 @@ class ProviderSession:
         if self._run_started:
             raise RuntimeError("a provider session can run only once")
         self._run_started = True
+        if self._selection is None:
+            self._deadline_watcher_task = asyncio.create_task(self._watch_provider_deadline())
 
         try:
             await _settle_shielded(self._publish_started())
@@ -327,45 +433,90 @@ class ProviderSession:
             self._session_start_settled.set()
 
     async def _start_provider_operation(self) -> None:
-        """Atomically start and claim one lazy operation unless an outcome already won."""
+        """Admit, charge, synchronously start, and claim one lazy provider operation."""
         async with self._decision_lock:
-            if self._selection is not None:
-                return
-            try:
-                operation = self._provider.start(self._request)
-                self._operation = operation
-                events = operation.events()
-            except (asyncio.CancelledError, Exception):
-                self._select_locked(
-                    _SelectedOutcome(
-                        kind="failed",
-                        cleanup_mode="cancel",
-                        failure_code=PROVIDER_INVALID_RESPONSE_CODE,
-                        failure_message=PROVIDER_INVALID_RESPONSE_MESSAGE,
-                        correlation_id=self._command.command_id,
+            async with self._deadline_state_lock:
+                if self._selection is not None:
+                    return
+                if self._deadline_latched or self._deadline_is_due():
+                    self._latch_provider_deadline_locked()
+                    self._select_locked(self._provider_deadline_outcome())
+                    return
+                if not self._limit_tracker.admit_model_turn():
+                    self._select_locked(
+                        _SelectedOutcome(
+                            kind="failed",
+                            cleanup_mode="cancel",
+                            failure_code=MODEL_TURN_LIMIT_EXCEEDED_CODE,
+                            failure_message=MODEL_TURN_LIMIT_EXCEEDED_MESSAGE,
+                            correlation_id=self._command.command_id,
+                        )
                     )
-                )
-                return
-            self._events = events
+                    return
+                try:
+                    operation = self._provider.start(self._request)
+                    self._operation = operation
+                    events = operation.events()
+                except (asyncio.CancelledError, Exception):
+                    if self._deadline_latched or self._deadline_is_due():
+                        self._latch_provider_deadline_locked()
+                        self._select_locked(self._provider_deadline_outcome())
+                    else:
+                        self._select_locked(
+                            _SelectedOutcome(
+                                kind="failed",
+                                cleanup_mode="cancel",
+                                failure_code=PROVIDER_INVALID_RESPONSE_CODE,
+                                failure_message=PROVIDER_INVALID_RESPONSE_MESSAGE,
+                                correlation_id=self._command.command_id,
+                            )
+                        )
+                    return
+                if self._deadline_latched or self._deadline_is_due():
+                    self._latch_provider_deadline_locked()
+                    self._select_locked(self._provider_deadline_outcome())
+                    return
+                self._events = events
 
     async def _consume_provider_events(self) -> None:
         events = self._events
-        if events is None:
+        watcher = self._deadline_watcher_task
+        if events is None or watcher is None:
             return
         while self._selection is None:
             pending = asyncio.create_task(_next_provider_event(events))
             self._pending_event_task = pending
             try:
-                observation = await asyncio.shield(pending)
+                await asyncio.wait(
+                    {pending, watcher},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                await self._select_invalid_response()
+                return
+
+            if self._deadline_latched or self._deadline_is_due():
+                await self._cancel_and_reap_pending_event()
+                await self._select_provider_deadline()
+                return
+
+            if not pending.done():
+                # Finalization may stop the watcher while this read is still blocked. Retain the
+                # operation-owned task so the selected finalizer can cancel and reap it.
+                await self._select_invalid_response()
+                return
+
+            try:
+                observation = pending.result()
             except StopAsyncIteration:
                 self._pending_event_task = None
                 if self._selection is None:
                     await self._select_invalid_response()
                 return
             except asyncio.CancelledError:
-                current = asyncio.current_task()
-                if current is not None and current.cancelling():
-                    raise
                 self._pending_event_task = None
                 await self._select_invalid_response()
                 return
@@ -380,17 +531,37 @@ class ProviderSession:
         async with self._decision_lock:
             if self._selection is not None:
                 return
+            if await self._select_deadline_if_due_locked():
+                return
             if isinstance(observation, ProviderTextDelta):
                 if self._completed_text is not None or self._usage_observed:
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
                 try:
                     encoded_length = len(observation.text.encode("utf-8"))
                 except UnicodeEncodeError:
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
+                async with self._deadline_state_lock:
+                    if self._selection is not None:
+                        return
+                    if self._deadline_latched or self._deadline_is_due():
+                        self._latch_provider_deadline_locked()
+                        self._select_locked(self._provider_deadline_outcome())
+                        return
+                    if not self._limit_tracker.reserve_assistant_output(encoded_length):
+                        self._select_locked(
+                            _SelectedOutcome(
+                                kind="failed",
+                                cleanup_mode="cancel",
+                                failure_code=ASSISTANT_OUTPUT_LIMIT_EXCEEDED_CODE,
+                                failure_message=ASSISTANT_OUTPUT_LIMIT_EXCEEDED_MESSAGE,
+                                correlation_id=self._command.command_id,
+                            )
+                        )
+                        return
                 if self._accepted_text_bytes + encoded_length > MAX_PROVIDER_TURN_OUTPUT_BYTES:
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
                 delta = await self._writer.emit_session(
                     "assistant.delta",
@@ -401,6 +572,7 @@ class ProviderSession:
                 await self._accept_lifecycle_locked(delta)
                 self._accepted_text.append(observation.text)
                 self._accepted_text_bytes += encoded_length
+                await self._select_deadline_if_due_locked()
                 return
 
             if isinstance(observation, ProviderTextCompleted):
@@ -409,14 +581,14 @@ class ProviderSession:
                     or self._usage_observed
                     or observation.text != "".join(self._accepted_text)
                 ):
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
                 self._completed_text = observation.text
                 return
 
             if isinstance(observation, ProviderUsageReported):
                 if self._completed_text is None or not self._accepted_text or self._usage_observed:
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
                 try:
                     usage = ModelUsageObserved(
@@ -425,18 +597,19 @@ class ProviderSession:
                         output_tokens=observation.output_tokens,
                     )
                 except (TypeError, ValueError):
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
                 if self._usage_observer is not None:
                     await self._usage_observer(usage)
                 self._usage_observed = True
+                await self._select_deadline_if_due_locked()
                 return
 
             if isinstance(observation, ProviderCompleted):
                 if self._completed_text is None or not self._accepted_text:
-                    self._select_invalid_response_locked()
+                    await self._select_invalid_response_locked()
                     return
-                self._select_locked(
+                await self._select_candidate_locked(
                     _SelectedOutcome(
                         kind="completed",
                         cleanup_mode="wait_closed",
@@ -446,7 +619,7 @@ class ProviderSession:
                 return
 
             if isinstance(observation, ProviderFailed):
-                self._select_locked(
+                await self._select_candidate_locked(
                     _SelectedOutcome(
                         kind="failed",
                         cleanup_mode="wait_closed",
@@ -458,18 +631,36 @@ class ProviderSession:
                 return
 
             if isinstance(observation, ProviderToolCallRequested):
-                self._select_locked(
-                    _SelectedOutcome(
-                        kind="failed",
-                        cleanup_mode="cancel",
-                        failure_code=TOOL_UNAVAILABLE_CODE,
-                        failure_message=TOOL_UNAVAILABLE_MESSAGE,
-                        correlation_id=self._command.command_id,
-                    )
-                )
+                async with self._deadline_state_lock:
+                    if self._selection is not None:
+                        return
+                    if self._deadline_latched or self._deadline_is_due():
+                        self._latch_provider_deadline_locked()
+                        self._select_locked(self._provider_deadline_outcome())
+                        return
+                    if not self._limit_tracker.observe_tool_call():
+                        self._select_locked(
+                            _SelectedOutcome(
+                                kind="failed",
+                                cleanup_mode="cancel",
+                                failure_code=TOOL_CALL_LIMIT_EXCEEDED_CODE,
+                                failure_message=TOOL_CALL_LIMIT_EXCEEDED_MESSAGE,
+                                correlation_id=self._command.command_id,
+                            )
+                        )
+                    else:
+                        self._select_locked(
+                            _SelectedOutcome(
+                                kind="failed",
+                                cleanup_mode="cancel",
+                                failure_code=TOOL_UNAVAILABLE_CODE,
+                                failure_message=TOOL_UNAVAILABLE_MESSAGE,
+                                correlation_id=self._command.command_id,
+                            )
+                        )
                 return
 
-            self._select_invalid_response_locked()
+            await self._select_invalid_response_locked()
 
     async def _select_user_cancellation(
         self,
@@ -483,36 +674,37 @@ class ProviderSession:
                 self._deferred_cancellation = cancellation
             else:
                 await self._accept_lifecycle_locked(cancellation)
-            self._select_locked(
+            selected = await self._select_candidate_locked(
                 _SelectedOutcome(
                     kind="cancelled",
                     cleanup_mode="cancel",
                     correlation_id=command_id,
                 )
             )
-            return "accepted"
+            return "accepted" if selected.kind == "cancelled" else "terminal"
 
     async def _select_teardown(self) -> TeardownRequestResult:
         async with self._decision_lock:
             if self._selection is not None:
                 return "already_requested" if self._selection.kind == "teardown" else "terminal"
-            self._select_locked(
+            selected = await self._select_candidate_locked(
                 _SelectedOutcome(
                     kind="teardown",
                     cleanup_mode="cancel",
                 )
             )
-            return "accepted"
+            return "accepted" if selected.kind == "teardown" else "terminal"
 
     async def _select_invalid_response(self) -> None:
         await _settle_shielded(self._select_invalid_response_transaction())
 
     async def _select_invalid_response_transaction(self) -> None:
         async with self._decision_lock:
-            self._select_invalid_response_locked()
+            await self._select_invalid_response_locked()
 
-    def _select_invalid_response_locked(self) -> None:
-        self._select_locked(
+    async def _select_invalid_response_locked(self) -> None:
+        """Select a safe invalid-response failure unless the provider deadline won."""
+        await self._select_candidate_locked(
             _SelectedOutcome(
                 kind="failed",
                 cleanup_mode="cancel",
@@ -521,6 +713,72 @@ class ProviderSession:
                 correlation_id=self._command.command_id,
             )
         )
+
+    async def _select_candidate_locked(self, candidate: _SelectedOutcome) -> _SelectedOutcome:
+        """Select one candidate under deadline precedence while the decision lock is held."""
+        async with self._deadline_state_lock:
+            if self._selection is not None:
+                return self._selection
+            if self._deadline_latched or self._deadline_is_due():
+                self._latch_provider_deadline_locked()
+                candidate = self._provider_deadline_outcome()
+            self._select_locked(candidate)
+            return candidate
+
+    async def _select_deadline_if_due_locked(self) -> bool:
+        """Select deadline failure when due while the caller owns the decision lock."""
+        async with self._deadline_state_lock:
+            if self._selection is not None:
+                return False
+            if not self._deadline_latched and not self._deadline_is_due():
+                return False
+            self._latch_provider_deadline_locked()
+            self._select_locked(self._provider_deadline_outcome())
+            return True
+
+    async def _select_provider_deadline(self) -> None:
+        """Settle an already-due provider deadline through the shared terminal guard."""
+        async with self._decision_lock:
+            async with self._deadline_state_lock:
+                if self._selection is not None:
+                    return
+                self._latch_provider_deadline_locked()
+                self._select_locked(self._provider_deadline_outcome())
+
+    def _provider_deadline_outcome(self) -> _SelectedOutcome:
+        """Build the stable safe failure selected by provider-work expiry."""
+        return _SelectedOutcome(
+            kind="failed",
+            cleanup_mode="cancel",
+            failure_code=PROVIDER_WORK_DEADLINE_EXCEEDED_CODE,
+            failure_message=PROVIDER_WORK_DEADLINE_EXCEEDED_MESSAGE,
+            correlation_id=self._command.command_id,
+        )
+
+    def _deadline_is_due(self) -> bool:
+        """Return whether the captured provider-work deadline has arrived."""
+        return _read_monotonic_clock(self._monotonic_now) >= self._provider_work_deadline
+
+    def _latch_provider_deadline_locked(self) -> None:
+        """Latch expiry and begin shared cancellation under the deadline-state guard."""
+        if not self._deadline_latched:
+            self._deadline_latched = True
+            self._limit_tracker.mark_provider_work_exhausted()
+        if self._operation is not None:
+            self._ensure_provider_cleanup("cancel")
+
+    async def _watch_provider_deadline(self) -> None:
+        """Latch provider expiry independently of event publication or stream progress."""
+        await self._wait_until(self._provider_work_deadline)
+        async with self._deadline_state_lock:
+            if self._selection is not None:
+                return
+            self._latch_provider_deadline_locked()
+
+    async def _wait_until(self, absolute_deadline: float) -> None:
+        """Use the paired injected waiter until its clock confirms an absolute deadline."""
+        while _read_monotonic_clock(self._monotonic_now) < absolute_deadline:
+            await self._monotonic_waiter(absolute_deadline)
 
     def _select_locked(self, selection: _SelectedOutcome) -> None:
         if self._selection is not None:
@@ -537,6 +795,7 @@ class ProviderSession:
         if selection.kind != "teardown":
             await self._session_start_settled.wait()
             if not self._session_started_successfully:
+                await self._stop_deadline_watcher()
                 return
         cleanup_failed = await self._finish_provider_work(selection.cleanup_mode)
         if cleanup_failed:
@@ -546,14 +805,12 @@ class ProviderSession:
         await self._emit_selected_terminal(selection)
 
     async def _finish_provider_work(self, cleanup_mode: _CleanupMode) -> bool:
-        operation = self._operation
-        cleanup_failed = False
-        if operation is not None:
+        await self._stop_deadline_watcher()
+        cleanup_failed = self._pending_event_cleanup_failed
+        cleanup = self._ensure_provider_cleanup(cleanup_mode)
+        if cleanup is not None:
             try:
-                if cleanup_mode == "cancel":
-                    await operation.cancel()
-                else:
-                    await operation.wait_closed()
+                cleanup_failed = await _join_shared(cleanup) or cleanup_failed
             except asyncio.CancelledError:
                 current = asyncio.current_task()
                 if current is not None and current.cancelling():
@@ -561,18 +818,92 @@ class ProviderSession:
                 cleanup_failed = True
             except Exception:
                 cleanup_failed = True
-        pending = self._pending_event_task
-        if pending is not None:
-            if not pending.done():
-                pending.cancel()
+        await self._cancel_and_reap_pending_event()
+        return cleanup_failed or self._pending_event_cleanup_failed
+
+    def _ensure_provider_cleanup(self, cleanup_mode: _CleanupMode) -> asyncio.Task[bool] | None:
+        """Return the one loop-owned supervised provider-cleanup task, creating it if needed."""
+        if self._operation is None:
+            return None
+        if self._cleanup_task is not None:
+            if self._cleanup_mode != cleanup_mode:
+                raise RuntimeError("provider cleanup mode changed after cleanup started")
+            return self._cleanup_task
+        self._cleanup_mode = cleanup_mode
+        self._cleanup_task = asyncio.create_task(self._supervise_provider_cleanup(cleanup_mode))
+        return self._cleanup_task
+
+    async def _supervise_provider_cleanup(self, cleanup_mode: _CleanupMode) -> bool:
+        """Bound one provider cleanup await by the fixed cancellation-responsive grace."""
+        operation = self._operation
+        if operation is None:
+            return False
+
+        async def invoke_cleanup() -> None:
+            if cleanup_mode == "cancel":
+                await operation.cancel()
+            else:
+                await operation.wait_closed()
+
+        cleanup = asyncio.create_task(invoke_cleanup())
+        grace_deadline = _read_monotonic_clock(self._monotonic_now) + PROVIDER_CLEANUP_GRACE_SECONDS
+        grace = asyncio.create_task(self._wait_until(grace_deadline))
+        try:
+            await asyncio.wait({cleanup, grace}, return_when=asyncio.FIRST_COMPLETED)
+            if cleanup.done():
+                try:
+                    cleanup.result()
+                except asyncio.CancelledError:
+                    return True
+                except Exception:
+                    return True
+                return False
+            cleanup.cancel()
             try:
-                await asyncio.shield(pending)
-            except (StopAsyncIteration, asyncio.CancelledError):
+                await cleanup
+            except asyncio.CancelledError:
                 pass
             except Exception:
-                cleanup_failed = True
-            self._pending_event_task = None
-        return cleanup_failed
+                pass
+            return True
+        finally:
+            if not grace.done():
+                grace.cancel()
+            try:
+                await grace
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+    async def _stop_deadline_watcher(self) -> None:
+        """Cancel and reap the session-owned deadline watcher after a terminal choice."""
+        watcher = self._deadline_watcher_task
+        if watcher is None:
+            return
+        if not watcher.done():
+            watcher.cancel()
+        try:
+            await watcher
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    async def _cancel_and_reap_pending_event(self) -> None:
+        """Cancel and await the local read task under the responsive-iterator contract."""
+        pending = self._pending_event_task
+        if pending is None:
+            return
+        if not pending.done():
+            pending.cancel()
+        try:
+            await pending
+        except (StopAsyncIteration, asyncio.CancelledError):
+            pass
+        except Exception:
+            self._pending_event_cleanup_failed = True
+        self._pending_event_task = None
 
     async def _report_cleanup_failure_once(self) -> None:
         if self._cleanup_diagnostic_emitted:
@@ -602,6 +933,7 @@ class ProviderSession:
                     correlation_id=self._command.command_id,
                 )
                 await self._accept_lifecycle_locked(assistant_completed)
+                await self._notify_loop_limits_once()
                 session_completed = await self._writer.emit_session(
                     "session.completed",
                     self._session_id,
@@ -612,6 +944,7 @@ class ProviderSession:
             elif selection.kind == "failed":
                 if selection.failure_code is None or selection.failure_message is None:
                     raise RuntimeError("failed provider session is missing its safe failure")
+                await self._notify_loop_limits_once()
                 session_failed = await self._writer.emit_session(
                     "session.failed",
                     self._session_id,
@@ -625,6 +958,7 @@ class ProviderSession:
             elif selection.kind == "cancelled":
                 if selection.correlation_id is None:
                     raise RuntimeError("cancelled provider session is missing command correlation")
+                await self._notify_loop_limits_once()
                 session_cancelled = await self._writer.emit_session(
                     "session.cancelled",
                     self._session_id,
@@ -635,6 +969,14 @@ class ProviderSession:
             else:
                 raise RuntimeError("teardown cannot emit a session terminal event")
             self._terminal_emitted = True
+
+    async def _notify_loop_limits_once(self) -> None:
+        """Publish one immutable limits snapshot immediately before the session terminal."""
+        if self._limits_observed:
+            return
+        self._limits_observed = True
+        if self._limits_observer is not None:
+            await self._limits_observer(self._limit_tracker.snapshot(self._session_id))
 
     async def _accept_lifecycle_locked(self, update: SessionUpdate) -> None:
         reduction = reduce_session_state(self._lifecycle_state, update)
@@ -667,6 +1009,10 @@ class ProviderSessionRunner:
         writer: OrderedEventWriter,
         provider: Provider,
         repository_instructions: tuple[RepositoryInstruction, ...] = (),
+        *,
+        limits: LoopLimits | None = None,
+        monotonic_now: MonotonicClock | None = None,
+        monotonic_waiter: MonotonicWaiter | None = None,
     ) -> None:
         """Create a provider-backed session factory for one runtime.
 
@@ -674,6 +1020,9 @@ class ProviderSessionRunner:
             writer: Runtime-owned validated ordered event writer.
             provider: Provider implementation used by every allocated session.
             repository_instructions: Ordered, already-resolved guidance supplied to each turn.
+            limits: Immutable loop budgets copied by value into every allocated session.
+            monotonic_now: Clock used to capture session-local provider deadlines.
+            monotonic_waiter: Waiter paired with the injected clock domain.
         """
         if not isinstance(provider, Provider):
             raise TypeError("provider session runner requires a provider implementation")
@@ -684,9 +1033,25 @@ class ProviderSessionRunner:
             for instruction in repository_instructions
         ):
             raise TypeError("repository instructions contain an unsupported value")
+        configured_limits = LoopLimits() if limits is None else limits
+        if not isinstance(configured_limits, LoopLimits):
+            raise TypeError("provider session runner limits must be LoopLimits")
+        if (monotonic_now is None) != (monotonic_waiter is None):
+            raise ValueError(
+                "provider session runner monotonic clock and waiter must be supplied together"
+            )
+        configured_clock = time.monotonic if monotonic_now is None else monotonic_now
+        configured_waiter = _wait_until_monotonic if monotonic_waiter is None else monotonic_waiter
+        if not callable(configured_clock):
+            raise TypeError("provider session runner monotonic clock must be callable")
+        if not callable(configured_waiter):
+            raise TypeError("provider session runner monotonic waiter must be callable")
         self._writer = writer
         self._provider = provider
         self._repository_instructions = repository_instructions
+        self._limits = configured_limits
+        self._monotonic_now = configured_clock
+        self._monotonic_waiter = configured_waiter
         self._session_count = 0
 
     def create(self, command: SessionStartCommand) -> ProviderSession:
@@ -706,6 +1071,10 @@ class ProviderSessionRunner:
             command,
             session_id,
             self._repository_instructions,
+            limits=self._limits,
+            limit_tracker=LoopLimitTracker(self._limits),
+            monotonic_now=self._monotonic_now,
+            monotonic_waiter=self._monotonic_waiter,
         )
 
 
@@ -713,7 +1082,11 @@ __all__ = [
     "MAX_PROVIDER_TURN_OUTPUT_BYTES",
     "CancellationRequestResult",
     "LifecycleObserver",
+    "LoopLimitsObserver",
+    "MonotonicClock",
+    "MonotonicWaiter",
     "ModelUsageObserver",
+    "PROVIDER_CLEANUP_GRACE_SECONDS",
     "ProviderSession",
     "ProviderSessionRunner",
     "TeardownRequestResult",

@@ -170,6 +170,11 @@ CAH-007 and lessons completed going forward link a visual PPTX companion and rec
 rendered-slide and overflow validation evidence in the story note. The deck should introduce the
 same junior-level foundations before the deeper architecture.
 
+Starting with CAH-022, keep new lessons concise and centered on system design, agentic-loop design,
+and harness ownership. Every new written lesson and visual companion includes a compact architecture
+diagram that locates the unit in the relevant TUI, Python harness, provider, tool, and evidence
+boundaries. This requirement is prospective; do not retrofit older completed lessons.
+
 Production-tool examples are illustrative rather than approved dependencies. Include three to five
 representative tools with official references, describe the capability being compared, and discuss
 operational cost as well as benefit. Keep lesson status honest: planned stories use `Planned`, work

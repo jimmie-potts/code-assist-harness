@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import code_assist_harness.runtime as runtime_module
+from code_assist_harness.loop_limits import LoopLimits
 from code_assist_harness.mock_session import (
     MOCK_RESPONSE_DELTAS,
     MOCK_RESPONSE_TEXT,
@@ -113,6 +114,17 @@ class _SingleOperationProvider:
 
     def start(self, _request: ProviderRequest) -> ProviderOperation:
         return self.operation
+
+
+class _NeverStartingProvider:
+    """Record and reject any provider start after pre-admission deadline expiry."""
+
+    def __init__(self) -> None:
+        self.start_calls = 0
+
+    def start(self, _request: ProviderRequest) -> ProviderOperation:
+        self.start_calls += 1
+        raise AssertionError("provider start must not run after setup exhausts the deadline")
 
 
 def _isolated_runtime_environment(
@@ -1200,7 +1212,17 @@ def test_injected_provider_preserves_wire_tape_and_persists_usage_evidence(
     assert replay.evidence.model_usage.session_id == "ses_provider_1"
     assert replay.evidence.model_usage.input_tokens == 37
     assert replay.evidence.model_usage.output_tokens == 5
-    assert {record.transcript_version for record in replay.records} == {2}
+    assert replay.evidence.loop_limits is not None
+    assert replay.evidence.loop_limits.session_id == "ses_provider_1"
+    assert replay.evidence.loop_limits.max_model_turns == 1
+    assert replay.evidence.loop_limits.provider_work_timeout_seconds == 120
+    assert replay.evidence.loop_limits.max_assistant_output_bytes == 4096
+    assert replay.evidence.loop_limits.max_observed_tool_calls == 1
+    assert replay.evidence.loop_limits.model_turns_started == 1
+    assert replay.evidence.loop_limits.assistant_output_bytes == 15
+    assert replay.evidence.loop_limits.tool_calls_observed == 0
+    assert replay.evidence.loop_limits.exhausted is None
+    assert {record.transcript_version for record in replay.records} == {3}
     assert [record.kind for record in replay.records] == [
         "domain_fact",
         "session_event",
@@ -1208,12 +1230,237 @@ def test_injected_provider_preserves_wire_tape_and_persists_usage_evidence(
         "session_event",
         "model.usage_observed",
         "session_event",
+        "loop.limits_observed",
         "session_event",
     ]
     summary = summary_path.read_text(encoding="utf-8")
     assert "Model input tokens: 37" in summary
     assert "Model output tokens: 5" in summary
+    assert "Maximum model turns: 1" in summary
+    assert "Provider work timeout seconds: 120" in summary
+    assert "Maximum assistant output bytes: 4096" in summary
+    assert "Maximum observed tool calls: 1" in summary
+    assert "Model turns started: 1" in summary
+    assert "Assistant output bytes: 15" in summary
+    assert "Tool calls observed: 0" in summary
+    assert "Exhausted loop limit: none" in summary
     assert not disabled_state.exists()
+
+
+def test_runtime_captures_deadline_before_transcript_setup_and_forwards_clock_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> tuple[list[Event], Path, _NeverStartingProvider]:
+        workspace = (tmp_path / "workspace").resolve()
+        workspace.mkdir()
+        state_directory = tmp_path / "setup-expiry-state"
+        provider = _NeverStartingProvider()
+        output_lines: list[bytes] = []
+        terminal_written = asyncio.Event()
+        clock_value = 0.0
+        clock_observations: list[float] = []
+        waiter_deadlines: list[float] = []
+        captured_runner_options: dict[str, object] = {}
+
+        def monotonic_now() -> float:
+            clock_observations.append(clock_value)
+            return clock_value
+
+        async def monotonic_waiter(deadline: float) -> None:
+            waiter_deadlines.append(deadline)
+            raise AssertionError("an already-expired deadline must not await the clock")
+
+        original_create = SessionTranscript.create
+
+        async def create_then_expire(
+            _cls: type[SessionTranscript],
+            settings: TranscriptSettings,
+            transcript_workspace: Path,
+            session_id: str,
+        ) -> SessionTranscript:
+            nonlocal clock_value
+            transcript = await original_create(settings, transcript_workspace, session_id)
+            clock_value = 2.0
+            return transcript
+
+        original_runner = runtime_module.ProviderSessionRunner
+
+        def capture_runner_options(*args: object, **kwargs: object):
+            captured_runner_options.update(kwargs)
+            return original_runner(*args, **kwargs)  # type: ignore[arg-type]
+
+        initialize = validate_command(
+            json.loads(
+                _command(
+                    "runtime.initialize",
+                    "cmd_initialize",
+                    {"workspace": str(workspace)},
+                )
+            )
+        )
+        start = validate_command(
+            json.loads(
+                _command(
+                    "session.start",
+                    "cmd_session",
+                    {"task": "Expire while transcript setup is still in progress."},
+                )
+            )
+        )
+        shutdown = validate_command(json.loads(_command("runtime.shutdown", "cmd_shutdown", {})))
+
+        async def read_commands():
+            yield initialize
+            yield start
+            await terminal_written.wait()
+            yield shutdown
+
+        async def write_stdout_line(line: bytes) -> None:
+            output_lines.append(line)
+            if b'"type":"session.failed"' in line:
+                terminal_written.set()
+
+        monkeypatch.setattr(SessionTranscript, "create", classmethod(create_then_expire))
+        monkeypatch.setattr(runtime_module, "ProviderSessionRunner", capture_runner_options)
+        monkeypatch.setattr(runtime_module, "_read_commands", read_commands)
+        monkeypatch.setattr(runtime_module, "_write_stdout_line", write_stdout_line)
+        await runtime_module.run_runtime(
+            workspace,
+            transcript_settings=TranscriptSettings(state_directory=state_directory),
+            provider=provider,
+            loop_limits=LoopLimits(provider_work_timeout_seconds=1),
+            monotonic_now=monotonic_now,
+            monotonic_waiter=monotonic_waiter,
+        )
+
+        assert captured_runner_options["monotonic_now"] is monotonic_now
+        assert captured_runner_options["monotonic_waiter"] is monotonic_waiter
+        assert clock_observations[0] == 0.0
+        assert waiter_deadlines == []
+        return _event_lines(b"".join(output_lines)), state_directory, provider
+
+    events, state_directory, provider = asyncio.run(scenario())
+    transcript_path = next((state_directory / "transcripts").glob("*.jsonl"))
+    replay = replay_transcript(transcript_path)
+
+    assert provider.start_calls == 0
+    assert [event.type for event in events] == [
+        "runtime.ready",
+        "session.started",
+        "session.failed",
+    ]
+    assert events[-1].payload.code == "provider_work_deadline_exceeded"
+    assert replay.evidence.loop_limits is not None
+    assert replay.evidence.loop_limits.model_turns_started == 0
+    assert replay.evidence.loop_limits.exhausted == "provider_work"
+
+
+def test_runtime_uses_a_fresh_limit_tracker_for_each_sequential_provider_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> tuple[list[Event], Path]:
+        workspace = (tmp_path / "workspace").resolve()
+        workspace.mkdir()
+        state_directory = tmp_path / "fresh-tracker-state"
+        tasks = ("Complete the first provider turn.", "Complete the second provider turn.")
+        fake = FakeProvider(
+            tuple(
+                FakeProviderExchange(
+                    expected_request=ProviderRequest(
+                        conversation=(ProviderMessage(role="user", content=task),),
+                    ),
+                    steps=(
+                        FakeProviderEmit(ProviderTextDelta(text)),
+                        FakeProviderEmit(ProviderTextCompleted(text)),
+                        FakeProviderEmit(ProviderCompleted()),
+                    ),
+                )
+                for task, text in zip(tasks, ("first", "second"), strict=True)
+            )
+        )
+        output_lines: list[bytes] = []
+        first_transcript_closed = asyncio.Event()
+        second_transcript_closed = asyncio.Event()
+        transcript_close_count = 0
+        original_close = SessionTranscript.close
+
+        async def close_and_signal(transcript: SessionTranscript) -> None:
+            nonlocal transcript_close_count
+            await original_close(transcript)
+            transcript_close_count += 1
+            if transcript_close_count == 1:
+                first_transcript_closed.set()
+            elif transcript_close_count == 2:
+                second_transcript_closed.set()
+
+        initialize = validate_command(
+            json.loads(
+                _command(
+                    "runtime.initialize",
+                    "cmd_initialize",
+                    {"workspace": str(workspace)},
+                )
+            )
+        )
+        first_start = validate_command(
+            json.loads(_command("session.start", "cmd_first", {"task": tasks[0]}))
+        )
+        second_start = validate_command(
+            json.loads(_command("session.start", "cmd_second", {"task": tasks[1]}))
+        )
+        shutdown = validate_command(json.loads(_command("runtime.shutdown", "cmd_shutdown", {})))
+
+        async def read_commands():
+            yield initialize
+            yield first_start
+            await first_transcript_closed.wait()
+            yield second_start
+            await second_transcript_closed.wait()
+            yield shutdown
+
+        async def write_stdout_line(line: bytes) -> None:
+            output_lines.append(line)
+
+        monkeypatch.setattr(SessionTranscript, "close", close_and_signal)
+        monkeypatch.setattr(runtime_module, "_read_commands", read_commands)
+        monkeypatch.setattr(runtime_module, "_write_stdout_line", write_stdout_line)
+        await runtime_module.run_runtime(
+            workspace,
+            transcript_settings=TranscriptSettings(state_directory=state_directory),
+            provider=fake,
+            loop_limits=LoopLimits(max_model_turns=1),
+        )
+        fake.assert_complete()
+        return _event_lines(b"".join(output_lines)), state_directory
+
+    events, state_directory = asyncio.run(scenario())
+    transcript_paths = sorted((state_directory / "transcripts").glob("*.jsonl"))
+    replays = [replay_transcript(path) for path in transcript_paths]
+
+    assert [event.type for event in events] == [
+        "runtime.ready",
+        "session.started",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+        "session.started",
+        "assistant.delta",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert [replay.state.session_id for replay in replays] == ["ses_provider_1", "ses_provider_2"]
+    assert all(replay.complete for replay in replays)
+    assert all(replay.evidence.loop_limits is not None for replay in replays)
+    assert [
+        replay.evidence.loop_limits.model_turns_started  # type: ignore[union-attr]
+        for replay in replays
+    ] == [1, 1]
+    assert [
+        replay.evidence.loop_limits.exhausted  # type: ignore[union-attr]
+        for replay in replays
+    ] == [None, None]
 
 
 @pytest.mark.parametrize("boundary", ["eof", "shutdown"])

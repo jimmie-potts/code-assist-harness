@@ -2,308 +2,281 @@
 
 - **Unit:** CAH-022
 - **Milestone:** M1 - Conversational core
-- **Lesson status:** Planned
-- **Implementation status:** Planned; CAH-021's provider-neutral turn is implemented, but the hard
-  limits in this unit are not
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; the provider-neutral turn now enforces four harness-owned limits
 - **Story:** [CAH-022](../../user-stories/cah-022-enforce-loop-limits.md)
+- **Visual companion:** [Loop limits deck](assets/cah-022-loop-limits.pptx)
 - **Related architecture:** [Agent loop](../agent-loop.md), [Safety model](../safety-model.md), and
   [ADR 0001](../adr/0001-own-the-agent-loop.md)
 
-> This lesson describes the accepted safety-budget design around CAH-021's implemented
-> provider-neutral turn. It does not claim that provider work is currently deadline-bounded or that
-> a network adapter exists.
+> This lesson describes the implemented local harness. CAH-023 will add the first network adapter;
+> no live provider or tool execution is implied here.
 
 ## Quick summary
 
-CAH-022 plans four harness-owned limits around one provider-neutral turn: admission count, monotonic
-provider-work deadline, accepted UTF-8 output bytes, and observed tool calls. It teaches that a
-configured number is not a safety control until admission, streaming, cancellation, evidence, and
-races all enforce it.
+CAH-022 bounds one provider-backed session by model turns, provider-work time, accepted assistant
+bytes, and observed tool calls. The main system-design lesson is ownership: the Python harness
+charges work, resolves races, cleans up the provider operation, and records evidence; the TUI and
+provider adapter do not make those decisions.
 
 ## Learning objectives
 
 After completing this unit, you should be able to:
 
-- distinguish admission, provider-work time, output, and tool-call budgets;
-- identify the exact moment each budget is charged;
-- explain why a deadline must wake while a provider is silent;
-- test limit boundaries without wall-clock sleeps; and
-- preserve one terminal outcome when a limit races cancellation or completion.
+- locate loop-safety policy in the harness architecture;
+- explain where each budget is charged and why charging happens before acceptance;
+- reason about deadline, completion, and cleanup races; and
+- test an agent-loop limit without a live model or wall-clock sleep.
 
 ## Why this unit matters
 
-A one-turn loop removes multi-step unboundedness but not a slow connection, unlimited stream, or
-unexpected tool request. CAH-022 puts deterministic domain budgets around the provider-neutral
-path before CAH-023 activates a network and billable provider. This sequence prevents vendor
-configuration from becoming the first safety boundary.
+A one-turn loop can still wait forever, accept an unbounded stream, or receive unexpected tool
+requests. These limits establish a provider-independent safety boundary before CAH-023 introduces
+network and billable work.
 
 ## Junior engineer foundation
 
-A **limit** is a maximum amount of work. A **counter** records work already admitted. A **deadline**
-is a point on a monotonic clock after which work must stop. Monotonic time moves forward even when
-the wall clock is corrected, which makes elapsed-time comparisons reliable.
+A **budget** is work the system may admit. A **counter** records admitted work. A **deadline** is an
+absolute point on a monotonic clock, which measures elapsed time without being affected by wall-clock
+corrections.
 
-```python
-# Planned teaching example, not shipped CAH-022 code.
-if accepted_bytes + len(delta.encode("utf-8")) > maximum_bytes:
-    fail_without_emitting(delta)
-```
-
-UTF-8 matters because one visible character may occupy more than one byte. A common misconception is
-that checking a budget only before the request is enough. Admission prevents extra operations, but
-streaming limits must also be checked before each observation enters events or persistence.
+For a three-byte budget, accepting `"ab"` leaves one byte. A two-byte delta must be rejected whole;
+accepting one byte and truncating the rest would silently change the model's output. The common
+mistake is checking only before the provider request. Admission limits how many operations start;
+streaming limits must also run before each observation reaches wire, reducer, or transcript state.
 
 ## Key concepts
 
-- **Admission control:** refuse a costly operation before it starts.
-- **Provider-work deadline:** an absolute stop point for provider activity derived from elapsed time,
-  not calendar time or local sink latency.
-- **Cumulative output budget:** UTF-8 bytes already accepted across all deltas in the turn.
-- **Observed tool-call budget:** provider requests counted before parsing or execution.
-- **Cleanup barrier:** awaited provider cancellation that guarantees no later observation can arrive.
-- **Limit race:** competition between a budget failure and another terminal outcome.
+- **Reserve before accept:** charge a complete delta or tool observation before publishing it.
+- **Independent deadline watcher:** wake even when the provider emits nothing or a local sink is
+  blocked.
+- **First-winner terminal guard:** completion, failure, cancellation, and limits converge on one
+  terminal selection.
+- **Single cleanup owner:** the watcher and finalizer join one shared cleanup task rather than calling
+  the provider concurrently.
+- **Bounded evidence:** transcript v3 records configuration, counters, and the exhausted limit without
+  provider payloads or monotonic timestamps.
 
 ## Architecture and design
 
+CAH-022 is positioned inside the Python harness, around the provider port:
+
 ```text
-validated limits
-      |
-      +--> admission check ---- denied --> session.failed
-      |          |
-      |        allowed
-      |          v
-      |    Provider.start()
-      |          |
-      +--> deadline waiter -----+
-      +--> output accountant ---+--> terminal guard --> one terminal event
-      +--> tool-call counter ----+
-                    |
-             limit wins
-                    v
-          cancel + await cleanup
+                        validated NDJSON events
+ +----------+        <---------------------------        +------------------+
+ | Ink TUI  |                                             | Transcript v3    |
+ | renders  |        --------------------------->         | bounded evidence |
+ +----------+          validated commands                 +---------^--------+
+                                                                  |
+                    +---------------------------------------------+-------------+
+                    | Python harness                              |             |
+                    |  Runtime                                    |             |
+                    |    +----------------------------------------+---------+   |
+                    |    | ProviderSession  <--- CAH-022 lives here         |   |
+                    |    | LoopLimitTracker + deadline + terminal guard     |---+
+                    |    +----------------------+---------------------------+   |
+                    |                           | tool request: count, then     |
+                    |                           | fail unavailable (no tools)   |
+                    +---------------------------+-------------------------------+
+                                                |
+                                                v
+                                      +-------------------+
+                                      | Provider port     |
+                                      | fake now; adapter |
+                                      | in CAH-023        |
+                                      +-------------------+
 ```
 
-The configuration is immutable and rejects invalid values; it never silently clamps. The loop
-charges a model turn immediately before provider start, output bytes before emission, and tool calls
-before CAH-021's unavailable-tool failure. A deadline waiter races every awaited stream step, so a
-provider that emits nothing cannot keep provider work active forever.
+The TUI displays validated events. The provider port translates model activity. Neither owns budget
+policy. `ProviderSession` coordinates an immutable `LoopLimits`, a fresh per-session tracker, an
+absolute deadline captured at session allocation, and the shared terminal/cleanup paths.
 
-The exact configuration is intentionally small and finite:
+| Budget | Default | Charge point | Stable failure code |
+| --- | ---: | --- | --- |
+| Model turns | `1` | Immediately before `Provider.start()` | `model_turn_limit_exceeded` |
+| Provider work | `120s` | Deadline latch at or after the absolute deadline | `provider_work_deadline_exceeded` |
+| Assistant output | `4096` bytes | Before accepting a complete UTF-8 delta | `assistant_output_limit_exceeded` |
+| Tool calls | `1` | Before parsing or unavailable-tool handling | `tool_call_limit_exceeded` |
 
-| Field | Default | Allowed range |
-| --- | ---: | ---: |
-| `max_model_turns` | `1` | `1..16` |
-| `provider_work_timeout_seconds` | `120` | `1..3600` |
-| `max_assistant_output_bytes` | `4096` | `1..8192` |
-| `max_observed_tool_calls` | `1` | `1..64` |
+The allowed maxima are 16 turns, 3,600 seconds, 8,192 bytes, and 64 tool calls. Invalid values are
+rejected rather than clamped.
 
-The deadline is `monotonic_now() + provider_work_timeout_seconds`; the clock value is never truncated.
-After any stream wait wakes, the loop checks the clock again. At or after the deadline, time wins
-even if an event became ready in the same scheduler turn, and that event is reaped without being
-accepted.
+Three invariants shape the agent loop:
 
-This is a provider-work deadline, not a promise that a protocol or transcript sink finishes within
-120 seconds. An independent watcher latches expiry and starts supervised provider cancellation
-without waiting for the session publication lock. If a delta transaction was admitted first, its
-wire write, reducer acceptance, and transcript-observer attempt still finish together. Every
-terminal-selection path checks the expiry latch as soon as that transaction releases the lock, so
-the deadline wins before another provider observation. The cancellation attempt starts on time and
-a conforming provider stops; failed or timed-out cleanup remains unconfirmed. A blocked local sink
-may delay the eventual terminal event, and local sink timeouts are future work.
+1. **Deadline precedence:** after a stream wait wakes, `now >= deadline` wins even if an event is
+   ready in the same scheduler turn. The event is reaped without acceptance.
+2. **Publication integrity:** an event transaction admitted before expiry finishes its ordered,
+   non-interleaved write/reducer/transcript attempt. The watcher can start provider cancellation
+   while that local sink is blocked, and the deadline terminal is selected next.
+3. **One cleanup task:** cancellation or close is invoked once and joined with a fixed five-second
+   grace. A cleanup exception or grace expiry emits the payload-free `provider_cleanup_failed`
+   diagnostic without replacing the selected terminal result.
 
-The configurable output check runs before CAH-021's fixed 8192-byte protocol-fit ceiling. If both
-would reject one delta, `assistant_output_limit_exceeded` is the terminal code. This makes the
-configurable safety budget authoritative without weakening the transport ceiling.
+The deadline bounds provider work, not local terminal latency. A provider that suppresses task
+cancellation cannot be forcefully contained by this in-process port; process isolation is deferred.
 
-The stable terminal codes are:
-
-| Budget | Failure code | Admission moment | Fixed safe message |
-| --- | --- | --- | --- |
-| Model turns | `model_turn_limit_exceeded` | Immediately before `Provider.start()` | `The model-turn limit was reached.` |
-| Provider work | `provider_work_deadline_exceeded` | When the monotonic deadline wins | `Provider work exceeded its time limit.` |
-| Assistant output | `assistant_output_limit_exceeded` | Before accepting a delta's UTF-8 bytes | `Assistant output exceeded its byte limit.` |
-| Tool calls | `tool_call_limit_exceeded` | Before accepting a provider tool request | `The provider tool-call limit was reached.` |
-
-Provider-reported tokens remain observational. They can differ by provider or arrive only at
-completion, so they neither replace harness counters nor grant additional budget.
-
-CAH-022 advances new transcripts to version 3. A provider-backed session writes at most one
-`loop.limits_observed` evidence record. With persistence enabled and healthy through the terminal
-write, it writes exactly one immediately before that terminal with the four configured values,
-three observed counters, and an optional exhausted-limit enum. Disabled persistence, persistence
-failure before the record, or teardown before terminal preparation writes none; teardown or
-persistence failure after the record may leave a replayable one-record prefix without a terminal.
-Replay keeps versions 1 and 2 compatible, validates version-3 order and bounds, and exposes limit
-evidence beside usage for summary generation. A mock session may have a version-3 transcript without
-this record because it never enters the provider-backed path.
-
-`exhausted_limit` is null or exactly `model_turns`, `provider_work`, `assistant_output`, or
-`tool_calls`. `model_turns_started` and `assistant_output_bytes` record admitted work and remain
-within their maxima; the provider-work limit is represented by the exhausted-limit classification,
-not an elapsed-time counter. When the tool budget is exhausted, `tool_calls_observed` is exactly
-maximum plus one because the rejecting request is itself an observation; otherwise it remains within
-the maximum.
+Transcript writer version 3 adds one transcript-only `loop.limits_observed` record immediately before
+the session terminal. Replay accepts versions 1, 2, and 3. A provider-backed terminal path records at
+most one observation; a mock session may omit it because it never enters this loop. Writer and replay
+also require an exhausted limit to match its exact adjacent failure code, so stored evidence cannot
+claim a limit failure beside completion, cancellation, or a different failure. In version 3, a
+reserved limit-failure code cannot appear without the preceding evidence record either.
 
 ## Practical walkthrough
 
-1. Validate limits before creating the tracker; reject booleans, zero, negatives, and excessive
-   values.
-2. Derive one absolute deadline from an injected monotonic clock when the provider-backed session
-   object is allocated, before observer/transcript setup or provider admission; pass it into the
-   later task.
-3. Ask the tracker to admit a model turn immediately before provider start.
-4. Race each next stream observation against an injected deadline waiter.
-5. Encode each delta as UTF-8 and reserve its full size before emitting it.
-6. Charge each tool request before inspecting its name or serialized arguments.
-7. When any reservation fails, select the stable failure, cancel active provider work, and await
-   cleanup.
-8. Route the failure through the same terminal guard as provider completion and user cancellation.
-9. On an enabled, healthy terminal path, persist exactly one bounded version-3
-   `loop.limits_observed` record and the stable limit classification; otherwise preserve the
-   at-most-one/prefix rules above.
-
-CAH-021 ends the session on its first admitted tool request. Integration can therefore prove the
-first-call boundary only; focused tracker tests seed prior tool counts to prove exact exhaustion and
-over-limit behavior until a later multi-turn/tool-continuation story makes those states reachable.
-`tool_calls_observed` increments before the decision: admitted calls remain at or below the maximum,
-while the rejecting observation is recorded as maximum plus one. Model turns and assistant bytes,
-by contrast, record admitted work and never exceed their configured maxima.
-
-Cleanup gets a separate fixed five-second grace. It is not a fifth user-configurable work budget;
-it is a defensive bound on awaiting a provider that has already violated its cleanup contract. On
-expiry, the local cleanup-join awaitable is cancelled and reaped, the selected outcome remains, and
-the harness reports cleanup as unconfirmed rather than pretending remote work stopped. A provider
-may internally shield a sole cleanup owner, as CAH-023 plans to do; that owner may continue after the
-bounded join ends. The local bound requires the port awaitable itself to propagate task cancellation,
-as every conforming in-process provider must. Python cannot forcefully reap a task that suppresses
-`CancelledError`; handling that implementation would require future process isolation or escalation.
+1. `ProviderSessionRunner` gives every session the same immutable configuration and a fresh tracker.
+2. Session allocation captures `monotonic_now() + timeout`; setup time therefore consumes budget.
+3. Admission checks the deadline and charges the model turn before the lazy provider start.
+4. Streaming checks the deadline after every wake, then reserves full UTF-8 deltas or counts tool
+   observations before publication or inspection.
+5. A limit selects one safe failure, starts or joins the shared cleanup task, and emits one terminal.
+6. Immediately before that terminal, the runtime asks the transcript to record the bounded snapshot.
 
 ## Implementation code samples
 
-No CAH-022 implementation exists yet. Planned control flow:
+### Reserve a whole output delta
 
-```text
-limits = validate(configuration)
-deadline = monotonic_now_at_session_allocation() + limits.provider_work_timeout_seconds
-tracker = start_tracker(deadline)
-deadline_watcher = start_expiry_latch_and_provider_cancel_without_publication_lock(deadline)
-under the deadline-admission guard:
-    if deadline_expiry_is_latched or monotonic_now() >= deadline:
-        reserve provider_work_deadline_exceeded without starting provider work
-    else:
-        tracker.admit_model_turn()
-        operation = provider.start(request)  # synchronous and lazy
-while provider operation is active:
-    observation = await next_owned_provider_event()
-    if monotonic_now() >= deadline:
-        reject observation and select provider_work_deadline_exceeded
-    if text delta:
-        tracker.reserve_output(utf8_size(delta))
-    if tool request:
-        tracker.increment_observed_tool_calls_then_check_limit()
-    publish admitted event as one shielded wire/reducer/transcript transaction
-    if deadline_expiry_is_latched:
-        select provider_work_deadline_exceeded before accepting another observation
-on limit failure:
-    if terminal_guard.select_failed(limit_code, safe_message):
-        supervise operation.cancel() with the fixed five-second cleanup grace
-        emit provider_cleanup_failed if the join raises or exceeds the grace
-        emit selected session.failed
-finally:
-    cancel and reap deadline_watcher when it has not already finished
+From [`loop_limits.py`](../../src/code_assist_harness/loop_limits.py):
+
+```python
+remaining = self._limits.max_assistant_output_bytes - self._assistant_output_bytes
+if candidate_bytes > remaining:
+    self._exhausted = "assistant_output"
+    return False
+self._assistant_output_bytes += candidate_bytes
+return True
 ```
 
-After implementation, replace this pseudocode with exact excerpts from the tracker, loop integration,
-and at least one deterministic boundary test.
+The subtraction derives the remaining budget. The comparison rejects the complete candidate and
+records the first exhausted class. Only an admitted candidate changes the byte counter.
+
+### Make time win before observation acceptance
+
+From [`provider_session.py`](../../src/code_assist_harness/provider_session.py):
+
+```python
+if self._deadline_latched or self._deadline_is_due():
+    await self._cancel_and_reap_pending_event()
+    await self._select_provider_deadline()
+    return
+
+try:
+    observation = pending.result()
+```
+
+The clock check occurs after the wait but before reading the provider result. Reaping first prevents
+the tied observation from leaking into an event or transcript.
+
+### Persist bounded evidence immediately before the terminal
+
+From [`provider_session.py`](../../src/code_assist_harness/provider_session.py):
+
+```python
+await self._notify_loop_limits_once()
+session_failed = await self._writer.emit_session(
+    "session.failed",
+    self._session_id,
+    {
+        "code": selection.failure_code,
+        "message": selection.failure_message,
+    },
+    correlation_id=self._command.command_id,
+)
+```
+
+The observer runs once before the terminal append. The wire failure stays small and stable; limit
+values and counters live only in bounded transcript evidence.
+
+### Prove a silent provider cannot evade the deadline
+
+From [`test_provider_session.py`](../../tests/test_provider_session.py):
+
+```python
+await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+clock.advance_to(10.0)
+await asyncio.wait_for(running, timeout=1)
+
+assert operation.cancel_calls == 1
+assert _wire_events(lines)[-1]["payload"] == {
+    "code": "provider_work_deadline_exceeded",
+    "message": "Provider work exceeded its time limit.",
+}
+```
+
+The fake blocks stream progress. Advancing an injected clock releases the deterministic waiter, so
+the test proves watcher-driven cancellation without sleeping or contacting a provider.
 
 ## Failure scenarios to study
 
-| Scenario | Observable symptom | Safe outcome and evidence |
-| --- | --- | --- |
-| Turn budget already exhausted | Provider would otherwise start | No `Provider.start()` call; one failed terminal |
-| Provider remains silent | No event reaches the loop | Provider-work deadline requests cancellation; cleanup is confirmed or reported unconfirmed after the grace |
-| Delta sink is blocked at expiry | An admitted publication transaction is unfinished | Independent watcher starts provider cancellation; the delta finishes all three views, then the deadline terminal wins |
-| Delta crosses byte budget | Candidate output is too large | Entire delta rejected before TUI or transcript |
-| Seeded tool counter is exhausted | Another request is proposed | No parsing or execution; stable limit failure |
-| Limit races completion | Two terminal paths contend | Shared guard records one winner |
-| Event and deadline wake together | Both awaitables are ready | Deadline wins before observation acceptance |
-| Cleanup contract is violated | Provider cancellation raises | Limit stays terminal; payload-free runtime diagnostic |
-| Cleanup barrier never returns | Awaitable blocks but propagates task cancellation | Five-second injected grace cancels and reaps the local await; provider cleanup remains unconfirmed |
-| Cleanup awaitable suppresses cancellation | In-process task refuses to stop | Outside the current port contract; no false reaping claim, and future process isolation is required |
+| Failure | Responsible boundary | Safe outcome | Evidence |
+| --- | --- | --- | --- |
+| Provider stays silent | Deadline watcher | Cancel once; deadline failure | Controlled clock test |
+| Delta exceeds bytes | Tracker before publication | Reject whole delta | Wire, reducer, and counter assertions |
+| Deadline and event tie | Session coordinator | Deadline wins; event reaped | Exact-tie regression test |
+| Sink blocks after admission | Watcher plus publication lock | Cancellation starts; admitted transaction settles; deadline terminal follows | Blocked-sink race test |
+| Cleanup raises or times out | Shared cleanup supervisor | Keep original terminal; emit safe diagnostic | Exception and grace tests |
+| Transcript terminal append fails | Transcript writer | Preserve replayable limit-record prefix | Persistence rollback/prefix tests |
 
 ## Production expansion
 
 ### Example enterprise scenario
 
-A hosted coding assistant may need per-tenant quotas, regional deadlines, concurrency admission,
-provider rate limits, and cost budgets. Those policies can feed the same preflight and streaming
-accountants, but they require durable coordination and operational ownership beyond one local process.
+A hosted agent may need tenant quotas, cross-replica concurrency limits, upstream deadline
+propagation, and spend controls. Those policies can feed the same admission points, but they require
+durable coordination and operational ownership beyond one process.
 
 ### Typical production capabilities and tools
 
-These official references illustrate capabilities rather than dependencies:
-
-- [Python asyncio timeouts](https://docs.python.org/3/library/asyncio-task.html#timeouts) document
-  monotonic-loop deadline primitives suitable for the local implementation.
+- [Python asyncio timeouts](https://docs.python.org/3/library/asyncio-task.html#timeouts) provide
+  monotonic timeout primitives.
 - [Envoy circuit breaking](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/circuit_breaking)
-  illustrates shared connection and request admission bounds.
-- [OpenTelemetry metrics](https://opentelemetry.io/docs/concepts/signals/metrics/) illustrate
-  centralized limit counters and alerts, with added cardinality and privacy policy.
+  adds shared upstream admission bounds.
+- [OpenTelemetry metrics](https://opentelemetry.io/docs/concepts/signals/metrics/) supports centralized
+  counters and alerts, with privacy and cardinality costs.
 - [Kubernetes resource quotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/) illustrate
-  multi-tenant aggregate budgets that require cluster-wide enforcement.
+  aggregate multi-tenant resource governance.
 
 ### Local design versus production design
 
 | Dimension | This repository | Production expansion |
 | --- | --- | --- |
-| Scope | One process and one active session | Tenants, regions, replicas, and provider accounts |
-| Provider time | Injected monotonic provider-work deadline | Distributed deadlines and upstream timeout propagation |
-| Output | Local cumulative UTF-8 bytes | Content, token, cost, and transport budgets |
-| Admission | In-memory tracker | Durable quota and concurrency service |
-| Operations | Deterministic fake tests | Metrics, alerts, override governance, and runbooks |
+| Scope | One process and active session | Tenants, replicas, and provider accounts |
+| Reliability | Deterministic local guard and replay | Durable quota service and upstream deadlines |
+| Operations | Fake-provider tests and safe diagnostics | Metrics, alerts, overrides, and runbooks |
+| Cost | Low setup and explicit control flow | Distributed state and governance ownership |
 
 ### Trade-offs and graduation signals
 
-Local immutable limits are easy to audit but cannot coordinate multiple processes. Graduate to a
-shared quota system when concurrency or multi-tenant requirements make local counters inaccurate.
-Add provider-specific budgets only when measured spend, rate-limit behavior, or service objectives
-justify their extra configuration and failure modes.
+Local counters are auditable but cannot coordinate replicas. Graduate when concurrent sessions make
+local accounting inaccurate, measured provider spend requires shared enforcement, or service-level
+objectives require upstream deadline propagation.
 
 ## Practical exercises
 
-1. Calculate the UTF-8 budget for ASCII text and an emoji, then predict which delta is rejected.
-2. Seed a turn counter at its maximum and prove the fake records no request.
-3. Seed a tool counter at its maximum and prove no second natural provider turn is implied.
-4. Hold a fake provider at a logical gate and advance the injected deadline.
-5. Race a final provider completion with an output-budget failure and identify the terminal guard's
-   required evidence.
-6. Explain why reported tokens cannot stop a stream before the report arrives.
+1. Change an output limit and predict whether an emoji delta fits by UTF-8 bytes.
+2. Advance the fake clock at the same moment as a final event and confirm the deadline wins.
+3. Seed the tool-call tracker at its maximum and confirm arguments are never inspected.
 
 ## Key takeaways
 
-- The harness owns budgets and charges them before admitting work or evidence.
-- A deadline, streaming accountant, cleanup barrier, and terminal guard must work together.
-- Distributed quotas and telemetry improve multi-process control but add operational cost and new
-  failure domains.
+- The harness, not the TUI or provider adapter, owns agent-loop safety budgets.
+- Charge work before acceptance and converge every ending on one terminal and cleanup owner.
+- Shared production quotas add coordination power at the cost of distributed state and operations.
 
 ## Glossary
 
-- **Admission control:** decision made before costly work begins.
-- **Budget reservation:** accounting performed before an observation is accepted.
-- **Deadline waiter:** cancellable task that wakes at the monotonic provider-work deadline.
-- **Hard limit:** validated maximum that active work cannot weaken.
-- **Limit race:** concurrent attempts by a limit and another path to end a session.
+- **Admission:** the decision to begin costly work.
+- **Budget reservation:** accounting completed before accepting an observation.
+- **Deadline latch:** first-winner state recording that provider work has expired.
+- **Cleanup grace:** fixed local bound for joining provider cancellation or close.
 
 See the shared [project glossary](../glossary.md) for session, model turn, provider, and tool call.
 
 ## Further reading
 
-- [CAH-022 user story](../../user-stories/cah-022-enforce-loop-limits.md)
-- [CAH-021 provider-neutral turn](cah-021-one-model-turn.md)
-- Project design: [agent loop](../agent-loop.md), [safety model](../safety-model.md), and
+- [CAH-022 story](../../user-stories/cah-022-enforce-loop-limits.md)
+- [Agent loop](../agent-loop.md), [safety model](../safety-model.md), and
   [evaluation](../evaluation.md)
-- Later network boundary: [CAH-023 lesson](cah-023-openai-responses-adapter.md)
-- Production references: [Python asyncio timeouts](https://docs.python.org/3/library/asyncio-task.html#timeouts),
-  [Envoy circuit breaking](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/circuit_breaking),
-  [OpenTelemetry metrics](https://opentelemetry.io/docs/concepts/signals/metrics/), and
-  [Kubernetes resource quotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
+- [CAH-021 provider-neutral turn](cah-021-one-model-turn.md)
+- [CAH-023 OpenAI adapter](cah-023-openai-responses-adapter.md)
