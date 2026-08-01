@@ -142,7 +142,15 @@ describe('run-tui launcher', () => {
     try {
       const result = spawnSync(
         launcherPath,
-        ['--no-transcript', '--workspace', 'target with spaces'],
+        [
+          '--no-transcript',
+          '--provider',
+          'openai',
+          '--model',
+          'gpt-4.1-mini-2025-04-14',
+          '--workspace',
+          'target with spaces',
+        ],
         {
         cwd: launchDirectory,
         encoding: 'utf8',
@@ -155,6 +163,10 @@ describe('run-tui launcher', () => {
       expect(result.stdout).toContain('argument=<start>');
       expect(result.stdout).toContain('argument=<-->');
       expect(result.stdout).toContain('argument=<--no-transcript>');
+      expect(result.stdout).toContain('argument=<--provider>');
+      expect(result.stdout).toContain('argument=<openai>');
+      expect(result.stdout).toContain('argument=<--model>');
+      expect(result.stdout).toContain('argument=<gpt-4.1-mini-2025-04-14>');
       expect(result.stdout).toContain('argument=<--workspace>');
       expect(result.stdout).toContain('argument=<target with spaces>');
     } finally {

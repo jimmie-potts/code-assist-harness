@@ -33,17 +33,18 @@ reducer. Provider-backed version-3 tapes may also carry bounded, transcript-only
 projection. A mock-session version-3 tape may omit loop-limit evidence because the launched mock does
 not enter the provider-backed path. A storage failure becomes one recoverable TUI warning without
 changing the session outcome. Use `--no-transcript` to disable only these local files.
-The launched application does **not** yet read the workspace, integrate with OpenAI, or select a
-provider-backed session. It still composes `MockSession`, so the protocol-v1 TUI experience remains
-the deterministic three-delta mock. Beside that launched path, `ProviderSession` now implements one
-harness-owned provider-neutral turn, and `run_runtime` exposes an injected-provider seam used by
-network-free tests. The turn builds one exact request, enforces the locked text/completion grammar,
-and applies four immutable hard limits: model-turn admission, provider-work time, cumulative accepted
-UTF-8 output, and observed provider tool calls. Each allocated provider session owns a fresh tracker,
-and the provider-work deadline excludes local event and transcript sink latency. Completion, failure,
-cancellation, deadline expiry, teardown, and one shared provider-cleanup task remain serialized around
-one terminal winner; every cleanup await has a fixed five-second local grace. CAH-009 documents the
-first end-to-end mocked execution in the
+The default launch still composes `MockSession`, so the protocol-v1 TUI experience remains the
+deterministic three-delta mock. Explicitly selecting `--provider openai --model
+gpt-4.1-mini-2025-04-14` instead composes the first real adapter and runs one harness-owned
+`ProviderSession` under the same four immutable hard limits. The adapter owns SDK request/event
+translation, fixed safe failure mapping, and one-operation stream/client cleanup; SDK objects and
+credentials do not enter provider-neutral, protocol, or transcript types. The request is text-only,
+foreground, `background=false`, and `store=false`; provider tool and reasoning output fail closed.
+Default tests use SDK fakes with network denied, and the credentialed live smoke remains an explicit
+non-default check. Each provider session owns a fresh limit tracker, and its deadline excludes local
+event and transcript sink latency. Completion, failure, cancellation, deadline expiry, teardown, and
+one shared provider-cleanup task remain serialized around one terminal winner; every cleanup await has
+a fixed five-second local grace. CAH-009 documents the first end-to-end mocked execution in the
 [walking-skeleton guide](docs/walking-skeleton.md). Its normalized success and cancellation examples
 are checked against the shared protocol validators and the real process-boundary evidence. CAH-007
 adds one offline `./scripts/check` gate and a lockfile-driven Linux workflow for the complete M0
@@ -52,9 +53,9 @@ evidence without moving lifecycle authority into storage. CAH-020 adds the provi
 network-free fake, CAH-021 completes the first injected provider-neutral turn, and
 [CAH-022](user-stories/cah-022-enforce-loop-limits.md) completes its hard limits with a
 [written lesson](docs/lessons/cah-022-loop-limits.md) and
-[visual companion](docs/lessons/assets/cah-022-loop-limits.pptx). CAH-023 is the next unit and will
-introduce and activate the OpenAI Responses adapter. Workspace reads, tool execution, policy, and
-broader multi-turn agent behavior also remain unimplemented.
+[visual companion](docs/lessons/assets/cah-022-loop-limits.pptx). CAH-023 adds the strict OpenAI
+Responses adapter and explicit launch selection without changing protocol v1. Workspace discovery and
+reads, tool execution, policy, and broader multi-turn agent behavior remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -125,9 +126,10 @@ See [architecture.md](docs/architecture.md) for the complete target structure an
 - Node 22.22.1, pinned in `.node-version`; the enforced TUI range is `>=22.13.0 <23`
 - npm 9 or newer
 
-An OpenAI API key is not needed for the walking skeleton or default tests. Planned CAH-023 will let
-the adapter consume `OPENAI_API_KEY` only when OpenAI is explicitly selected; CAH-011 may inspect a
-recognized credential value solely to seed transcript redaction. Credentials and `.env` files must
+An OpenAI API key is not needed for the walking skeleton, default launch, or default tests. The
+adapter consumes `OPENAI_API_KEY` only after OpenAI and the exact model snapshot are explicitly
+selected; Python rejects every other ambient `OPENAI_*` setting before SDK import. CAH-011 may inspect
+a recognized credential value solely to seed transcript redaction. Credentials and `.env` files must
 never be committed.
 
 ## Setup, launch, and checks
@@ -153,7 +155,7 @@ whose complete-lock-graph check invokes npm, and before every TUI npm stage. The
 repository policy, TUI type checking, lint, unit tests, TypeScript protocol fixtures, and the real
 Node-to-`uv`-to-Python integration as distinct stages. Repository policy uses Git's tracked and
 nonignored untracked files to check local documentation links and anchors, the complete TUI lock
-graph, and the M0 production-source network guard.
+graph, and the production-source network boundary.
 
 The script verifies the Python environment with `uv sync --check --locked --offline`, runs Python
 tools with `uv run --offline --frozen --no-sync`, and uses npm offline mode. It sets `TMPDIR=/tmp`,
@@ -163,10 +165,11 @@ interpreter, working-directory, and no-project selectors so local Python checks 
 away from the repository's prepared environment, and clears isolated-run mode so `uv run` cannot
 substitute an ephemeral environment. The top-level Python and Node checks preload guards that reject
 common socket/network client entry points. The runtime supervisor deliberately strips ambient Python
-selectors, including `PYTHONPATH`, before its real Python child; that current child remains covered by
-source-policy tests that reject known network modules and request APIs in production paths. These are
-intentionally small M0 controls, not a general-purpose network sandbox for arbitrary native
-executables.
+selectors, including `PYTHONPATH`, before its real Python child. Source policy permits the approved SDK
+and network surface only inside the concrete OpenAI adapter; provider-neutral code remains isolated.
+The canonical gate deselects the live-provider marker and removes OpenAI credentials and routing
+configuration. These are defense-in-depth controls, not a general-purpose network sandbox for
+arbitrary native executables.
 
 `uv sync --dev` is required before launch. The runtime supervisor verifies that `.venv/pyvenv.cfg`
 and an executable `.venv/bin/python` already exist before it invokes `uv`; an unprepared checkout
@@ -177,6 +180,16 @@ supervised shell from the repository root inside Ubuntu WSL:
 ```bash
 ./scripts/run-tui
 ```
+
+That command selects the deterministic mock. To opt into the real bounded turn, provide
+`OPENAI_API_KEY` through the process environment and select the exact reviewed snapshot:
+
+```bash
+./scripts/run-tui --provider openai --model gpt-4.1-mini-2025-04-14
+```
+
+Provider and model are child-process configuration, not NDJSON fields. TypeScript validates the pair
+for early feedback and Python validates it again before importing or constructing the SDK adapter.
 
 The directory from which the launcher is invoked is the default workspace. Select a different
 single workspace with an absolute path, or with a path relative to that launch directory:
@@ -195,8 +208,8 @@ run with either of these equivalent forms:
 ./scripts/run-tui --workspace /path/to/repository --no-transcript
 ```
 
-The flag controls local harness artifacts only; it does not make a future provider request or
-provider-side retention policy disappear. Transcript filenames contain a pseudonymous workspace
+The flag controls local harness artifacts only; it does not cancel an OpenAI request or supersede
+provider-account retention controls. Transcript filenames contain a pseudonymous workspace
 hash, session ID, and random transcript ID, not the workspace path or repository name. The hash is
 not anonymous, file mode `0600` is not encryption, and retention remains the local user's
 responsibility.
@@ -207,8 +220,8 @@ npm or the TypeScript loader runs. The runtime supervisor separately resolves `u
 `PATH`, follows symlinks, rejects paths under `/mnt` and names ending in `.exe`, and validates the
 prepared project environment before spawn. The TUI then sends a validated `runtime.initialize`
 command, waits for the correctly correlated `runtime.ready` event, and displays the canonical
-workspace and runtime state. Type a non-empty task and press Enter to start the deterministic mock.
-The conversation renders these three fragments as they arrive:
+workspace and runtime state. With the default provider, type a non-empty task and press Enter to start
+the deterministic mock. The conversation renders these three fragments as they arrive:
 
 ```text
 Mock response:
@@ -296,12 +309,12 @@ duplicating its check list in workflow YAML.
 ## Current and planned project layout
 
 ```text
-src/code_assist_harness/  Runtime, reducers, protocol, persistence, and provider-neutral boundary
+src/code_assist_harness/  Runtime, reducers, protocol, persistence, and provider implementations
 tests/                    Current Python tests mirroring source modules
 tui/                      Current supervised Ink app, Zod protocol boundary, metadata, and tests
 scripts/run-tui           Current WSL-aware launcher and argument-forwarding boundary
 scripts/check             Canonical offline repository validation gate
-protocol/                 Current reviewed cross-language NDJSON and walking-skeleton fixtures
+protocol/                 Reviewed cross-language protocol, lifecycle, and launch-config fixtures
 evals/                    Planned deterministic scenario fixtures
 docs/                     Architecture and learning documentation
 docs/lessons/             Unit-by-unit learning companions
@@ -310,9 +323,9 @@ user-stories/             Roadmap, implementation stories, and planning notes
 
 The Python runtime, supervised TUI, protocol messages and fixtures, deterministic mocked streaming,
 cooperative session cancellation, conversation projection, transcript-v3 persistence with v1/v2/v3
-replay, provider-neutral request and stream contracts, strict programmable fake, and one hard-bounded
-injected provider-backed session turn exist today. The launched TUI still selects the mock. The
-OpenAI adapter and runtime activation, broader evaluation, workspace reads, tools, policy, and
+replay, provider-neutral request and stream contracts, strict programmable fake, one hard-bounded
+provider session turn, and the explicitly selected OpenAI Responses adapter exist today. The launched
+TUI defaults to the mock. Broader evaluation, workspace discovery and reads, tools, policy, and
 transcript browsing/export/retention remain planned and are introduced only by the story that needs
 them.
 

@@ -18,6 +18,10 @@ import {
   type ProtocolLineErrorCode,
   type ProtocolLineResult,
 } from './protocol-stream.js';
+import {
+  resolveProviderSelection,
+  type RuntimeProvider,
+} from './provider-configuration.js';
 import {RuntimeDiagnostics} from './runtime-diagnostics.js';
 import {
   INITIAL_SESSION_LIFECYCLE_STATE,
@@ -126,6 +130,10 @@ export interface PythonRuntimeSupervisorConfiguration {
   readonly command?: string;
   /** Disable only local transcript and summary files when explicitly false. */
   readonly transcriptEnabled?: boolean;
+  /** Provider selected explicitly by launch configuration; absence preserves the mock default. */
+  readonly provider?: RuntimeProvider;
+  /** Exact model accepted only when `provider` is `openai`. */
+  readonly model?: string;
 }
 
 /** Injectable process and timing seams for deterministic lifecycle tests. */
@@ -170,10 +178,12 @@ export class SessionSubmissionError extends Error {
 /**
  * Build the offline uv invocation that {@link prepareRuntimeLaunch} must approve before spawn.
  *
- * The uv project root is the harness repository while the target workspace is a separate explicit
- * Python argument. Python, virtual-environment, and uv selectors are removed from the inherited
+ * The uv project root is the harness repository while the target workspace, provider, and optional
+ * model are separate explicit Python arguments. Provider configuration never enters the NDJSON
+ * protocol. Python, virtual-environment, and uv selectors are removed from the inherited
  * environment. stdin/stdout/stderr are all pipes; CAH-004 validates stdout as protocol events
- * before any child output can enter trusted lifecycle state.
+ * before any child output can enter trusted lifecycle state. An invalid provider/model pair is
+ * rejected locally with a fixed message before preflight or spawn.
  */
 export function buildRuntimeLaunchRequest(
   repositoryRoot: string,
@@ -181,8 +191,11 @@ export function buildRuntimeLaunchRequest(
   command = 'uv',
   environment: NodeJS.ProcessEnv = process.env,
   transcriptEnabled = true,
+  provider: RuntimeProvider | undefined = undefined,
+  model: string | undefined = undefined,
 ): RuntimeLaunchRequest {
   const pythonExecutable = join(repositoryRoot, '.venv', 'bin', 'python');
+  const providerSelection = resolveProviderSelection(provider, model);
   return {
     command,
     arguments: [
@@ -202,6 +215,11 @@ export function buildRuntimeLaunchRequest(
       'python',
       '-m',
       'code_assist_harness.runtime',
+      '--provider',
+      providerSelection.provider,
+      ...(providerSelection.provider === 'openai'
+        ? ['--model', providerSelection.model]
+        : []),
       '--workspace',
       workspace,
       ...(transcriptEnabled ? [] : ['--no-transcript']),
@@ -292,6 +310,8 @@ export class PythonRuntimeSupervisor implements RuntimeSupervisor {
       configuration.command,
       dependencies.environment,
       configuration.transcriptEnabled,
+      configuration.provider,
+      configuration.model,
     );
     this.#spawnProcess = dependencies.spawnProcess ?? spawnRuntimeProcess;
     this.#prepareLaunch = dependencies.prepareLaunch ?? prepareRuntimeLaunch;

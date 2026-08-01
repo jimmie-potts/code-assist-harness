@@ -9,8 +9,8 @@
 > repository context, tools, approvals, or edits. CAH-011 now records the same lifecycle, but the M0
 > trace below intentionally stays on the protocol path rather than following that persistence side
 > channel record by record. CAH-020 adds the provider port and fake, CAH-021 adds a separately tested
-> injected-provider session, and CAH-022 hard-bounds that injected path. None changes the launched
-> `MockSession` trace below.
+> injected-provider session, and CAH-022 hard-bounds that path. CAH-023 adds explicit OpenAI
+> composition, but the default launch—and therefore the `MockSession` trace below—remains unchanged.
 
 ## What this slice proves
 
@@ -235,14 +235,14 @@ The commands use no API key, model, network call, or target-workspace write.
 ## Intentional M0 omissions
 
 The response text is fixed. `MockSession` is a runtime fixture, not a provider adapter or an agent
-loop. The CAH-020 provider package, CAH-021 `ProviderSession`, and CAH-022 limits exist beside this
-launched path but do not replace its response source. This walking-skeleton path does not yet:
+loop. The provider package, `ProviderSession`, hard limits, and OpenAI adapter exist beside this
+default path but do not replace its response source. This walking-skeleton path does not:
 
 - call OpenAI or any other provider;
 - discover, search, or read workspace content;
 - expose tools, evaluate policy, or request approval;
 - propose or apply edits, run repository subprocesses, or show diffs;
-- select the implemented provider-backed turn from `main()` or the TUI.
+- exercise the explicit OpenAI/provider-backed launch option.
 
 These omissions keep the first boundary deterministic. They must not be filled in by explanatory
 prose before their owning stories implement and test them.
@@ -252,9 +252,9 @@ redacted local version-3 transcript plus terminal summary unless disabled. Repla
 consistent version-1, version-2, and version-3 tapes, but the walking skeleton still does not browse,
 export, resume, or derive live authority from storage. A mock version-3 tape may omit
 `loop.limits_observed` because it never enters the provider-backed path. Optional provider usage and
-loop-limit evidence on the separately injected path never change this protocol-v1 trace.
+loop-limit evidence on the provider-backed path never change this protocol-v1 trace.
 
-## What comes next
+## What followed this slice
 
 [CAH-007](../user-stories/cah-007-establish-repository-checks.md) now runs the separate Python,
 TypeScript, protocol, integration, documentation, and network-policy checks through one offline
@@ -273,8 +273,13 @@ injected provider-neutral turn while preserving the existing lifecycle invariant
 deadline supervision, bounded cleanup, and transcript-v3 loop evidence around that injected turn; its
 [lesson](lessons/cah-022-loop-limits.md) and
 [visual companion](lessons/assets/cah-022-loop-limits.pptx) explain the shipped boundary.
-[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md) is next and will activate a real
-provider while `main()` and the TUI remain on `MockSession` today.
+[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md) now adds the strict OpenAI Responses
+adapter and explicit `--provider openai --model gpt-4.1-mini-2025-04-14` launch path. Default launch,
+default tests, and this guide remain on `MockSession`; workspace discovery, tools, and approvals are
+still absent.
+
+With M1 complete, the next planning step is to refine the first single-responsibility E3 story for
+repository context and bounded native reads before implementing it.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

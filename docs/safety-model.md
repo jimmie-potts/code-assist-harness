@@ -1,8 +1,9 @@
 # Safety Model
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
-> injected provider-session path; the launched `main()` path remains `MockSession`, and this is not a
-> sandbox or a claim that untrusted code can be executed safely.
+> provider-session path, and CAH-023 makes that path available only through explicit, validated OpenAI
+> selection. The launch still defaults to `MockSession`; this is not a sandbox or a claim that
+> untrusted code can be executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
 repository content are untrusted inputs. Safety therefore comes from defense in depth: bounded
@@ -105,7 +106,7 @@ Cancellation will be checked before provider calls, tool execution, edit applica
 loop step. Since external work may finish concurrently, the session terminal-state guard ensures
 exactly one completed, cancelled, or failed event wins.
 
-CAH-022 implements four hard limits for injected provider-backed sessions: model-turn admission,
+CAH-022 implements four hard limits for provider-backed sessions: model-turn admission,
 provider-work time, cumulative accepted UTF-8 output, and observed provider tool calls. The immutable
 configuration is validated before use, while every allocated session owns a fresh tracker. Admission
 is charged before `Provider.start()`, output before publication, and tool requests before parsing or
@@ -126,6 +127,20 @@ awaitable is cancelled and reaped and `provider_cleanup_failed` is emitted at mo
 replacing the selected terminal outcome. This requires provider awaitables to propagate task
 cancellation and does not prove remote cleanup succeeded. File-size, search-result,
 command-duration, whole-session, and later tool-execution limits remain future controls.
+
+CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
+validate the explicit `openai` provider plus exact `gpt-4.1-mini-2025-04-14` snapshot, while Python
+remains authoritative before SDK import. `OPENAI_API_KEY` is inspected only after that selection;
+every other `OPENAI_*` setting is rejected so ambient routing, headers, or logging cannot silently
+alter the request. The adapter fixes the official endpoint, disables environment proxy trust,
+redirects, SDK retries, and background mode, and sets `store=false` for the request. Its closed failure
+table never exposes SDK exceptions, bodies, headers, request IDs, model candidates, or credentials.
+
+Each OpenAI operation lazily owns one client and stream. Natural termination and cancellation share
+one shielded adapter cleanup task that attempts both closes, beneath the harness's five-second local
+cleanup grace. A bounded cleanup failure records that release is unconfirmed; it does not claim remote
+cleanup succeeded or replace the selected session outcome. Default validation uses SDK fakes with
+network denied, and the live smoke requires explicit flags, the exact model, and a credential.
 
 ## Transcripts and privacy
 
@@ -157,7 +172,8 @@ and recognized credential syntax are redacted before a lifecycle input is persis
 safety net, so producers should avoid emitting secrets in the first place.
 
 The CLI implements `--no-transcript`, which disables local JSONL and summary files without changing
-the event tape. It does not govern future provider-side storage. A first transcript failure becomes
+the event tape. It does not govern the adapter's separate `store=false` request setting or broader
+provider-account retention controls. A first transcript failure becomes
 one sanitized recoverable TUI warning, disables later persistence attempts for that process, and
 cannot silently corrupt or rewrite session state.
 
@@ -179,6 +195,7 @@ At minimum, safety tests cover:
 - Rejected approval producing no side effect.
 - Command timeout and cancellation terminating child processes.
 - Secret-like values omitted or redacted from events, diagnostics, fixtures, and transcripts.
+- Provider/model/environment/key rejection before SDK import, with fixed non-echoing diagnostics.
 
 Passing these tests demonstrates the specified controls; it does not turn restricted host execution
 into secure execution of arbitrary untrusted code.

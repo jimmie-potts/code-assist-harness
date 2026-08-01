@@ -5,9 +5,10 @@
 > normalized teaching tapes to that evidence. CAH-007 runs all current deterministic layers through
 > one offline repository gate and Linux workflow. CAH-010 adds equivalent pure lifecycle reducers
 > and shared transition/replay fixtures. CAH-020 adds the provider-neutral port and programmable
-> fake. CAH-021 proves one injected provider-backed turn, and CAH-022 proves four hard limits,
-> deadline races, bounded cleanup, and version-3 evidence around it. Filesystem-backed `evals/`
-> scenarios are not implemented yet, and the launched TUI remains on the deterministic mock.
+> fake. CAH-021 proves one provider-backed turn, CAH-022 proves four hard limits, deadline races,
+> bounded cleanup, and version-3 evidence around it, and CAH-023 adds SDK-fake adapter coverage plus
+> an explicit optional live smoke. Filesystem-backed `evals/` scenarios are not implemented yet, and
+> the launched TUI still defaults to the deterministic mock.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -83,8 +84,9 @@ request ordering, malformed serialized tool arguments, usage validation, and saf
 `tests/provider/test_fake.py` exercises exact request order, logical delays without wall-clock sleep,
 normalized failure, content-safe mismatch diagnostics, omitted and extra calls, abandoned streams,
 single-consumer ownership, and cancellation before output and between deltas.
-`tests/provider/test_port_imports.py` proves the package imports while common vendor and framework
-modules are unavailable and that the project declares no OpenAI or LangChain dependency. A
+`tests/provider/test_port_imports.py` proves the provider-neutral package surface imports while vendor
+and framework modules are unavailable; the concrete adapter remains an isolated, non-reexported
+module. A
 transcript regression models the later failure handoff and verifies that only normalized failure
 fields are persisted, never a raw adapter object.
 
@@ -111,6 +113,15 @@ earlier accepted view, and the test does not claim to bound local sink latency.
 fresh counters across sequential provider sessions, transcript-mode wire parity, and version-3 loop
 evidence. `tests/test_transcript.py` retains version-1 and version-2 replay and validates version-3
 cardinality, order, ranges, prefixes, and mock omission.
+
+CAH-023 adds deterministic adapter evidence without making the default suite networked.
+`tests/provider/test_openai_config.py` and `tests/test_runtime_configuration.py` prove exact
+provider/model parity, SDK-free rejection, credential privacy, mock independence from ambient keys,
+and lazy composition. `tests/provider/test_openai_responses.py` uses SDK-shaped fakes to cover exact
+request mapping, the accepted stream automaton, failure normalization, cancellation races, and every
+stream/client cleanup outcome. TypeScript configuration, launcher, supervisor, and real-boundary tests
+prove separate shell-free arguments and the explicit mock default. Repository policy permits the SDK
+and network surface only in the concrete adapter.
 
 ## Assertion layers
 
@@ -163,15 +174,26 @@ fixtures test unsupported versions, bad discriminators, missing fields, and malf
 The walking-skeleton tests start the real Node parent and Python child with mocked runtime behavior.
 They assert ordered streamed completion, authoritative cancellation, another session after a
 terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. Separate Python
-integration tests now exercise the CAH-020 fake through CAH-021's injected runtime seam and CAH-022's
-four hard limits while leaving the launched mock honest. CAH-023 is next and will activate the bounded
-path at the composition root. A later unit may add a fake or restricted executor.
+integration tests exercise the CAH-020 fake through CAH-021's runtime seam and CAH-022's four hard
+limits. CAH-023 activates that bounded path at the composition root only for explicit OpenAI/model
+selection; the default process-boundary suite remains on the mock. A later unit may add a fake or
+restricted executor.
 
 ### Live-provider smoke evaluations
 
-CAH-023 will add one minimal live OpenAI smoke evaluation that is optional, explicitly selected,
+CAH-023 includes one minimal live OpenAI smoke evaluation that is optional, explicitly selected,
 credential-gated, and excluded from default validation and default CI even when credentials are
-present. Later live evaluations may measure
+present. It runs only with `--run-live-provider`, `--live-provider-model
+gpt-4.1-mini-2025-04-14`, and `OPENAI_API_KEY`; ambient credentials alone never select it. After
+supplying the credential through the process environment, run the one smoke explicitly:
+
+```bash
+uv run pytest -q -m live_provider tests/provider/test_openai_live.py \
+  --run-live-provider --live-provider-model gpt-4.1-mini-2025-04-14
+```
+
+This command may incur provider cost and is supplemental rather than completion evidence. Later live
+evaluations may measure
 retrieval quality, unnecessary reads, plan grounding, tool-call success, unsafe attempts, and
 final-summary accuracy. Their variability must not weaken deterministic harness gates.
 
@@ -211,7 +233,7 @@ CAH-007 makes `./scripts/check` the canonical local and CI entry point for this 
 common provider credentials, forces dependency tools offline after setup, and preloads guards into
 the top-level Python and Node checks that reject common socket/network client entry points. The real
 Python integration child preserves its runtime-selector sanitization, including removal of
-`PYTHONPATH`, and is covered by the current M0 production-source denylist instead. The gate also
+`PYTHONPATH`, and is covered by the current production-source network policy instead. The gate also
 checks local Markdown targets and anchors. These controls are defense in depth rather than an
 operating-system sandbox for arbitrary native executables.
 Focused tests remain useful for diagnosis, but a completed unit returns to the unified gate and
@@ -241,11 +263,12 @@ Complete this story when an isolated runner reports event and file-state differe
 > As a learner, I want known relevant files, source ranges, budgets, and unnecessary reads measured
 > so that context-engineering changes can be compared.
 
-### CAH-023 (Planned) — Add optional live-provider smoke evaluation
+### CAH-023 (Implemented) — Add optional live-provider smoke evaluation
 
 > As a maintainer, I want an explicit non-default provider smoke suite so that the real adapter can
 > be checked without making ordinary development depend on credentials or network access.
 
-This evaluation slice is assigned to
-[CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md); broader live quality evaluation
+The smoke executes one minimal request through `ProviderSession` and `LoopLimits`, then requires a
+bounded completed result. Marker selection without the explicit run flag skips it; the canonical gate
+also deselects `live_provider` and clears provider configuration. Broader live quality evaluation
 remains future work.

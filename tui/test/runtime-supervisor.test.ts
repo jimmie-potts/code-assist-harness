@@ -16,6 +16,7 @@ import {PassThrough} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
 
 import {MAX_PROTOCOL_LINE_BYTES} from '../src/protocol.js';
+import {OPENAI_TEXT_STREAM_MODEL} from '../src/provider-configuration.js';
 import {
   buildRuntimeLaunchRequest,
   prepareRuntimeLaunch,
@@ -234,6 +235,8 @@ describe('PythonRuntimeSupervisor', () => {
         'python',
         '-m',
         'code_assist_harness.runtime',
+        '--provider',
+        'mock',
         '--workspace',
         '/workspace',
       ],
@@ -245,6 +248,41 @@ describe('PythonRuntimeSupervisor', () => {
         env: {},
       },
     });
+  });
+
+  it('forwards an explicit OpenAI model as separate shell-free Python arguments', () => {
+    const request = buildRuntimeLaunchRequest(
+      '/repo',
+      '/workspace',
+      'uv',
+      {},
+      true,
+      'openai',
+      OPENAI_TEXT_STREAM_MODEL,
+    );
+
+    expect(request.arguments.slice(-6)).toEqual([
+      '--provider',
+      'openai',
+      '--model',
+      OPENAI_TEXT_STREAM_MODEL,
+      '--workspace',
+      '/workspace',
+    ]);
+    expect(request.arguments.filter((argument) => argument === '--provider')).toHaveLength(1);
+    expect(request.arguments.filter((argument) => argument === '--model')).toHaveLength(1);
+    expect(request.options.shell).toBe(false);
+  });
+
+  it('rejects an invalid direct supervisor provider/model pair before spawn', () => {
+    const model = 'model-value-that-must-not-be-echoed';
+
+    expect(() =>
+      buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {}, true, 'mock', model),
+    ).toThrow('--model is supported only with --provider openai.');
+    const message = launchConfigurationErrorMessage('openai', model);
+    expect(message).toBe('Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14.');
+    expect(message).not.toContain(model);
   });
 
   it('forwards transcript opt-out as one separate shell-free Python argument', () => {
@@ -264,10 +302,17 @@ describe('PythonRuntimeSupervisor', () => {
       UV_ISOLATED: '1',
       VIRTUAL_ENV: '/tmp/active-environment',
       CUSTOM_SETTING: 'kept',
+      OPENAI_API_KEY: 'kept-for-authoritative-python-validation',
+      OPENAI_BASE_URL: 'kept-so-python-can-reject-it',
     };
     const request = buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', environment);
 
-    expect(request.options.env).toEqual({PATH: '/usr/bin', CUSTOM_SETTING: 'kept'});
+    expect(request.options.env).toEqual({
+      PATH: '/usr/bin',
+      CUSTOM_SETTING: 'kept',
+      OPENAI_API_KEY: 'kept-for-authoritative-python-validation',
+      OPENAI_BASE_URL: 'kept-so-python-can-reject-it',
+    });
     expect(environment).toEqual({
       PATH: '/usr/bin',
       PYTHONHOME: '',
@@ -276,6 +321,8 @@ describe('PythonRuntimeSupervisor', () => {
       UV_ISOLATED: '1',
       VIRTUAL_ENV: '/tmp/active-environment',
       CUSTOM_SETTING: 'kept',
+      OPENAI_API_KEY: 'kept-for-authoritative-python-validation',
+      OPENAI_BASE_URL: 'kept-so-python-can-reject-it',
     });
   });
 
@@ -1241,6 +1288,17 @@ describe('PythonRuntimeSupervisor', () => {
     await supervisor.stop();
   });
 });
+
+function launchConfigurationErrorMessage(provider: 'mock' | 'openai', model: string): string {
+  try {
+    buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {}, true, provider, model);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+  }
+  throw new Error('Expected runtime launch configuration to fail.');
+}
 
 function writeExecutable(path: string): void {
   writeFileSync(path, '#!/bin/sh\nexit 0\n', {mode: 0o755});

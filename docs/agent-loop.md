@@ -1,8 +1,8 @@
 # Agent Loop
 
-> Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn through
-> an injected runtime seam and the CAH-020 deterministic fake; CAH-022 hard-bounds that injected path.
-> The launched `main()` path and TUI remain on `MockSession`, with no live adapter. CAH-023 is next.
+> Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn,
+> CAH-022 hard-bounds it, and CAH-023 activates it through an explicitly selected OpenAI Responses
+> adapter. The launched `main()` path and TUI still default to `MockSession`.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -22,9 +22,10 @@ The Python harness owns:
 - Emitting one ordered, authoritative session event stream.
 - Selecting exactly one terminal outcome.
 
-A real provider adapter will own translation between the implemented provider-neutral types and its
-SDK. OpenAI SDK objects must not escape that adapter. The deterministic fake implements the same
-port without an SDK or network access. The TUI will display events and send commands; it does not
+A provider adapter owns translation between the implemented provider-neutral types and its SDK. The
+OpenAI implementation also owns its SDK client, stream automaton, and resource cleanup; none escapes
+the adapter. The deterministic fake implements the same port without an SDK or network access. The TUI
+displays events and sends commands; it does not
 decide that a turn is complete or that an action is safe.
 
 ## Vocabulary
@@ -59,16 +60,16 @@ cooperative cancellation event and serializes delta writes, completion, and canc
 state lock. The [walking-skeleton guide](walking-skeleton.md) traces this path from the Ink keypress
 through its authoritative Python terminal event and back to rendering.
 
-CAH-021 adds a parallel composition seam for tests and later adapters. When `run_runtime` receives an
-injected `Provider`, `ProviderSessionRunner` creates one `ProviderSession` instead of a `MockSession`.
+CAH-021 adds a parallel provider composition seam. When `run_runtime` receives a `Provider`,
+`ProviderSessionRunner` creates one `ProviderSession` instead of a `MockSession`.
 CAH-022 gives each created session a fresh mutable limit tracker under one immutable limits value. The
 session starts at most one operation and claims its stream exactly once when admission succeeds. Each
 accepted lifecycle publication is a shielded, ordered, non-interleaved transaction under the session
 decision lock: protocol write, Python reduction, and transcript-observer attempt settle before
 cancellation or teardown may select an outcome. An ordinary later sink or observer failure does not
-roll back an earlier accepted view. The slice is real provider-neutral orchestration, but `main()`
-deliberately injects no provider, so it does not alter the visible mock or the TypeScript protocol-v1
-projection.
+roll back an earlier accepted view. CAH-023 keeps the mock default but lets `main()` supply the
+concrete adapter only after the TUI and Python composition roots validate `--provider openai --model
+gpt-4.1-mini-2025-04-14`. Provider selection does not alter the TypeScript protocol-v1 projection.
 
 ## Bounded loop
 
@@ -151,8 +152,30 @@ and retryable observation. It has no raw exception, response, header, environmen
 field; retryability does not authorize the loop to retry. Malformed tool arguments remain serialized
 text at this boundary so later tool validation can return a structured harness result. Provider
 contract tests run without vendor modules, framework packages, API keys, or network access. CAH-021
-consumes this port for one fake-backed turn, and CAH-022 enforces its four configurable hard limits.
-CAH-023 will next target the OpenAI Responses API at this boundary.
+consumes this port for one turn, CAH-022 enforces its four configurable hard limits, and CAH-023 maps
+the same port to OpenAI Responses without changing its types.
+
+## OpenAI Responses adapter
+
+`openai_config.py` validates provider, exact model snapshot, environment names, and
+`OPENAI_API_KEY` without importing the SDK. The mock ignores ambient provider credentials. OpenAI is
+constructed only after explicit selection; every other `OPENAI_*` variable is rejected with a fixed
+message rather than being inherited as hidden SDK routing.
+
+`openai_responses.py` maps the ordered conversation and caller-supplied instructions into one
+foreground text request with `background=false`, `store=false`, no tools, and no tool choice.
+`Provider.start()` remains synchronous, lazy, and I/O-free. Consuming the operation creates one async
+client and one stream, validates the exact lifecycle/item/text/completion sequence, and exposes only
+provider-neutral text, usage, completion, or fixed failure values. Tool, reasoning, multimodal,
+duplicate, missing, or inconsistent observations fail closed without retaining their raw values.
+
+Natural termination and cancellation converge on one operation-owned, shielded cleanup task that
+attempts both stream and client close. A cleanup failure becomes one safe adapter exception consumed
+by the existing `ProviderSession` cleanup boundary; it never changes the already selected session
+failure. SDK objects, exceptions, request IDs, headers, and raw response bodies remain inside the
+adapter. The credential is confined to the provider-specific validation, composition, and adapter
+boundary and never enters a provider-neutral or protocol value. Deterministic SDK fakes cover this
+path by default; the separately selected live smoke remains outside the canonical gate and default CI.
 
 ## Implemented one-turn grammar
 
@@ -244,7 +267,7 @@ every provider or executor stopping immediately after cancellation.
 
 ## Limits and failures
 
-CAH-022 implements an immutable four-field `LoopLimits` configuration for injected provider-backed
+CAH-022 implements an immutable four-field `LoopLimits` configuration for provider-backed
 sessions. It rejects booleans and out-of-range values rather than clamping or disabling a budget:
 
 | Field | Default | Allowed range | Accounting point |
@@ -358,9 +381,10 @@ tests prove fresh trackers and deadline capture before transcript setup. See the
 > As an explicitly configured user, I want the bounded provider-neutral turn to use OpenAI Responses
 > so that the first real model capability is available without leaking SDK types into the harness.
 
-Complete this story when one text-only foreground Responses stream is explicitly configured with the
-allowlisted `gpt-4.1-mini-2025-04-14` snapshot, `background=false`, and `store=false`; its request
-omits tools and rejects reasoning/tool events; one exact assistant-text trace and SDK failures are
-normalized behind the provider port; foreground cancellation suppresses pending observations and
-joins operation-owned stream/client cleanup; default tests use SDK fakes with network denied; and a
-separately selected credentialed smoke test remains outside the canonical gate and default CI.
+This story is complete. The TUI and Python composition roots default to mock and require the explicit
+OpenAI provider/model pair. SDK-free configuration rejects unsupported models, credentials, and
+ambient OpenAI routing before lazy adapter construction. The adapter implements the reviewed
+text-only stream automaton, fixed failure normalization, cancellation, and shared stream/client
+cleanup behind the provider port. Deterministic SDK-fake tests run with network denied; the minimal
+credentialed smoke requires separate explicit selection and remains outside the canonical gate and
+default CI.

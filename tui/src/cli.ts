@@ -20,6 +20,8 @@ async function loadApplication(): Promise<ApplicationModule> {
     repositoryRoot,
     workspace: configuration.workspace.path,
     transcriptEnabled: configuration.transcriptEnabled,
+    provider: configuration.provider,
+    ...(configuration.provider === 'openai' ? {model: configuration.model} : {}),
   });
 
   return {

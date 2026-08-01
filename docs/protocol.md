@@ -3,9 +3,9 @@
 > Status: CAH-006 implements protocol version 1 readiness, deterministic mocked streaming, and
 > cooperative session cancellation across the real Node-to-`uv`-to-Python boundary. CAH-009
 > documents that execution with normalized message tapes. CAH-010 derives equivalent lifecycle
-> state from validated v1 events. CAH-021 and CAH-022 reuse that wire contract for the separately
-> injected provider turn and its hard-limit failures; the launched `main()` path remains `MockSession`.
-> CAH-023 is the next unit and will add the first live adapter without changing that ownership split.
+> state from validated v1 events. CAH-021 and CAH-022 reuse that wire contract for the provider turn
+> and its hard-limit failures. CAH-023 adds explicit OpenAI composition and the first live adapter
+> without changing protocol v1; launch still defaults to `MockSession`.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -36,7 +36,8 @@ CAH-003 launches one child with this shell-free argument array:
 PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   --python VENV_PYTHON
-  -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
+  -- python -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
+     --workspace CANONICAL_WORKSPACE
 ```
 
 Node supplies each displayed token separately with `shell: false` and configures stdin, stdout, and
@@ -45,7 +46,10 @@ rejects a path under `/mnt` or a name ending in `.exe`. It also requires
 `REPOSITORY_ROOT/.venv/pyvenv.cfg` plus executable `VENV_PYTHON` at `.venv/bin/python`; failure stops
 before `uv` can create or change the project environment. `REPOSITORY_ROOT` identifies the harness
 project for `uv`, while `--python VENV_PYTHON` fixes its prepared interpreter. The separately
-resolved `CANONICAL_WORKSPACE` identifies the one future target repository. The launch directory is
+resolved `CANONICAL_WORKSPACE` identifies the one future target repository. `PROVIDER` defaults to
+`mock`; `openai` requires `EXACT_SNAPSHOT` to be `gpt-4.1-mini-2025-04-14`. TypeScript validates this
+pair for early feedback and Python validates it again before SDK import. Provider/model selection is
+process configuration and never enters protocol stdin. The launch directory is
 the default workspace, and `--workspace PATH` selects an override relative to that launch directory
 before both Node and Python canonicalize and validate it. The child environment removes
 `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable so ambient selectors cannot
@@ -187,7 +191,7 @@ and becomes a sanitized visible warning. CAH-011 uses this existing envelope for
 transcript, and does not alter an active or terminal session outcome. A nonrecoverable runtime error,
 malformed message, or invalid session tape still fails closed.
 
-The injected provider path also uses that recoverable envelope for `provider_cleanup_failed` when a
+The provider-backed path also uses that recoverable envelope for `provider_cleanup_failed` when a
 cleanup barrier or subsequent local read reaping raises or exceeds its local grace. Provider cleanup
 has one shared loop-owned task per session; a deadline watcher may start it in cancellation mode and
 the finalizer joins that same task rather than invoking cleanup concurrently. Every `cancel()` or
@@ -211,6 +215,13 @@ while an already-admitted publication is blocked, but that ordered, non-interlea
 transaction completes its wire/reducer/observer work before the latched deadline selects the
 terminal. An ordinary later failure does not roll back an earlier accepted view. At an exact provider
 event/deadline tie, the deadline wins and the observation is not published.
+
+CAH-023 maps OpenAI text, normalized failure, and optional usage observations into these existing
+events and transcript evidence. Provider configuration, SDK lifecycle/item events, stream/client
+cleanup, credentials, and raw responses never become protocol messages. Adapter failures therefore
+reuse the existing bounded `session.failed` and `runtime.error` shapes; no NDJSON command, event,
+golden wire fixture, or protocol-version change was required. The separate runtime-configuration
+fixture locks TypeScript/Python provider and model constants rather than extending the wire protocol.
 
 Transcript compatibility is a separate local-storage contract, not an NDJSON protocol revision. The
 writer now emits transcript version 3, replay accepts internally consistent versions 1, 2, and 3, and

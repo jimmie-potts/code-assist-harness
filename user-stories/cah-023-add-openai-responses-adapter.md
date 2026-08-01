@@ -1,6 +1,6 @@
 # CAH-023 - Add the OpenAI Responses adapter
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M1 - Conversational core / E2 - Provider interface and explicit agent loop
 - **Dependencies:** CAH-022
 - **Lesson:** [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md)
@@ -62,9 +62,10 @@
   `OPENAI_PROJECT_ID`, `OPENAI_CUSTOM_HEADERS`, or `OPENAI_LOG`. The async HTTP client is the
   SDK-exported `DefaultAsyncHttpxClient` configured with
   `trust_env=false` and `follow_redirects=false`; the official `https://api.openai.com/v1` endpoint
-  is explicit, organization and project are explicit nulls, and SDK retries are disabled with
-  `max_retries=0`. Proxy variables, redirects, SDK routing defaults, and hidden HTTP retries cannot
-  alter one harness model turn.
+  is explicit, the constructor receives null organization and project only after ambient values are
+  rejected again at lazy construction, and SDK retries are disabled with `max_retries=0`. Proxy
+  variables, redirects, SDK routing defaults, and hidden HTTP retries cannot alter one harness model
+  turn.
 - Local API-key validation requires `1..4096` UTF-8 bytes and rejects every Unicode whitespace,
   control, surrogate, or other category-C code point; it makes no prefix assumption. A missing or
   locally malformed key, and a missing, malformed, or non-allowlisted model, fail before network
@@ -238,8 +239,9 @@
 14. Repository policy permits the SDK/network dependency only inside the concrete adapter and rejects
     it from provider-neutral loop, session, protocol, persistence, and tool modules.
 15. Client-construction tests prove the official endpoint, `trust_env=false`,
-    `follow_redirects=false`, explicit null account routing, and `max_retries=0`; recognized ambient
-    routing, header, log, and proxy values cannot redirect or duplicate the request.
+    `follow_redirects=false`, null account arguments after construction-time environment revalidation,
+    and `max_retries=0`; recognized ambient routing, header, log, and proxy values cannot redirect or
+    duplicate the request.
 
 ## Validation
 
@@ -270,6 +272,25 @@ Document provider/model selection, credential setup, request and event mapping, 
 cancellation, storage and transcript boundaries, SDK-fake testing, and the opt-in live command.
 Update the agent-loop, architecture, safety, evaluation, README, glossary, and provider lesson. Add
 the required written and visual CAH-023 learning evidence when implemented.
+
+## Delivered implementation
+
+- `openai_config.py` validates the provider/model pair and accepted environment before the SDK is
+  imported. The mock remains the default; OpenAI requires the one repository-approved snapshot.
+- `openai_responses.py` implements the lazy async adapter, exact request mapper, closed stream
+  automaton, bounded failure table, cancellation, and shared resource-cleanup owner behind the
+  existing provider port.
+- The TypeScript launcher and supervisor forward provider/model as separate child arguments, while
+  Python independently revalidates them at the authoritative composition root. A shared fixture
+  locks cross-language allowlist parity.
+- Deterministic SDK fakes cover request mapping, successful and malformed streams, failure
+  normalization, partial output, terminal races, cancellation, and resource-close failures without
+  HTTP. The separately registered live smoke remains explicit and supplemental.
+- The linked lesson and visual companion locate the adapter inside the TUI, harness, provider, tool,
+  and evidence boundaries and focus on loop ownership rather than SDK mechanics.
+
+Detailed validation and presentation evidence is recorded in the
+[CAH-023 implementation note](notes/2026-08-01-cah-023-openai-responses-adapter.md).
 
 ## Out of scope
 

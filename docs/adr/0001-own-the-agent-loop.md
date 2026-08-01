@@ -106,9 +106,9 @@ maps bounded failure and unavailable-tool outcomes, records optional transcript-
 selects one terminal outcome before awaited cleanup. A shared decision lock and finalizer keep each
 wire write, reducer acceptance, and observer attempt in one ordered, non-interleaved publication
 transaction with respect to cancellation, teardown, and cleanup diagnostics. An ordinary later sink
-or observer failure does not roll back an earlier accepted view. `run_runtime` exposes the injection
-seam, but `main()` deliberately supplies no provider: the launched `MockSession`, TUI, and protocol
-version 1 remain unchanged.
+or observer failure does not roll back an earlier accepted view. At the CAH-021 stage, `run_runtime`
+exposed the injection seam while `main()` deliberately supplied no provider: the launched
+`MockSession`, TUI, and protocol version 1 remained unchanged.
 
 CAH-022 completes the next bounded slice. One immutable four-field limits value is shared by the
 runner while each allocated provider session receives a fresh tracker. Admission is charged before
@@ -120,10 +120,15 @@ failures retain distinct stable codes and one terminal winner.
 
 The transcript writer now emits version 3 with optional provider usage and provider-backed
 `loop.limits_observed` evidence, while replay accepts versions 1, 2, and 3; a mock version-3 tape may
-omit the limit record. The implementation imports without a provider SDK or orchestration framework,
-and default tests remain model-free and network-free. See the
+omit the limit record. Default tests remain model-free and network-free. See the
 [CAH-022 story](../../user-stories/cah-022-enforce-loop-limits.md),
 [lesson](../lessons/cah-022-loop-limits.md), and
-[visual companion](../lessons/assets/cah-022-loop-limits.pptx). CAH-023 is next and will add the OpenAI
-Responses adapter and explicit runtime activation. The tool loop and broader orchestration remain
-future work.
+[visual companion](../lessons/assets/cah-022-loop-limits.pptx).
+
+CAH-023 now adds the one deliberately narrow vendor exception: the concrete OpenAI Responses adapter
+may import the approved SDK, while the explicit loop, session, protocol, persistence, and tool
+domains remain provider-neutral. Provider/model selection is launch configuration, the mock remains
+the default, and the adapter activates only after CAH-022 limits are composed. See the
+[CAH-023 story](../../user-stories/cah-023-add-openai-responses-adapter.md) and
+[lesson](../lessons/cah-023-openai-responses-adapter.md). The tool loop and broader orchestration
+remain future work.

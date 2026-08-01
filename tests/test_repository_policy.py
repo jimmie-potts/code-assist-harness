@@ -20,6 +20,9 @@ PRODUCTION_SOURCE_ROOTS = (
 )
 PYTHON_NETWORK_GUARD = REPOSITORY_ROOT / "tests" / "network_guard"
 NODE_NETWORK_GUARD = REPOSITORY_ROOT / "scripts" / "deny-network.mjs"
+OPENAI_ADAPTER_SOURCE = (
+    REPOSITORY_ROOT / "src" / "code_assist_harness" / "provider" / "openai_responses.py"
+)
 
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)|!\[[^]]*]\(([^)]+)\)")
 MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
@@ -28,6 +31,7 @@ PYTHON_NETWORK_MODULES = frozenset(
         "aiohttp",
         "http.client",
         "httpx",
+        "openai",
         "requests",
         "socket",
         "urllib",
@@ -217,7 +221,11 @@ def _broken_markdown_links(
     return broken
 
 
-def _python_network_violations(path: Path) -> list[str]:
+def _python_network_violations(
+    path: Path,
+    *,
+    openai_adapter_source: Path = OPENAI_ADAPTER_SOURCE,
+) -> list[str]:
     violations: list[str] = []
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
@@ -227,22 +235,49 @@ def _python_network_violations(path: Path) -> list[str]:
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported_modules = [node.module]
         for module in imported_modules:
-            if _is_denied_python_module(module):
+            if _is_denied_python_module(module) and not _is_allowed_openai_adapter_import(
+                path,
+                module,
+                openai_adapter_source,
+            ):
                 violations.append(f"{path}:{node.lineno}: network module {module!r}")
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "__import__"
-        ):
+        if isinstance(node, ast.Call) and _is_dynamic_import_call(node.func):
             if (
                 node.args
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)
             ):
                 module = node.args[0].value
-                if _is_denied_python_module(module):
+                if _is_denied_python_module(module) and not _is_allowed_openai_adapter_import(
+                    path,
+                    module,
+                    openai_adapter_source,
+                ):
                     violations.append(f"{path}:{node.lineno}: dynamic network import {module!r}")
     return violations
+
+
+def _is_dynamic_import_call(function: ast.expr) -> bool:
+    """Recognize literal dynamic imports without evaluating repository source."""
+    if isinstance(function, ast.Name):
+        return function.id in {"__import__", "import_module"}
+    return (
+        isinstance(function, ast.Attribute)
+        and isinstance(function.value, ast.Name)
+        and function.value.id == "importlib"
+        and function.attr == "import_module"
+    )
+
+
+def _is_allowed_openai_adapter_import(
+    path: Path,
+    module: str,
+    openai_adapter_source: Path,
+) -> bool:
+    """Allow the OpenAI SDK namespace only in the one concrete adapter module."""
+    return (
+        module == "openai" or module.startswith("openai.")
+    ) and path.resolve() == openai_adapter_source.resolve()
 
 
 def _typescript_network_violations(path: Path) -> list[str]:
@@ -295,7 +330,7 @@ def test_internal_markdown_links_resolve() -> None:
     assert broken == {}
 
 
-def test_m0_has_static_and_runtime_network_guards() -> None:
+def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:
     violations: list[str] = []
     for path in _repository_files(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):
         if path.suffix == ".py":
@@ -408,6 +443,11 @@ def test_tui_lockfile_matches_package_contract_and_complete_graph(tmp_path: Path
             "network module 'socket'",
         ),
         ("client = __import__('httpx')\n", "dynamic network import 'httpx'"),
+        ("import openai\n", "network module 'openai'"),
+        (
+            "import importlib\nclient = importlib.import_module('openai')\n",
+            "dynamic network import 'openai'",
+        ),
     ],
 )
 def test_python_network_policy_rejects_synthetic_source(
@@ -417,6 +457,42 @@ def test_python_network_policy_rejects_synthetic_source(
     path.write_text(source, encoding="utf-8")
 
     assert expected in _python_network_violations(path)[0]
+
+
+def test_python_network_policy_allows_only_openai_sdk_in_concrete_adapter(
+    tmp_path: Path,
+) -> None:
+    adapter = tmp_path / "openai_responses.py"
+    adapter.write_text(
+        "from openai import AsyncOpenAI, DefaultAsyncHttpxClient\n",
+        encoding="utf-8",
+    )
+    provider_neutral = tmp_path / "provider_session.py"
+    provider_neutral.write_text("from openai import AsyncOpenAI\n", encoding="utf-8")
+
+    assert _python_network_violations(adapter, openai_adapter_source=adapter) == []
+    assert (
+        "network module 'openai'"
+        in _python_network_violations(
+            provider_neutral,
+            openai_adapter_source=adapter,
+        )[0]
+    )
+
+
+def test_python_network_policy_keeps_direct_network_modules_out_of_openai_adapter(
+    tmp_path: Path,
+) -> None:
+    adapter = tmp_path / "openai_responses.py"
+    adapter.write_text("import httpx\n", encoding="utf-8")
+
+    assert (
+        "network module 'httpx'"
+        in _python_network_violations(
+            adapter,
+            openai_adapter_source=adapter,
+        )[0]
+    )
 
 
 @pytest.mark.parametrize(

@@ -39,14 +39,17 @@ import code_assist_harness.provider
     assert result.returncode == 0, result.stderr
 
 
-def test_provider_port_is_structural_and_project_has_no_provider_sdk_dependency() -> None:
+def test_provider_port_is_structural_and_sdk_dependency_is_production_constrained() -> None:
     fake = FakeProvider(())
     project = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     dependencies = project["project"]["dependencies"]
     development_dependencies = project["dependency-groups"]["dev"]
 
     assert isinstance(fake, Provider)
-    assert all("openai" not in dependency.lower() for dependency in dependencies)
+    openai_dependencies = [
+        dependency for dependency in dependencies if dependency.lower().startswith("openai")
+    ]
+    assert openai_dependencies == ["openai>=2.46,<3"]
     assert all("langchain" not in dependency.lower() for dependency in dependencies)
     assert all("openai" not in dependency.lower() for dependency in development_dependencies)
     assert all("langchain" not in dependency.lower() for dependency in development_dependencies)

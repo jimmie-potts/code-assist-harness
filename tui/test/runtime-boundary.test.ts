@@ -176,7 +176,10 @@ describe('real Node to uv to Python boundary', () => {
       }
 
       pythonPid = await findRuntimeProcess(uvPid);
-      expect(readCommandLine(pythonPid)).toContain('code_assist_harness.runtime');
+      const runtimeCommandLine = readCommandLine(pythonPid);
+      expect(runtimeCommandLine).toContain('code_assist_harness.runtime');
+      expect(runtimeCommandLine).toContain('--provider mock');
+      expect(runtimeCommandLine).not.toContain('--model');
       expect(readExecutableName(pythonPid)).toMatch(/^python(?:\d+(?:\.\d+)*)?$/u);
 
       const firstCommandId = supervisor.submitTask(successCommand.payload.task);

@@ -9,6 +9,7 @@ description = "A learning-first local coding agent with an explicit Python harne
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "openai>=2.46,<3",
     "pydantic>=2.12,<3",
 ]
 
@@ -20,6 +21,9 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "-ra"
+markers = [
+    "live_provider: requires explicit model and credential opt-in for one networked smoke test",
+]
 testpaths = ["tests"]
 
 [tool.ruff]
