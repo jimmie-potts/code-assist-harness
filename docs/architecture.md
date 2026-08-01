@@ -308,8 +308,10 @@ completed text, optional usage, and provider completion in that order. Candidate
 buffered until the full grammar selects completion and the cleanup barrier has been attempted. A
 cleanup-contract failure adds a separate bounded diagnostic without rewriting that selection.
 Invalid grammar becomes `provider_invalid_response`; normalized provider failure remains bounded; a
-tool request becomes `tool_unavailable` without parsing or execution. Cumulative accepted text has a
-fixed 8,192-byte UTF-8 compatibility ceiling until CAH-022 supplies configurable limits.
+tool request becomes `tool_unavailable` without parsing or execution. An empty completed-text
+candidate is retained only so a following tool request reaches that classification; it cannot admit
+usage or complete successfully. Cumulative accepted text has a fixed 8,192-byte UTF-8 compatibility
+ceiling until CAH-022 supplies configurable limits.
 
 Planned CAH-023 will add the first real adapter against foreground OpenAI Responses streaming after
 CAH-022's hard limits; SDK objects remain inside that adapter. The launched M0 `MockSession` is still
@@ -326,12 +328,16 @@ overlapping `session.start`, `session.cancel`, or `runtime.shutdown`. Shutdown w
 three-delta task. For an injected provider, `ProviderSession` shields each admitted wire-write,
 reducer, and observer transaction from interruption and selects completion, failure, cancellation,
 or teardown through one guard and shared finalizer. Cancellation calls and awaits operation cleanup.
-Teardown from shutdown, EOF, or outer cancellation emits no fabricated session terminal when it wins;
-a cleanup-contract exception adds at most one payload-free `provider_cleanup_failed` runtime error
-without rewriting an already-selected outcome. CAH-022 will add deadline and budget supervision,
-and CAH-023 will activate the bounded path with a concrete adapter. Later units add tool supervision
-to the same loop. Small, bounded filesystem operations may run directly; blocking work moves to a
-worker thread when needed.
+Teardown from shutdown, EOF, or outer cancellation emits no fabricated session terminal when it wins.
+After the cleanup attempt, the loop cancels and joins any pending local provider read. That join
+finishes in-process only when the iterator responds to task cancellation. A cleanup or read-reaping
+exception adds at most one payload-free `provider_cleanup_failed` runtime error without rewriting an
+already-selected outcome; a successful barrier return remains the port's cleanup confirmation.
+CAH-022 will add deadline and budget supervision for cancellation-responsive cleanup, and stronger
+process isolation is required to contain an iterator that suppresses cancellation. CAH-023 will
+activate the bounded path with a concrete adapter. Later units add tool supervision to the same loop.
+Small, bounded filesystem operations may run directly; blocking work moves to a worker thread when
+needed.
 
 CAH-006 implements mock cancellation as a lifecycle operation rather than an exception leaked to the
 TUI. Each `MockSession` owns an `asyncio.Event` and a state lock. A matching request selects

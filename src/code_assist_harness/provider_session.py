@@ -407,7 +407,6 @@ class ProviderSession:
                 if (
                     self._completed_text is not None
                     or self._usage_observed
-                    or not self._accepted_text
                     or observation.text != "".join(self._accepted_text)
                 ):
                     self._select_invalid_response_locked()
@@ -416,7 +415,7 @@ class ProviderSession:
                 return
 
             if isinstance(observation, ProviderUsageReported):
-                if self._completed_text is None or self._usage_observed:
+                if self._completed_text is None or not self._accepted_text or self._usage_observed:
                     self._select_invalid_response_locked()
                     return
                 try:
@@ -434,7 +433,7 @@ class ProviderSession:
                 return
 
             if isinstance(observation, ProviderCompleted):
-                if self._completed_text is None:
+                if self._completed_text is None or not self._accepted_text:
                     self._select_invalid_response_locked()
                     return
                 self._select_locked(
@@ -564,7 +563,7 @@ class ProviderSession:
                 cleanup_failed = True
         pending = self._pending_event_task
         if pending is not None:
-            if cleanup_failed and not pending.done():
+            if not pending.done():
                 pending.cancel()
             try:
                 await asyncio.shield(pending)

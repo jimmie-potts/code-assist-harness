@@ -150,8 +150,9 @@ class ProviderTextDelta:
 class ProviderTextCompleted:
     """The provider's complete assistant text observation.
 
-    Empty text is legal for a tool-call-only response. CAH-021 will reconcile non-empty completed
-    text with accepted deltas before creating session events.
+    Empty text is legal for a tool-call-only response. The session may retain that candidate long
+    enough to classify the next observation; usage and successful completion still require accepted
+    non-empty deltas.
     """
 
     kind: ClassVar[Literal["text.completed"]] = "text.completed"

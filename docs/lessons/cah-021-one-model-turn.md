@@ -46,7 +46,7 @@ provider work.
 An asynchronous iterator is like a sequence whose next item may arrive later. Calling `anext()`
 returns an awaitable for one item; putting that awaitable in a task lets another coroutine request
 cancellation while the provider is waiting. The implemented consumer in
-[`provider_session.py`](../../src/code_assist_harness/provider_session.py#L344) does exactly that:
+[`provider_session.py`](../../src/code_assist_harness/provider_session.py#L351) does exactly that:
 
 ```python
 while self._selection is None:
@@ -120,6 +120,8 @@ The implemented success grammar is deliberately narrow:
 `tool_unavailable` failure, calls the operation's cancellation barrier, and starts no tool or second
 turn. Missing, duplicate, out-of-order, empty, mismatched, unencodable, or prematurely ended success
 observations select `provider_invalid_response` without copying rejected content into diagnostics.
+The session may retain `ProviderTextCompleted("")` as a candidate only so a following tool request is
+recognized as `tool_unavailable`. Empty text cannot admit usage or complete successfully.
 
 Accepted deltas share a fixed 8,192-byte cumulative UTF-8 compatibility ceiling. The delta that
 would cross it is rejected in full before emission. This protects the current protocol shape; it is
@@ -140,8 +142,12 @@ Outcome selection and terminal publication are two phases. Completion, provider 
 response, tool rejection, user cancellation, and teardown can each propose an outcome, but
 `_select_locked()` stores only the first and creates one finalization task. That task attempts
 `wait_closed()` for natural provider terminals or `cancel()` when active work must stop. A cleanup
-exception adds the fixed `provider_cleanup_failed` runtime diagnostic; it never rewrites the
-selected session outcome or exposes exception text.
+or local read-reaping exception adds the fixed `provider_cleanup_failed` runtime diagnostic. After
+the cleanup attempt, the loop cancels and awaits any pending local read. For a cancellation-
+responsive iterator, that join prevents local task scheduling from hanging finalization. A
+successful barrier return is trusted and does not create a warning merely because the wrapper task
+was pending; a warning never rewrites the selected outcome or exposes provider content. An iterator
+that suppresses cancellation requires stronger process isolation beyond this unit.
 
 Runtime shutdown, stdin EOF, and outer-task cancellation use teardown rather than fabricating a
 user cancellation. Teardown-first cancels and joins provider work, emits no session terminal, and
@@ -163,10 +169,11 @@ CAH-023 work.
 3. Each delta is UTF-8 measured before it can enter the existing `assistant.delta` protocol path.
 4. The session writes an admitted delta, reduces it, and finishes the lifecycle observer before
    appending it to the internal reconciliation buffer.
-5. Text completion must match that buffer. Valid usage, when present, is observed once after text
-   completion and before provider completion.
-6. `ProviderCompleted` selects completion but does not immediately emit it. The shared finalizer
-   awaits `wait_closed()` first, then publishes `assistant.completed` and `session.completed`.
+5. Text completion must match that buffer. An empty match is held only for a possible following tool
+   request; it cannot admit usage or successful provider completion.
+6. `ProviderCompleted` after a non-empty text candidate selects completion but does not immediately
+   emit it. The shared finalizer awaits `wait_closed()` first, then publishes
+   `assistant.completed` and `session.completed`.
 7. Provider failure preserves a partial accepted prefix. Invalid grammar and tool requests select
    fixed safe failures; active work is cancelled and joined before `session.failed` is emitted.
 8. Cancellation and teardown compete under the same decision lock. Every caller joins the selected
@@ -181,7 +188,7 @@ CAH-023 work.
 ### 1. Construct one provider-neutral request
 
 The constructor excerpt is from
-[`ProviderSession.__init__()`](../../src/code_assist_harness/provider_session.py#L140):
+[`ProviderSession.__init__()`](../../src/code_assist_harness/provider_session.py#L147):
 
 ```python
 self._writer = writer
@@ -204,7 +211,7 @@ provider work can start.
 ### 2. Start and claim exactly one operation
 
 The operation claim is from
-[`_start_provider_operation()`](../../src/code_assist_harness/provider_session.py#L322):
+[`_start_provider_operation()`](../../src/code_assist_harness/provider_session.py#L329):
 
 ```python
 async with self._decision_lock:
@@ -236,7 +243,7 @@ text never becomes a protocol payload. Only the successfully claimed iterator en
 ### 3. Admit a bounded delta and reconcile completion
 
 The important success checks are in
-[`_accept_observation()`](../../src/code_assist_harness/provider_session.py#L372):
+[`_accept_observation()`](../../src/code_assist_harness/provider_session.py#L379):
 
 ```python
 if isinstance(observation, ProviderTextDelta):
@@ -276,7 +283,6 @@ if isinstance(observation, ProviderTextCompleted):
     if (
         self._completed_text is not None
         or self._usage_observed
-        or not self._accepted_text
         or observation.text != "".join(self._accepted_text)
     ):
         self._select_invalid_response_locked()
@@ -285,7 +291,7 @@ if isinstance(observation, ProviderTextCompleted):
     return
 
 if isinstance(observation, ProviderCompleted):
-    if self._completed_text is None:
+    if self._completed_text is None or not self._accepted_text:
         self._select_invalid_response_locked()
         return
     self._select_locked(
@@ -298,14 +304,16 @@ if isinstance(observation, ProviderCompleted):
     return
 ```
 
-The joined delta text must match exactly, and at least one delta must exist. Setting
-`_completed_text` changes no wire state. Only `ProviderCompleted` selects a completion outcome, and
-its cleanup mode records that the operation ended naturally rather than needing cancellation.
+The joined delta text must match exactly. Setting `_completed_text` changes no wire state, which lets
+an empty tool-only prefix wait for its actual tool observation. The provider-completion guard still
+requires at least one accepted delta, so that empty candidate can never emit assistant completion.
+Only `ProviderCompleted` after non-empty text selects success, and its cleanup mode records that the
+operation ended naturally rather than needing cancellation.
 
 ### 4. Finish cleanup before publishing the selected terminal
 
 The selected finalizer is implemented in
-[`_select_locked()` and `_finalize()`](../../src/code_assist_harness/provider_session.py#L519):
+[`_select_locked()` and `_finalize()`](../../src/code_assist_harness/provider_session.py#L525):
 
 ```python
 def _select_locked(self, selection: _SelectedOutcome) -> None:
@@ -357,7 +365,7 @@ mock stream. CAH-023 must add validated configuration before changing that truth
 ### 6. Prove a blocked delta transaction wins admission before cancellation
 
 The meaningful race excerpt comes from
-[`test_delta_transaction_finishes_before_user_cancellation()`](../../tests/test_provider_session.py#L946):
+[`test_delta_transaction_finishes_before_user_cancellation()`](../../tests/test_provider_session.py#L1069):
 
 ```python
 async def sink(line: bytes) -> None:
@@ -415,7 +423,7 @@ delta.
 
 The cleanup-failure test records a secret-looking exception inside its controlled operation, then
 asserts the safe observable order in
-[`test_completion_cleanup_failure_emits_one_safe_diagnostic_then_completion()`](../../tests/test_provider_session.py#L1392):
+[`test_completion_cleanup_failure_emits_one_safe_diagnostic_then_completion()`](../../tests/test_provider_session.py#L1514):
 
 ```python
 assert _event_types(lines) == [
@@ -442,12 +450,14 @@ from “provider resource release was confirmed.”
 | Completed text differs | Reconciliation rejects the stream | Fixed `provider_invalid_response`; invalid-grammar parameter cases |
 | Output crosses 8,192 bytes | Candidate delta would exceed the ceiling | Whole delta rejected by `test_delta_crossing_utf8_output_ceiling_is_rejected_in_full` |
 | Tool request arrives | Provider asks for unsupported work | Fixed `tool_unavailable`, cancellation, and no arguments in output |
+| Empty text precedes a tool request | Provider represents a tool-only response | Empty candidate stays non-terminal; the tool still selects `tool_unavailable` |
 | Stream closes early | No provider terminal observation | Invalid response plus cancellation of the operation |
 | Cancellation arrives during delta admission | Sink or observer is blocked | Admitted transaction finishes, then one `session.cancelled` |
 | Cancellation races selected completion | Cleanup is still pending | Cancellation returns `terminal` and joins the winning completion finalizer |
 | Usage competes with cancellation or teardown | Usage observer is blocked | Usage-first observer settles; terminal-first companion suppresses usage |
 | Runtime pipe closes | No correlated user cancel exists | Teardown cleanup, incomplete transcript prefix, no invented terminal |
-| Provider cleanup raises | Resource cleanup is unconfirmed | One bounded runtime diagnostic followed by the unchanged selected terminal |
+| Cancellation-responsive local read is pending after cleanup returns | Provider says cleanup succeeded before the wrapper task settles | Local read is cancelled and joined without inventing a warning |
+| Provider cleanup or read reaping raises | Resource cleanup is unconfirmed | One bounded diagnostic preserves the selected outcome |
 
 ## Production expansion
 
@@ -488,10 +498,11 @@ These are capability comparisons, not repository dependencies:
 
 ### Trade-offs and graduation signals
 
-The narrow grammar is easy to teach and test, but intentionally rejects tool-only, multimodal, and
-multi-turn responses. The single-process finalizer makes ownership visible, but it does not provide
-durable distributed recovery. Expand the grammar only when a story names the new outcome and adds
-fixtures for every observation. Add production routing, resilience, or central telemetry when
+The narrow grammar is easy to teach and test. Tool-only output cannot succeed in this unit, but its
+tool request is still recognized and rejected through `tool_unavailable`; multimodal and multi-turn
+responses remain invalid. The single-process finalizer makes ownership visible, but it does not
+provide durable distributed recovery. Expand the grammar only when a story names the new outcome and
+adds fixtures for every observation. Add production routing, resilience, or central telemetry when
 measured concurrency, latency, availability, cost-allocation, or on-call needs justify their
 operational burden.
 

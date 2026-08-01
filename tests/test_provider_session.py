@@ -118,6 +118,7 @@ class _ControlledOperation:
         self._cancel_error = cancel_error
         self._claimed = False
         self.iteration_started = asyncio.Event()
+        self.iteration_finished = asyncio.Event()
         self.release_iteration = asyncio.Event()
         self.wait_closed_started = asyncio.Event()
         self.release_wait_closed = asyncio.Event()
@@ -134,12 +135,15 @@ class _ControlledOperation:
 
         async def generate() -> AsyncIterator[ProviderStreamEvent]:
             self.iteration_started.set()
-            if self._block_iteration:
-                await self.release_iteration.wait()
-            if self._iteration_error is not None:
-                raise self._iteration_error
-            for event in self._events:
-                yield event
+            try:
+                if self._block_iteration:
+                    await self.release_iteration.wait()
+                if self._iteration_error is not None:
+                    raise self._iteration_error
+                for event in self._events:
+                    yield event
+            finally:
+                self.iteration_finished.set()
 
         return generate()
 
@@ -386,10 +390,19 @@ def test_candidate_completion_stays_buffered_until_provider_completion() -> None
     ("name", "steps", "accepted_deltas"),
     [
         (
-            "text-completed-before-delta",
+            "empty-text-completed-before-provider-completed",
             (
                 FakeProviderEmit(ProviderTextCompleted("")),
-                FakeProviderWaitForCancellation("reject-completion-before-delta"),
+                FakeProviderEmit(ProviderCompleted()),
+            ),
+            [],
+        ),
+        (
+            "usage-after-empty-text-completed",
+            (
+                FakeProviderEmit(ProviderTextCompleted("")),
+                FakeProviderEmit(ProviderUsageReported(input_tokens=1, output_tokens=1)),
+                FakeProviderWaitForCancellation("reject-usage-after-empty-completion"),
                 FakeProviderEmit(ProviderCompleted()),
             ),
             [],
@@ -736,14 +749,19 @@ def test_failure_after_candidate_completion_never_emits_assistant_completion() -
     ]
 
 
-def test_tool_request_uses_fixed_failure_without_exposing_arguments() -> None:
+@pytest.mark.parametrize("empty_text_candidate", [False, True], ids=["direct", "tool-only-prefix"])
+def test_tool_request_uses_fixed_failure_without_exposing_arguments(
+    empty_text_candidate: bool,
+) -> None:
     async def scenario() -> tuple[list[bytes], ProviderSession]:
         lines: list[bytes] = []
+        prefix = (FakeProviderEmit(ProviderTextCompleted("")),) if empty_text_candidate else ()
         fake = FakeProvider(
             (
                 FakeProviderExchange(
                     _request(),
                     (
+                        *prefix,
                         FakeProviderEmit(
                             ProviderToolCallRequested(
                                 call_id="call_1",
@@ -941,8 +959,58 @@ def test_conforming_cancel_waits_for_scheduled_iterator_close_without_a_diagnost
     lines, operation, session = asyncio.run(scenario())
 
     assert operation.cancel_calls == 1
+    assert operation.iteration_finished.is_set()
     assert _event_types(lines) == ["session.started", "session.cancelled"]
     assert session.lifecycle_state.status == "cancelled"
+
+
+@pytest.mark.parametrize(
+    ("request_kind", "expected_types", "expected_status"),
+    [
+        (
+            "user_cancellation",
+            ["session.started", "session.cancelled"],
+            "cancelled",
+        ),
+        ("teardown", ["session.started"], "running"),
+    ],
+)
+def test_successful_cleanup_return_reaps_a_still_pending_read(
+    request_kind: str,
+    expected_types: list[str],
+    expected_status: str,
+) -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation, ProviderSession, str]:
+        lines: list[bytes] = []
+        operation = _ControlledOperation((), block_iteration=True)
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_early_cleanup_return",
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.iteration_started.wait(), timeout=1)
+        if request_kind == "user_cancellation":
+            result = await asyncio.wait_for(
+                session.request_cancellation("cmd_cancel"),
+                timeout=1,
+            )
+        else:
+            result = await asyncio.wait_for(session.request_teardown(), timeout=1)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation, session, result
+
+    lines, operation, session, result = asyncio.run(scenario())
+    assert result == "accepted"
+    assert operation.cancel_calls == 1
+    assert operation.iteration_finished.is_set()
+    assert _event_types(lines) == expected_types
+    assert session.lifecycle_state.status == expected_status
 
 
 def test_cancellation_between_deltas_suppresses_the_suffix() -> None:

@@ -7,6 +7,7 @@ import select
 import subprocess
 import sys
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
@@ -37,9 +38,12 @@ from code_assist_harness.provider import (
     FakeProviderExchange,
     FakeProviderOperation,
     FakeProviderWaitForCancellation,
+    ProviderCancellationResult,
     ProviderCompleted,
     ProviderMessage,
+    ProviderOperation,
     ProviderRequest,
+    ProviderStreamEvent,
     ProviderTextCompleted,
     ProviderTextDelta,
     ProviderUsageReported,
@@ -66,6 +70,49 @@ class _CapturingFakeProvider:
 
     def assert_complete(self) -> None:
         self.fake.assert_complete()
+
+
+class _EarlyReturningOperation:
+    """Return successfully while one provider read remains blocked to test local reaping."""
+
+    def __init__(self) -> None:
+        self._claimed = False
+        self._release_iteration = asyncio.Event()
+        self.iteration_started = asyncio.Event()
+        self.iteration_finished = asyncio.Event()
+        self.cancel_calls = 0
+
+    def events(self) -> AsyncIterator[ProviderStreamEvent]:
+        if self._claimed:
+            raise RuntimeError("early-returning operation stream claimed twice")
+        self._claimed = True
+
+        async def generate() -> AsyncIterator[ProviderStreamEvent]:
+            self.iteration_started.set()
+            try:
+                await self._release_iteration.wait()
+                yield ProviderCompleted()
+            finally:
+                self.iteration_finished.set()
+
+        return generate()
+
+    async def cancel(self) -> ProviderCancellationResult:
+        self.cancel_calls += 1
+        return "cancelled"
+
+    async def wait_closed(self) -> None:
+        raise AssertionError("teardown must request cancellation")
+
+
+class _SingleOperationProvider:
+    """Return one controlled provider operation for runtime-boundary tests."""
+
+    def __init__(self, operation: ProviderOperation) -> None:
+        self.operation = operation
+
+    def start(self, _request: ProviderRequest) -> ProviderOperation:
+        return self.operation
 
 
 def _isolated_runtime_environment(
@@ -1240,6 +1287,76 @@ def test_injected_provider_teardown_does_not_fabricate_a_terminal_event(
     assert replay.state.status == "running"
     assert not replay.complete
     assert replay.evidence.model_usage is None
+    assert not list((state_directory / "transcripts").glob("*.summary.txt"))
+
+
+@pytest.mark.parametrize("boundary", ["eof", "shutdown"])
+def test_runtime_reaps_a_pending_read_after_successful_provider_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    async def scenario() -> tuple[list[Event], Path, _EarlyReturningOperation]:
+        workspace = (tmp_path / "workspace").resolve()
+        workspace.mkdir()
+        state_directory = tmp_path / f"{boundary}-early-cleanup-state"
+        operation = _EarlyReturningOperation()
+        provider = _SingleOperationProvider(operation)
+        output_lines: list[bytes] = []
+        initialize = validate_command(
+            json.loads(
+                _command(
+                    "runtime.initialize",
+                    "cmd_initialize",
+                    {"workspace": str(workspace)},
+                )
+            )
+        )
+        start = validate_command(
+            json.loads(
+                _command(
+                    "session.start",
+                    "cmd_session",
+                    {"task": "Contain an early cleanup return."},
+                )
+            )
+        )
+        shutdown = validate_command(json.loads(_command("runtime.shutdown", "cmd_shutdown", {})))
+
+        async def read_commands():
+            yield initialize
+            yield start
+            await operation.iteration_started.wait()
+            if boundary == "shutdown":
+                yield shutdown
+
+        async def write_stdout_line(line: bytes) -> None:
+            output_lines.append(line)
+
+        monkeypatch.setattr(runtime_module, "_read_commands", read_commands)
+        monkeypatch.setattr(runtime_module, "_write_stdout_line", write_stdout_line)
+        await asyncio.wait_for(
+            runtime_module.run_runtime(
+                workspace,
+                transcript_settings=TranscriptSettings(state_directory=state_directory),
+                provider=provider,
+            ),
+            timeout=1,
+        )
+        return _event_lines(b"".join(output_lines)), state_directory, operation
+
+    events, state_directory, operation = asyncio.run(scenario())
+    transcript_path = next((state_directory / "transcripts").glob("*.jsonl"))
+    replay = replay_transcript(transcript_path)
+
+    assert operation.cancel_calls == 1
+    assert operation.iteration_finished.is_set()
+    assert [event.type for event in events] == [
+        "runtime.ready",
+        "session.started",
+    ]
+    assert replay.state.status == "running"
+    assert not replay.complete
     assert not list((state_directory / "transcripts").glob("*.summary.txt"))
 
 

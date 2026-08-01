@@ -20,6 +20,8 @@ turn.
 - A successful stream is one or more non-empty text deltas, one matching text-completed candidate,
   optional usage, and one provider-completed terminal in that order. Candidate completion is not a
   wire event until the full grammar is valid and loop-level cleanup has settled.
+- Empty completed text is retained only long enough to recognize a following tool-only request. It
+  cannot admit usage or provider completion, so it never creates an empty assistant completion.
 - Accepted assistant output has a fixed 8,192-byte cumulative UTF-8 ceiling. The delta that would
   cross the ceiling is rejected in full before wire publication; CAH-022 may configure a smaller
   limit but cannot enlarge this protocol-fit bound.
@@ -47,8 +49,8 @@ turn.
 - Runtime shutdown, stdin EOF, and outer-task cancellation request teardown. Teardown-first cleans up
   without inventing `session.cancelled`; an already-selected user-visible outcome remains
   authoritative and finishes unchanged.
-- A provider cleanup exception cannot replace the selected outcome. The loop emits at most one
-  start-correlated runtime error with `code=provider_cleanup_failed`, message
+- A provider cleanup exception or local read-reaping exception cannot replace the selected outcome.
+  The loop emits at most one start-correlated runtime error with `code=provider_cleanup_failed`, message
   `Provider cleanup could not be confirmed.`, and `recoverable=true`; raw exception text is omitted.
 
 ## Implementation map
@@ -84,14 +86,18 @@ session outcome.
 
 Shielding only the ordered writer is insufficient. Cancellation can arrive after bytes commit but
 before the reducer or transcript observer sees the event. `ProviderSession` shields the complete
-wire-to-reducer-to-observer transaction under the decision lock so all trusted views either finish
-that admission or all lose to the terminal selection.
+wire-to-reducer-to-observer attempt under the decision lock so cancellation cannot interleave with
+its ordered steps. The lock does not roll back an earlier wire or reducer effect if a later observer
+raises.
 
-Pending `anext()` is operation-owned work. Teardown and outer cancellation leave it alive long
-enough for the operation's cancellation barrier to stop it, then join it before finalization. When a
-non-conforming cleanup method raises, the loop reaps its separate pending iterator task where
-possible and reports only the fixed runtime diagnostic; the port offers no broader force-close API
-and the code does not claim remote resources were released.
+Pending `anext()` is operation-owned work. After every cleanup-barrier attempt, the loop cancels and
+awaits a read that is still pending. When the iterator responds to task cancellation, that join
+prevents local task scheduling from hanging finalization. A successful barrier return is the port's
+cleanup confirmation; whether its wrapper task has received another scheduler turn is not reliable
+failure evidence. A barrier or reaping exception produces only the fixed runtime diagnostic. The
+port cannot detect an implementation that falsely reports successful remote cleanup. CAH-022 adds
+bounded grace for cleanup awaitables that propagate cancellation; an iterator that suppresses task
+cancellation still cannot be contained in-process and requires future process isolation.
 
 Usage is deliberately separate from lifecycle. This preserves protocol-v1 and both lifecycle
 reducers while still making model-cost evidence replayable. The evidence transaction uses the same
@@ -100,22 +106,24 @@ selected terminal admits no later usage.
 
 ## Validation evidence
 
-- Focused CAH-021 validation passed with 149 tests:
+- Focused CAH-021 validation passed with 155 tests:
   `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync pytest -q tests/test_provider_session.py tests/test_transcript.py tests/test_runtime.py tests/provider/test_provider_models.py`.
-- The 47 provider-session tests cover exact request construction, one operation, normal completion,
+- The 51 provider-session tests cover exact request construction, one operation, normal completion,
   logical delay, invalid ordering, early EOF, the exact and crossing UTF-8 ceiling, provider failure
-  before and after output, tool rejection, safe usage bounds, general-awaitable and malformed
-  iterator boundaries, user cancellation before and between deltas, blocked sink and observer
-  transactions, teardown, outer cancellation, completion races, and cleanup-contract failures.
+  before and after output, direct and tool-only-prefix rejection, safe usage bounds, general-
+  awaitable and malformed iterator boundaries, user cancellation before and between deltas, blocked
+  sink and observer transactions, teardown, outer cancellation, completion races, and cleanup-
+  contract failures and successful-barrier pending-read reaping.
 - Runtime and transcript tests prove provider-enabled and transcript-disabled sessions emit the same
   protocol tape, usage stays transcript-only, replay remains compatible with version 1, and
-  teardown-first leaves an incomplete replayable prefix without a summary.
+  teardown-first leaves an incomplete replayable prefix without a summary. Runtime EOF and shutdown
+  also reap a blocked local read after `cancel()` returns, without inventing a terminal or warning.
 - The 10-slide visual companion
   [`docs/lessons/assets/cah-021-one-model-turn.pptx`](../../docs/lessons/assets/cah-021-one-model-turn.pptx)
   was rendered slide by slide and inspected at full resolution. Every slide contains a `[Sources]`
   speaker-notes block, and the presentation overflow test passed with no overflow detected.
 - The canonical non-live gate passed with
-  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check`: 336 Python tests, 30 Python protocol-
+  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check`: 342 Python tests, 30 Python protocol-
   fixture tests, 24 repository-policy tests, 208 TUI tests, 29 TypeScript protocol-fixture tests,
   and 4 real Node/Python boundary tests passed; Python lint/format and TUI typecheck/lint also passed.
 

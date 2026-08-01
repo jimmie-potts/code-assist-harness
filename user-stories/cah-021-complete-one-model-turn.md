@@ -33,6 +33,9 @@
 - A successful text stream contains one or more non-empty `ProviderTextDelta` values, exactly one
   `ProviderTextCompleted`, optionally one `ProviderUsageReported`, and exactly one
   `ProviderCompleted`. Usage, when present, follows text completion and precedes provider completion.
+- An empty `ProviderTextCompleted` may be held only as a tool-only candidate so a following
+  `ProviderToolCallRequested` reaches the locked `tool_unavailable` path. It cannot admit usage or
+  authorize `ProviderCompleted`; an empty successful response remains `provider_invalid_response`.
 - Completed text must equal the byte-for-byte concatenation of accepted deltas. A missing,
   duplicate, out-of-order, empty, or mismatched successful observation is
   `provider_invalid_response`.
@@ -95,12 +98,15 @@
   is still active before emitting that failure. Invalid-stream fake scripts either end at the
   invalid terminal observation or provide a cancellation checkpoint so `assert_complete()` can
   prove the suffix was reaped.
-- A provider implementation that raises from its promised cleanup barrier cannot replace the
-  already-selected session outcome. The loop emits one payload-free, bounded
-  `provider_cleanup_failed` runtime diagnostic, cancels and awaits any separate pending `anext`
-  task, and never copies the exception text or claims that the non-conforming provider's own
-  resources were reaped. The current port exposes no generic force-close operation beyond its
-  promised cleanup methods.
+- After any cleanup-barrier attempt, the loop cancels and awaits a separately owned `anext` that is
+  still pending. For a cancellation-responsive iterator, that join prevents local task scheduling
+  from hanging finalization. A successful barrier return is trusted as the port's cleanup
+  confirmation; a pending wrapper task alone is not evidence of provider failure. If the barrier or
+  local read reaping raises, the selected outcome remains and the loop emits one payload-free,
+  bounded `provider_cleanup_failed` diagnostic without copying exception text. A provider that
+  falsely reports successful remote cleanup cannot be detected through this port; CAH-022 bounds
+  non-returning cleanup that propagates cancellation, and future process isolation is the stronger
+  containment for an iterator that suppresses it.
 - `provider_cleanup_failed` uses the existing protocol-v1 `runtime.error` surface with exactly the
   fields `code=provider_cleanup_failed`, `message=Provider cleanup could not be confirmed.`, and
   `recoverable=true`, plus the originating `session.start` command correlation. It is
@@ -124,9 +130,10 @@
    visible and persisted without being reclassified as success.
 7. Invalid stream structure emits one `provider_invalid_response` failure without payload contents in
    diagnostics.
-8. A provider tool request emits one `tool_unavailable` failure and the cleanup barrier is awaited
-   before the session task returns. The conforming fake proves closure; a barrier exception follows
-   the locked safe-diagnostic path without rewriting the failure.
+8. A provider tool request, including one preceded by an empty completed-text candidate, emits one
+   `tool_unavailable` failure and the cleanup barrier is awaited before the session task returns. The
+   conforming fake proves closure; an observable cleanup failure follows the locked safe-diagnostic
+   path without rewriting the failure.
 9. Cancellation propagates to the operation and preserves the existing exactly-one-terminal race
    semantics before output, between deltas, during a blocked delta sink/observer transaction, and
    against completion. A committed delta is reduced and its transcript-observer attempt finishes
@@ -144,9 +151,10 @@
     stream ordering, the fixed protocol ceiling, tool-call rejection, usage bounds, cancellation,
     and completion races without network access or credentials.
 13. Runtime shutdown, stdin EOF, and outer-task cancellation cancel and await active provider work
-    when teardown wins, while an already-selected session outcome finishes unchanged;
-    cleanup-contract violations produce only the safe runtime diagnostic and no raw exception.
-14. A cleanup-contract violation emits at most one recoverable, start-correlated
+    when teardown wins, while an already-selected session outcome finishes unchanged. A still-
+    pending, cancellation-responsive local read is reaped after the cleanup attempt; observable
+    cleanup failures produce only the safe runtime diagnostic and no raw exception.
+14. An observable cleanup-contract failure emits at most one recoverable, start-correlated
     `provider_cleanup_failed` runtime error with the locked payload and no transcript record; an
     already-selected session terminal follows it unchanged.
 
@@ -208,12 +216,13 @@ lesson surfaces.
 - `run_runtime()` accepts an optional injected `Provider` and ordered repository-instruction tuple.
   Injected sessions use `ProviderSessionRunner`; the launched `main()` composition deliberately
   passes no provider and therefore continues to use `MockSessionRunner` until CAH-023.
-- `tests/test_provider_session.py` contains 47 deterministic tests covering the exact request,
+- `tests/test_provider_session.py` contains 51 deterministic tests covering the exact request,
   success, logical delay, stream grammar, UTF-8 limit, failure, tool rejection, usage, cancellation,
   teardown, general-awaitable and malformed iterator boundaries, admitted-transaction races,
-  completion buffering, and cleanup-contract violations. Runtime and transcript regressions cover
-  provider injection, transcript-enabled/disabled wire parity, versioned replay, usage ordering and
-  summaries, EOF/shutdown teardown, and outer-task cancellation.
+  completion buffering, tool-only prefixes, and cleanup-contract violations. Runtime and transcript
+  regressions cover provider injection, transcript-enabled/disabled wire parity, versioned replay,
+  usage ordering and summaries, EOF/shutdown teardown, pending-read reaping after cleanup, and outer-
+  task cancellation.
 - No OpenAI or orchestration SDK, provider credential, network request, tool execution, retry, or
   second model turn is introduced by this unit.
 
@@ -221,7 +230,7 @@ lesson surfaces.
 
 - Focused validation passed:
   `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync pytest -q tests/test_provider_session.py tests/test_transcript.py tests/test_runtime.py tests/provider/test_provider_models.py`
-  reports 149 passed tests.
+  reports 155 passed tests.
 - The linked written lesson is reconciled with the shipped modules, failure paths, race semantics,
   and repository-backed examples in the CAH-021 completion change.
 - The linked 10-slide visual companion
@@ -229,7 +238,7 @@ lesson surfaces.
   was rendered slide by slide, every rendered image was inspected at full resolution, all 10 slides
   include a `[Sources]` speaker-notes block, and the presentation overflow test passed.
 - The canonical non-live gate passed with
-  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check`: 336 Python tests, 30 Python protocol-
+  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check`: 342 Python tests, 30 Python protocol-
   fixture tests, 24 repository-policy tests, 208 TUI tests, 29 TypeScript protocol-fixture tests,
   and 4 real Node/Python boundary tests passed; Python lint/format and TUI typecheck/lint also passed.
 

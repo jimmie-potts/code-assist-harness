@@ -165,6 +165,11 @@ attempted. Only then does the session emit `assistant.completed` followed by `se
 A missing, duplicate, out-of-order, empty, mismatched, or early-ended success observation becomes the
 safe `provider_invalid_response` failure.
 
+Empty completed text has one deliberately narrow non-success use: the session may retain it as a
+candidate until a following tool request arrives. That request still becomes `tool_unavailable` and
+triggers cancellation. Empty text cannot authorize usage or provider completion, so it never emits
+an empty `assistant.completed` event.
+
 The turn rejects a delta in full before emission when cumulative accepted assistant text would exceed
 8,192 UTF-8 bytes. This fixed compatibility ceiling keeps protocol lines bounded; it is not the
 configurable output budget, model-turn limit, tool-observation limit, or provider-work deadline owned
@@ -183,9 +188,12 @@ Completion, normalized failure, user cancellation, invalid response, and runtime
 shared outcome before cleanup. User cancellation calls and awaits `ProviderOperation.cancel()`.
 Shutdown, stdin EOF, or outer-task cancellation use teardown: they cancel and join active provider
 work without fabricating `session.cancelled`, leaving an incomplete replayable transcript prefix when
-teardown wins. A promised cleanup method that raises cannot rewrite an already-selected outcome; the
-runtime emits at most one start-correlated, payload-free `provider_cleanup_failed` diagnostic before
-any selected terminal.
+teardown wins. After the cleanup attempt, the loop cancels and awaits any pending local read. For a
+cancellation-responsive iterator, that join prevents local task scheduling from hanging
+finalization. A successful cleanup return is trusted; a cleanup or reaping exception emits at most
+one start-correlated, payload-free `provider_cleanup_failed` diagnostic before any selected terminal
+and cannot rewrite that outcome. An iterator that suppresses task cancellation requires stronger
+process isolation beyond CAH-021.
 
 ## State and terminal outcomes
 
