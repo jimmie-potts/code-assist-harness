@@ -11,6 +11,7 @@ from .fake import (
     FakeProviderWaitForCancellation,
 )
 from .models import (
+    MAX_MODEL_USAGE_TOKENS,
     MAX_PROVIDER_FAILURE_MESSAGE_CHARS,
     ProviderCompleted,
     ProviderFailed,
@@ -29,6 +30,7 @@ from .models import (
 from .port import Provider, ProviderCancellationResult, ProviderOperation
 
 __all__ = [
+    "MAX_MODEL_USAGE_TOKENS",
     "MAX_PROVIDER_FAILURE_MESSAGE_CHARS",
     "FakeProvider",
     "FakeProviderDelay",

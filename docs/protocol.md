@@ -185,6 +185,13 @@ and becomes a sanitized visible warning. CAH-011 uses this existing envelope for
 transcript, and does not alter an active or terminal session outcome. A nonrecoverable runtime error,
 malformed message, or invalid session tape still fails closed.
 
+CAH-021 also uses that recoverable envelope for `provider_cleanup_failed` when an injected provider's
+promised cleanup barrier raises. The fixed, payload-free warning is correlated to the originating
+`session.start`, emitted at most once after the cleanup attempt, and precedes any already-selected
+session terminal. If runtime teardown won first, the warning may appear without a fabricated session
+terminal. It is not a session event, lifecycle-reducer input, or transcript record, and it cannot
+replace the selected session outcome.
+
 A cancel command for the wrong currently active session produces recoverable `session_mismatch`.
 When no session is active, a command naming neither the most recent terminal session nor an active
 session produces recoverable `session_not_active`. A repeated request for the active session and a

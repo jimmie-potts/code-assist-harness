@@ -2,73 +2,90 @@
 
 - **Unit:** CAH-021
 - **Milestone:** M1 - Conversational core
-- **Lesson status:** Planned
-- **Implementation status:** Planned; no provider-backed turn is connected to the session runtime
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; the provider-injected runtime seam is implemented and tested,
+  while launched `main()` intentionally remains on `MockSession`
 - **Story:** [CAH-021](../../user-stories/cah-021-complete-one-model-turn.md)
+- **Visual companion:**
+  [One turn, one owner](assets/cah-021-one-model-turn.pptx)
 - **Related architecture:** [ADR 0001](../adr/0001-own-the-agent-loop.md),
   [Agent loop](../agent-loop.md), and [Protocol](../protocol.md)
 
-> This lesson describes an accepted provider-neutral design. The current launched application still
-> runs `MockSession`; the loop, usage evidence, and provider injection seam below are not implemented.
-> CAH-023, not this unit, will add and activate an OpenAI adapter.
+> This lesson traces the implemented CAH-021 path in `ProviderSession`, the runtime composition
+> seam, transcript version 2, and deterministic tests. It does not claim that the launched
+> application uses a real model: `main()` still selects `MockSession`, and CAH-023 owns adapter
+> configuration and activation.
 
 ## Quick summary
 
-CAH-021 plans the smallest harness-owned model-turn boundary: one task becomes one
-`ProviderRequest`, one provider operation streams observations, and the session selects one terminal
-outcome. The strict fake proves orchestration without HTTP, credentials, provider SDK types, or hard
-limits.
+CAH-021 implements the smallest harness-owned model turn: one accepted task becomes one exact
+`ProviderRequest`, one provider operation yields validated observations, and one shared finalizer
+publishes the authoritative outcome after cleanup. The strict fake proves success, malformed
+streams, usage, teardown, and cancellation races without HTTP, credentials, or provider SDK types.
 
 ## Learning objectives
 
 After completing this unit, you should be able to:
 
 - distinguish a session, provider operation, and model turn;
-- trace provider-neutral observations into ordered session events and local evidence;
-- explain why reconciliation and one terminal guard make streaming trustworthy;
-- test cancellation and malformed streams without wall-clock sleeps; and
-- identify which concerns belong to later limit, provider, context, and tool units.
+- trace provider-neutral observations into ordered session events and transcript-only evidence;
+- explain why reconciliation, a decision lock, and one finalizer make streaming trustworthy;
+- read deterministic cancellation tests that use logical gates instead of elapsed-time guesses; and
+- identify which limits, adapters, context, and tools remain separate units.
 
 ## Why this unit matters
 
-CAH-020 proves that the provider port and fake behave correctly in isolation. The harness still needs
-to prove that it owns request construction, stream grammar, cancellation cleanup, and session
-completion. Keeping the first turn provider-neutral separates those lifecycle decisions from a
-vendor SDK and lets CAH-022 add hard limits before CAH-023 enables network or billable work.
+CAH-020 proved that the provider port and fake work in isolation. CAH-021 proves the harder
+integration boundary: the harness constructs the request, decides which stream observations are
+legal, owns cancellation, awaits cleanup, and alone declares the session terminal. Keeping that
+work provider-neutral lets CAH-022 add hard limits before CAH-023 introduces network and billable
+provider work.
 
 ## Junior engineer foundation
 
-An asynchronous stream is a sequence whose next value may arrive later. An `async for` loop waits
-without blocking every other task on the event loop:
+An asynchronous iterator is like a sequence whose next item may arrive later. Calling `anext()`
+returns an awaitable for one item; putting that awaitable in a task lets another coroutine request
+cancellation while the provider is waiting. The implemented consumer in
+[`provider_session.py`](../../src/code_assist_harness/provider_session.py#L344) does exactly that:
 
 ```python
-# Planned teaching example, not shipped CAH-021 code.
-async for event in operation.events():
-    handle(event)
+while self._selection is None:
+    pending = asyncio.create_task(anext(events))
+    self._pending_event_task = pending
+    try:
+        observation = await asyncio.shield(pending)
 ```
 
-The loop does not mean the provider owns the session. The provider reports observations; the harness
-decides which observations are legal and whether the session completed, failed, or was cancelled.
+- The `while` condition stops requesting observations after an outcome owns the session.
+- `create_task()` gives the pending provider read an identity that cleanup can join.
+- `self._pending_event_task` records ownership; teardown must not simply forget this task.
+- `shield()` keeps cancellation of the session waiter from silently cancelling provider-owned work
+  before the operation's explicit cleanup path runs.
 
-A terminal event means no later work is accepted for that session. A common beginner misconception
-is that stopping the stream automatically means success. The connection could close because of a
-failure, cancellation, or malformed implementation, so CAH-021 requires an explicit provider
-terminal observation and a separate harness terminal decision.
+A lock protects a decision, not just a data structure. `ProviderSession` uses one
+`asyncio.Lock` so an admitted delta can finish its wire write, reducer update, and observer attempt
+before cancellation selects a competing outcome.
+
+A common beginner misconception is “the stream ended, so the turn succeeded.” End-of-iteration is
+not success here. The stream must contain a matching text-completed candidate and an explicit
+`ProviderCompleted`; otherwise the harness selects `provider_invalid_response`.
 
 ## Key concepts
 
 - **Provider-neutral request:** immutable conversation and already-resolved repository instructions
   expressed only with harness-owned types.
-- **Provider operation:** one single-consumer stream plus awaited cancellation and cleanup.
-- **Stream grammar:** the legal order and cardinality of text, completion, usage, failure, and tool
-  observations.
-- **Completion reconciliation:** byte-for-byte comparison of completed text with the concatenation
-  of accepted deltas.
-- **Terminal guard:** the session mechanism through which completion, failure, and cancellation
-  compete for one final outcome.
-- **Trusted usage evidence:** optional bounded counters persisted through a transcript-only
-  `model.usage_observed` record. They are neither lifecycle state, protocol-v1 UI state, nor proof
-  of billing.
+- **Provider operation:** one claimed async stream plus explicit `cancel()` and `wait_closed()`
+  cleanup barriers.
+- **Stream grammar:** the accepted order and cardinality of delta, text completion, usage, provider
+  failure, tool request, and provider completion observations.
+- **Completion reconciliation:** exact comparison of completed text with the concatenation of
+  accepted deltas.
+- **Decision lock:** the serialization boundary for observation admission, evidence observers, and
+  outcome selection.
+- **Selected finalizer:** the one shared task that awaits cleanup, reports bounded cleanup failure,
+  and emits at most one session terminal.
+- **Trusted usage evidence:** optional bounded counters persisted as
+  `model.usage_observed`; they are neither protocol-v1 lifecycle state nor billing proof.
 
 ## Architecture and design
 
@@ -76,158 +93,361 @@ terminal observation and a separate harness terminal decision.
 validated session task
         |
         v
-one-turn loop ---- builds ----> ProviderRequest
-        |                              |
-        |                       Provider.start()
-        |                              |
-        +<---- one ProviderOperation --+
+ProviderSession ---- builds ----> ProviderRequest
+        |                               |
+        |                        Provider.start()
+        |                               |
+        +<----- ProviderOperation ------+
         |
-        +--> ordered session events --> reducer / protocol writer
-        +--> model.usage_observed --> transcript / replay evidence / summary
-        +--> cancel + await cleanup --> terminal guard
+        +--> assistant/session events --> OrderedEventWriter --> Python/TUI reducers
+        +--> ModelUsageObserved --------> transcript v2 --> replay evidence / summary
+        +--> selected outcome ----------> cleanup barrier --> one terminal publication
 ```
 
-The loop owns request construction, event acceptance, reconciliation, cancellation propagation, and
-the terminal result. The provider owns only its operation and cleanup contract. The ordered writer
-owns protocol sequence numbers, while the transcript observes accepted facts without becoming
-lifecycle authority.
+The harness owns request construction, observation acceptance, reconciliation, cancellation, and
+session truth. A provider owns only the provider-specific operation behind the neutral port. The
+ordered writer owns protocol sequence numbers. Transcript persistence observes accepted facts but
+does not become lifecycle authority.
 
-The successful grammar is deliberately narrow:
+The implemented success grammar is deliberately narrow:
 
 1. one or more non-empty `ProviderTextDelta` values;
 2. exactly one `ProviderTextCompleted` equal to their concatenation;
 3. optionally one bounded `ProviderUsageReported`;
 4. exactly one `ProviderCompleted`.
 
-`ProviderFailed` may terminate before or after partial text. A tool-call request is not ignored: it
-becomes `tool_unavailable`, cancellation is requested, the cleanup barrier is awaited, and no second
-turn begins. Missing, duplicate, out-of-order, empty, or mismatched successful observations become
-`provider_invalid_response` without copying content into diagnostics.
+`ProviderFailed` may terminate before or after a partial prefix. A tool request selects the fixed
+`tool_unavailable` failure, calls the operation's cancellation barrier, and starts no tool or second
+turn. Missing, duplicate, out-of-order, empty, mismatched, unencodable, or prematurely ended success
+observations select `provider_invalid_response` without copying rejected content into diagnostics.
 
-Accepted deltas also share a fixed `8192`-byte cumulative UTF-8 compatibility ceiling. The delta that
-would cross it is rejected in full before emission. This is a protocol-fit invariant, not CAH-022's
-configurable safety budget; that later budget must be no larger than the ceiling.
+Accepted deltas share a fixed 8,192-byte cumulative UTF-8 compatibility ceiling. The delta that
+would cross it is rejected in full before emission. This protects the current protocol shape; it is
+not CAH-022's configurable output budget. CAH-022 may choose a smaller value, never a larger one.
 
-`ProviderTextCompleted` remains a reconciled candidate until `ProviderCompleted` validates the whole
-success grammar and the loop finishes its `wait_closed()` attempt. Only then does the loop emit
-`assistant.completed` and `session.completed`. If that barrier raises, the selected completion stays
-authoritative and the loop first emits the bounded cleanup diagnostic. A later usage failure,
-provider failure, or early stream close before `ProviderCompleted` cannot leave a completed assistant
-in a failed session.
+`ProviderTextCompleted` is only a candidate. The session stores it after reconciliation, but does
+not emit `assistant.completed` until `ProviderCompleted` selects success and `wait_closed()`
+settles. A later provider failure or early EOF therefore cannot leave a completed assistant inside
+a failed session.
 
-Optional usage produces at most one transcript-only `model.usage_observed` record after text
-completion and before provider completion. Enabled, healthy persistence writes exactly one; disabled
-or failed persistence writes none. The record contains the session ID and safe-integer input/output
-counts, consumes no protocol sequence, and does not enter either lifecycle reducer. The CAH-021 writer
-always emits version 2; replay accepts versions 1 and 2 and restores version-2 usage into a separate
-evidence projection before building the summary. Protocol v1 and CAH-010's shared lifecycle fixtures
-stay unchanged. Usage admission is nevertheless a shielded transaction under the session decision
-lock: usage-first finishes its persistence attempt before a terminal can win, while terminal-first
-discards the observation. A CAH-022 deadline reservation has priority before usage admission.
+Usage is also separate from lifecycle. One valid report becomes `ModelUsageObserved`, passes through
+the usage observer under the decision lock, and may become one transcript-version-2 record. It does
+not consume a protocol sequence or enter either lifecycle reducer. Replay accepts homogeneous
+version-1 and version-2 tapes, rejects mixed versions and invalid placement, and exposes usage in
+`TranscriptEvidence` and the human summary. CAH-022's expiry reservation is still deferred.
 
-The request accepts an injected tuple of instructions because discovery and precedence are separate
-context-engineering responsibilities. The planned CAH-021 seam supplies an empty tuple until E3
-implements that work. CAH-021 also adds an injection seam, but `main()` remains on the visible M0
-mock until CAH-023 can select and configure a real adapter honestly. The mock response and
-cancellation path stays the same even though the shared transcript writer advances to version 2.
+Outcome selection and terminal publication are two phases. Completion, provider failure, invalid
+response, tool rejection, user cancellation, and teardown can each propose an outcome, but
+`_select_locked()` stores only the first and creates one finalization task. That task attempts
+`wait_closed()` for natural provider terminals or `cancel()` when active work must stop. A cleanup
+exception adds the fixed `provider_cleanup_failed` runtime diagnostic; it never rewrites the
+selected session outcome or exposes exception text.
 
-Session outcome authority is fixed before loop-initiated cleanup. Normal paths select the terminal
-guard first; CAH-022's independent watcher instead latches an irrevocable deadline reservation before
-starting cancellation, and the session formalizes that reserved failure after any admitted event
-transaction completes. Provider-internal natural cleanup may occur before an adapter exposes its
-terminal observation and cannot select session state. The wire terminal waits until the loop's own
-cleanup attempt finishes. This keeps one outcome authoritative without claiming that an unclosed
-provider is healthy; a cleanup-contract violation adds only the safe runtime diagnostic.
+Runtime shutdown, stdin EOF, and outer-task cancellation use teardown rather than fabricating a
+user cancellation. Teardown-first cancels and joins provider work, emits no session terminal, and
+leaves an incomplete replayable transcript prefix. If a user-visible outcome already won, teardown
+joins the same finalizer and lets that outcome finish unchanged.
 
-That diagnostic is an existing protocol-v1 `runtime.error`, not a new session event. It is emitted
-at most once with start-command correlation and exactly the fields
-`code=provider_cleanup_failed`, `message=Provider cleanup could not be confirmed.`, and
-`recoverable=true`.
-It follows the failed cleanup attempt and precedes any already-selected session terminal. Because it
-is recoverable and never enters the lifecycle reducers or transcript, the TUI can still accept the
-authoritative terminal that follows. Teardown-first may emit the diagnostic but invents no session
-terminal.
-
-Each accepted lifecycle event is a smaller transaction under the same session decision lock. The
-session writes the event through `OrderedEventWriter`, accepts it in the Python reducer, and finishes
-the transcript-observer attempt as one shielded unit. This matters because the ordered writer may
-finish a sink write and then propagate task cancellation. If the event transaction won admission,
-the session lets all three views catch up before cancellation competes; if cancellation selected a
-terminal outcome first, no later delta starts. A committed wire delta therefore cannot disappear
-from the authoritative reducer or enabled, healthy transcript merely because cancellation arrived
-during its sink call.
+The composition seam is intentionally narrower than product activation. Tests can pass a
+`Provider` and an already-resolved instruction tuple to `run_runtime()`. Its default `provider=None`
+selects `MockSessionRunner`, which is also what launched `main()` uses. Instruction discovery and
+precedence remain context-engineering work; a real OpenAI adapter and model selection remain
+CAH-023 work.
 
 ## Practical walkthrough
 
-1. Build one `ProviderMessage(role="user", content=task)` and combine it with the caller-supplied
-   instruction tuple.
-2. Call `Provider.start()` once and claim `events()` once.
-3. Reserve each text delta against the fixed protocol ceiling, accumulate it, and publish its
-   existing `assistant.delta` as one shielded wire/reducer/transcript-observer transaction.
-4. Validate text completion against the accumulated buffer but retain it as a candidate.
-5. Validate at most one usage report and attempt its transcript-only version-2 evidence persistence.
-6. Accept `ProviderCompleted` only after valid text completion and select completion in the terminal
-   guard. When it wins, await `wait_closed()`, then emit `assistant.completed` and
-   `session.completed`.
-7. On failure, invalid structure, or an unavailable tool request, first select one safe failure;
-   when it wins, cancel if work remains, await cleanup, and then emit `session.failed`.
-8. Let user cancellation compete in the same guard. Only when cancellation wins does it await
-   `operation.cancel()` and then emit `session.cancelled`.
-9. Let runtime shutdown, stdin EOF, or outer-task cancellation enter the same guard. If teardown
-   wins, cancel and await the operation without inventing a user-cancelled wire event or summary. If
-   a session outcome already won, shield it through cleanup, wire terminal emission, and summary.
-10. Assert the strict fake is complete so an abandoned stream or unconsumed scripted suffix cannot
-   hide orchestration drift.
+1. `ProviderSession.__init__()` snapshots one user message and the injected instruction tuple into
+   one immutable request.
+2. `run()` publishes `session.started`, calls `Provider.start()` once, and claims `events()` once
+   while holding the decision lock.
+3. Each delta is UTF-8 measured before it can enter the existing `assistant.delta` protocol path.
+4. The session writes an admitted delta, reduces it, and finishes the lifecycle observer before
+   appending it to the internal reconciliation buffer.
+5. Text completion must match that buffer. Valid usage, when present, is observed once after text
+   completion and before provider completion.
+6. `ProviderCompleted` selects completion but does not immediately emit it. The shared finalizer
+   awaits `wait_closed()` first, then publishes `assistant.completed` and `session.completed`.
+7. Provider failure preserves a partial accepted prefix. Invalid grammar and tool requests select
+   fixed safe failures; active work is cancelled and joined before `session.failed` is emitted.
+8. Cancellation and teardown compete under the same decision lock. Every caller joins the selected
+   finalizer rather than creating another cleanup owner.
+9. The runtime attaches transcript lifecycle and usage observers only around the injected session;
+   disabled persistence leaves the protocol tape unchanged.
+10. Each deterministic fake scenario ends with `FakeProvider.assert_complete()`, proving the one
+    request and its scripted stream were not abandoned.
 
 ## Implementation code samples
 
-No CAH-021 implementation exists yet. The following pseudocode states the intended ownership, not a
-repository-backed sample:
+### 1. Construct one provider-neutral request
 
-```text
-request = build_request(task, resolved_instructions)
-operation = provider.start(request)
-try:
-    for each provider observation:
-        validate grammar
-        under the session decision lock:
-            shield wire write + reducer acceptance + transcript-observer attempt
-            await the transaction result before propagating outer cancellation
-        for optional bounded model.usage_observed:
-            under the session decision lock, shield the evidence persistence attempt
-            discard it when a terminal/deadline reservation already owns the outcome
-    require reconciled text completion and provider completion
-    if terminal_guard.select_completed():
-        await operation.wait_closed()
-        emit assistant.completed and session.completed
-on a naturally observed ProviderFailed:
-    if terminal_guard.select_failed(safe_code, safe_message):
-        await operation.wait_closed(), reporting bounded cleanup failure separately
-        emit selected session.failed
-on invalid grammar or another harness-rejected observation:
-    if terminal_guard.select_failed(safe_code, safe_message):
-        await operation.cancel(), reporting bounded cleanup failure separately
-        emit selected session.failed
+The constructor excerpt is from
+[`ProviderSession.__init__()`](../../src/code_assist_harness/provider_session.py#L140):
+
+```python
+self._writer = writer
+self._provider = provider
+self._command = command
+self._session_id = session_id
+self._request = ProviderRequest(
+    conversation=(ProviderMessage(role="user", content=command.payload.task),),
+    repository_instructions=repository_instructions,
+)
+self._decision_lock = asyncio.Lock()
 ```
 
-After implementation, replace this block with exact success and failure excerpts from the loop and
-its fake-provider tests, then explain the important lines in small logical chunks.
+The first four assignments retain harness-owned collaborators and identities. `ProviderRequest`
+contains exactly one user message for this unit; the trailing comma makes `conversation` a tuple,
+not a single value in parentheses. The already-resolved instruction tuple is passed through without
+filesystem discovery. Finally, the decision lock establishes the shared admission boundary before
+provider work can start.
+
+### 2. Start and claim exactly one operation
+
+The operation claim is from
+[`_start_provider_operation()`](../../src/code_assist_harness/provider_session.py#L322):
+
+```python
+async with self._decision_lock:
+    if self._selection is not None:
+        return
+    try:
+        operation = self._provider.start(self._request)
+        self._operation = operation
+        events = operation.events()
+    except (asyncio.CancelledError, Exception):
+        self._select_locked(
+            _SelectedOutcome(
+                kind="failed",
+                cleanup_mode="cancel",
+                failure_code=PROVIDER_INVALID_RESPONSE_CODE,
+                failure_message=PROVIDER_INVALID_RESPONSE_MESSAGE,
+                correlation_id=self._command.command_id,
+            )
+        )
+        return
+    self._events = events
+```
+
+The lock first checks whether cancellation or teardown already selected an outcome. The provider is
+started once, and the operation is stored before `events()` is claimed so even a broken claim can be
+cleaned up. A start or claim exception becomes the fixed invalid-response outcome; raw exception
+text never becomes a protocol payload. Only the successfully claimed iterator enters `_events`.
+
+### 3. Admit a bounded delta and reconcile completion
+
+The important success checks are in
+[`_accept_observation()`](../../src/code_assist_harness/provider_session.py#L372):
+
+```python
+if isinstance(observation, ProviderTextDelta):
+    if self._completed_text is not None or self._usage_observed:
+        self._select_invalid_response_locked()
+        return
+    try:
+        encoded_length = len(observation.text.encode("utf-8"))
+    except UnicodeEncodeError:
+        self._select_invalid_response_locked()
+        return
+    if self._accepted_text_bytes + encoded_length > MAX_PROVIDER_TURN_OUTPUT_BYTES:
+        self._select_invalid_response_locked()
+        return
+    delta = await self._writer.emit_session(
+        "assistant.delta",
+        self._session_id,
+        {"text": observation.text},
+        correlation_id=self._command.command_id,
+    )
+    await self._accept_lifecycle_locked(delta)
+    self._accepted_text.append(observation.text)
+    self._accepted_text_bytes += encoded_length
+    return
+```
+
+The first guard rejects a delta after text completion or usage. Encoding determines bytes, not
+Python characters, which matters for emoji and other multibyte text. Both encoding failure and a
+ceiling crossing select the same payload-free safe failure. The writer and lifecycle reducer settle
+before the fragment enters the reconciliation buffer, so internal state cannot get ahead of
+published evidence.
+
+The same method keeps completion as a candidate and selects success only on the provider terminal:
+
+```python
+if isinstance(observation, ProviderTextCompleted):
+    if (
+        self._completed_text is not None
+        or self._usage_observed
+        or not self._accepted_text
+        or observation.text != "".join(self._accepted_text)
+    ):
+        self._select_invalid_response_locked()
+        return
+    self._completed_text = observation.text
+    return
+
+if isinstance(observation, ProviderCompleted):
+    if self._completed_text is None:
+        self._select_invalid_response_locked()
+        return
+    self._select_locked(
+        _SelectedOutcome(
+            kind="completed",
+            cleanup_mode="wait_closed",
+            correlation_id=self._command.command_id,
+        )
+    )
+    return
+```
+
+The joined delta text must match exactly, and at least one delta must exist. Setting
+`_completed_text` changes no wire state. Only `ProviderCompleted` selects a completion outcome, and
+its cleanup mode records that the operation ended naturally rather than needing cancellation.
+
+### 4. Finish cleanup before publishing the selected terminal
+
+The selected finalizer is implemented in
+[`_select_locked()` and `_finalize()`](../../src/code_assist_harness/provider_session.py#L519):
+
+```python
+def _select_locked(self, selection: _SelectedOutcome) -> None:
+    if self._selection is not None:
+        return
+    self._selection = selection
+    self._finalization_task = asyncio.create_task(self._finalize(selection))
+
+async def _join_finalization(self) -> None:
+    task = self._finalization_task
+    if task is not None:
+        await _join_shared(task)
+
+async def _finalize(self, selection: _SelectedOutcome) -> None:
+    if selection.kind != "teardown":
+        await self._session_start_settled.wait()
+        if not self._session_started_successfully:
+            return
+    cleanup_failed = await self._finish_provider_work(selection.cleanup_mode)
+    if cleanup_failed:
+        await self._report_cleanup_failure_once()
+    if selection.kind == "teardown":
+        return
+    await self._emit_selected_terminal(selection)
+```
+
+The early return makes the first selection authoritative. Every competing caller joins the stored
+task through `_join_shared()` instead of cancelling or replacing it. The finalizer waits for the
+start publication to settle, attempts provider cleanup, reports a bounded cleanup problem once, and
+emits no terminal for teardown. Other selected outcomes proceed to exactly one terminal publication.
+
+### 5. Keep the launched path honest
+
+The runtime seam is in
+[`run_runtime()`](../../src/code_assist_harness/runtime.py#L166):
+
+```python
+session_runner: MockSessionRunner | ProviderSessionRunner
+if provider is None:
+    session_runner = MockSessionRunner(writer)
+else:
+    session_runner = ProviderSessionRunner(writer, provider, repository_instructions)
+```
+
+Tests and later composition can inject a provider, but omission is an explicit branch, not an
+implicit global. Because `main()` supplies no provider, ordinary launch still produces the familiar
+mock stream. CAH-023 must add validated configuration before changing that truth.
+
+### 6. Prove a blocked delta transaction wins admission before cancellation
+
+The meaningful race excerpt comes from
+[`test_delta_transaction_finishes_before_user_cancellation()`](../../tests/test_provider_session.py#L946):
+
+```python
+async def sink(line: bytes) -> None:
+    if blocked_boundary == "sink" and b'"type":"assistant.delta"' in line:
+        transaction_started.set()
+        await release_transaction.wait()
+    lines.append(line)
+
+async def observe(update: SessionUpdate, _state: SessionState) -> None:
+    if isinstance(update, AssistantDeltaEvent):
+        if blocked_boundary == "observer":
+            transaction_started.set()
+            await release_transaction.wait()
+        observer_finished.set()
+
+session = ProviderSession(
+    OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+    fake,
+    _session_start(),
+    "ses_blocked_delta",
+)
+await session.attach_lifecycle_observer(observe)
+running = asyncio.create_task(session.run())
+await asyncio.wait_for(transaction_started.wait(), timeout=1)
+
+cancelling = asyncio.create_task(session.request_cancellation("cmd_cancel"))
+await asyncio.sleep(0)
+cancellation_waited = not cancelling.done()
+release_transaction.set()
+```
+
+The same test is parameterized over a blocked wire sink and a blocked lifecycle observer. Each uses
+an event as a logical gate. Cancellation is started only after the chosen boundary is definitely
+blocked; `sleep(0)` yields one scheduler turn rather than waiting for elapsed time. If the decision
+lock protects the full transaction, cancellation cannot finish until `release_transaction` opens.
+
+The assertions prove all three consequences:
+
+```python
+assert cancellation_waited is True
+assert _event_types(lines) == [
+    "session.started",
+    "assistant.delta",
+    "session.cancelled",
+]
+assert session.lifecycle_state.assistant_text == "committed"
+assert session.lifecycle_state.status == "cancelled"
+```
+
+The committed delta stays in the wire tape and authoritative reducer, then cancellation becomes the
+one terminal outcome. A cancellation-first companion test proves the opposite ordering emits no
+delta.
+
+### 7. Prove cleanup failure is bounded and cannot rewrite completion
+
+The cleanup-failure test records a secret-looking exception inside its controlled operation, then
+asserts the safe observable order in
+[`test_completion_cleanup_failure_emits_one_safe_diagnostic_then_completion()`](../../tests/test_provider_session.py#L1392):
+
+```python
+assert _event_types(lines) == [
+    "session.started",
+    "assistant.delta",
+    "runtime.error",
+    "assistant.completed",
+    "session.completed",
+]
+assert "sk-secret-cleanup-exception" not in b"".join(lines).decode()
+assert session.lifecycle_state.status == "completed"
+```
+
+The diagnostic precedes the already-selected terminal, but the session still completes. The raw
+exception text never reaches protocol output. This test separates “the session outcome is known”
+from “provider resource release was confirmed.”
 
 ## Failure scenarios to study
 
-| Scenario | Observable symptom | Safe outcome and evidence |
+| Scenario | Observable symptom | Safe outcome and repository evidence |
 | --- | --- | --- |
-| Failure before output | No assistant delta | One normalized failed terminal state |
-| Failure after output | A partial prefix is visible | Prefix remains evidence; no assistant completion is invented |
-| Completed text differs | Reconciliation rejects the stream | `provider_invalid_response` without content in diagnostics |
-| Output crosses 8192 bytes | Candidate delta would exceed protocol-fit ceiling | Whole delta rejected before TUI or transcript |
-| Tool request arrives | Provider asks for unsupported work | `tool_unavailable`, cancellation, and awaited cleanup |
-| Stream closes early | No provider terminal observation | Structured invalid-stream failure |
-| Cancellation arrives during delta sink | Ordered writer may commit before cancellation propagates | Finish reducer and transcript-observer attempt for that delta, then let cancellation compete |
-| Cancellation races completion | Two terminal paths contend | Exactly one session terminal event wins |
-| Usage overflows its bound | Counter cannot enter trusted evidence | Invalid-stream failure; no oversized metadata is persisted |
-| Runtime pipe closes | No correlated user-cancel command exists | Cancellation and cleanup attempted; incomplete transcript, no invented terminal |
-| Provider cleanup raises | Selected outcome already owns the session | One recoverable, start-correlated `provider_cleanup_failed` runtime error, then the unchanged terminal when one was selected |
+| Provider fails before output | No assistant delta | One normalized `session.failed`; `test_normalized_provider_failure_before_or_after_output_is_authoritative` |
+| Provider fails after output | Partial prefix remains visible | Prefix stays in lifecycle evidence; no assistant completion |
+| Completed text differs | Reconciliation rejects the stream | Fixed `provider_invalid_response`; invalid-grammar parameter cases |
+| Output crosses 8,192 bytes | Candidate delta would exceed the ceiling | Whole delta rejected by `test_delta_crossing_utf8_output_ceiling_is_rejected_in_full` |
+| Tool request arrives | Provider asks for unsupported work | Fixed `tool_unavailable`, cancellation, and no arguments in output |
+| Stream closes early | No provider terminal observation | Invalid response plus cancellation of the operation |
+| Cancellation arrives during delta admission | Sink or observer is blocked | Admitted transaction finishes, then one `session.cancelled` |
+| Cancellation races selected completion | Cleanup is still pending | Cancellation returns `terminal` and joins the winning completion finalizer |
+| Usage competes with cancellation or teardown | Usage observer is blocked | Usage-first observer settles; terminal-first companion suppresses usage |
+| Runtime pipe closes | No correlated user cancel exists | Teardown cleanup, incomplete transcript prefix, no invented terminal |
+| Provider cleanup raises | Resource cleanup is unconfirmed | One bounded runtime diagnostic followed by the unchanged selected terminal |
 
 ## Production expansion
 
@@ -240,60 +460,74 @@ harness owns session truth.
 
 ### Typical production capabilities and tools
 
-These are comparisons, not repository dependencies:
+These are capability comparisons, not repository dependencies:
 
 - [OpenAI Responses streaming](https://developers.openai.com/api/docs/guides/streaming-responses)
-  illustrates typed provider events that a later adapter can normalize.
+  illustrates typed remote events that CAH-023 can normalize behind the provider port. Its benefit
+  is a real model stream; its costs include credentials, usage, remote failure, and adapter upkeep.
 - [Envoy circuit breaking](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/circuit_breaking)
-  illustrates connection, request, and pending-work bounds around remote operations.
+  illustrates connection, request, and pending-work bounds. It adds proxy operation and policy
+  ownership that a one-process local harness does not need.
 - [OpenTelemetry generative AI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
-  illustrate interoperable operation telemetry with an additional privacy and operations burden.
-- [Python asyncio tasks](https://docs.python.org/3/library/asyncio-task.html) document the task and
-  cancellation primitives used by the local runtime.
+  illustrate interoperable model telemetry. They also introduce privacy review, sampling,
+  retention, and observability cost.
+- [Python asyncio tasks](https://docs.python.org/3/library/asyncio-task.html) document the task,
+  shielding, lock, and cancellation primitives used locally; these primitives still require the
+  application to define ownership correctly.
 
 ### Local design versus production design
 
 | Dimension | This repository | Production expansion |
 | --- | --- | --- |
 | Traffic | One local active operation | Concurrent tenants, regions, and provider versions |
-| Reliability | Deterministic fake and one terminal guard | Deadlines, retry budgets, circuit breakers, and failover |
+| Reliability | Deterministic fake and one selected finalizer | Deadlines, retry budgets, circuit breakers, and failover |
 | Evidence | Local redacted transcript metadata | Traces, metrics, cost allocation, and retention governance |
 | Testing | Scripted fake with logical checkpoints | Conformance, canary, load, and fault-injection suites |
 | Operations | No provider network in this unit | Credential rotation, quota monitoring, and on-call ownership |
+| Cost | No API usage and small local state | Provider spend plus telemetry and resilience infrastructure |
 
 ### Trade-offs and graduation signals
 
-The narrow grammar is easy to teach and test but intentionally rejects tool-only, multimodal, and
-multi-turn responses. Expand it only when a later user story names the new outcome and supplies
-fixtures for every added observation. Adopt production routing or resilience controls when measured
-concurrency, latency, availability, or organizational ownership requires their cost.
+The narrow grammar is easy to teach and test, but intentionally rejects tool-only, multimodal, and
+multi-turn responses. The single-process finalizer makes ownership visible, but it does not provide
+durable distributed recovery. Expand the grammar only when a story names the new outcome and adds
+fixtures for every observation. Add production routing, resilience, or central telemetry when
+measured concurrency, latency, availability, cost-allocation, or on-call needs justify their
+operational burden.
 
 ## Practical exercises
 
-1. Script two deltas and matching completion, then list the exact provider and session event order.
-2. Change one character in completed text and predict which evidence remains accepted.
-3. Put a logical cancellation checkpoint before output and between deltas; prove cleanup in both.
-4. Emit a tool request with secret-looking arguments and verify diagnostics contain neither value.
-5. Explain why an empty instruction tuple is honest while automatic `AGENTS.md` discovery is not yet
-   implemented.
+1. Run the candidate-completion delay test and identify the exact moment
+   `assistant.completed` becomes legal.
+2. Change one character in `ProviderTextCompleted` inside an invalid-grammar fake and predict which
+   prefix remains accepted.
+3. Add a multibyte delta at exactly the 8,192-byte boundary, then one byte beyond it, and compare the
+   tapes.
+4. Follow the blocked-observer race and explain why writer shielding by itself would be insufficient.
+5. Emit a tool request with secret-looking arguments and verify neither its name nor arguments enter
+   protocol output.
+6. Trace `run_runtime(provider=None)` and explain why it is honest for `main()` to stay mocked after
+   the provider-session implementation ships.
 
 ## Key takeaways
 
-- The Python loop, not the provider or TUI, owns turn and session semantics.
-- Strict stream grammar, reconciliation, cleanup, and one terminal guard make asynchronous behavior
-  deterministic.
-- Vendor integration and production resilience remain separate units because they introduce
-  different risks and reasons to change.
+- The Python harness, not the provider or TUI, owns request meaning, observation admission, cleanup,
+  and session truth.
+- Strict grammar, reconciliation, one decision lock, and one selected finalizer preserve exactly one
+  terminal outcome even under cancellation.
+- CAH-021 proves orchestration without network access; CAH-022 adds hard limits, and CAH-023 adds and
+  activates the real adapter only after validated configuration exists.
 
 ## Glossary
 
 - **Model turn:** one provider request and all observations from its operation.
-- **Provider operation:** the single-use stream plus its cancellation and cleanup boundary.
-- **Reconciliation:** validation that completed text matches accepted incremental text.
+- **Provider operation:** the single-use stream plus cancellation and natural-cleanup barriers.
+- **Reconciliation:** validation that completed text exactly matches accepted incremental text.
 - **Stream grammar:** legal provider-observation order and cardinality.
-- **Terminal guard:** the authority that selects one final session outcome.
+- **Decision lock:** the lock that serializes evidence admission with outcome selection.
+- **Selected finalizer:** the single shared task that cleans up and publishes the winning outcome.
 - **Trusted usage evidence:** bounded non-authoritative counters restored from a transcript-only
-  evidence record.
+  record, outside lifecycle state.
 
 See the shared [project glossary](../glossary.md) for session, provider, assistant delta, and usage.
 
@@ -304,6 +538,7 @@ See the shared [project glossary](../glossary.md) for session, provider, assista
   [agent loop](../agent-loop.md), [protocol](../protocol.md), and
   [context engineering](../context-engineering.md)
 - Provider-port precursor: [CAH-020 lesson](cah-020-provider-interface-and-fake.md)
+- Next hard-limit unit: [CAH-022 story](../../user-stories/cah-022-enforce-loop-limits.md)
 - Later network boundary: [CAH-023 lesson](cah-023-openai-responses-adapter.md)
 - Production references: [OpenAI Responses streaming](https://developers.openai.com/api/docs/guides/streaming-responses),
   [Envoy circuit breaking](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/circuit_breaking),

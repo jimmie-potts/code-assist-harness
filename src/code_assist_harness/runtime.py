@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .mock_session import MockSession, MockSessionRunner
+from .model_evidence import ModelUsageObserved
 from .persistence import SessionTranscript, TranscriptPersistenceError, TranscriptSettings
 from .protocol import (
     Command,
@@ -23,6 +24,8 @@ from .protocol import (
     SessionId,
     SessionStartCommand,
 )
+from .provider import Provider, RepositoryInstruction
+from .provider_session import ProviderSession, ProviderSessionRunner
 from .session_state import SessionState, SessionUpdate
 
 _READ_CHUNK_SIZE = 64 * 1024
@@ -165,6 +168,8 @@ async def run_runtime(
     *,
     transcript_enabled: bool = True,
     transcript_settings: TranscriptSettings | None = None,
+    provider: Provider | None = None,
+    repository_instructions: tuple[RepositoryInstruction, ...] = (),
 ) -> None:
     """Validate commands and emit ordered protocol events until shutdown or pipe EOF.
 
@@ -173,8 +178,9 @@ async def run_runtime(
     line is still processed. Initialization succeeds only when its payload resolves to the same
     canonical workspace supplied by the supervisor. After readiness, one ``session.start`` runs the
     deterministic CAH-005 stream in a child task so the command reader can reject overlapping work
-    and honor orderly shutdown. A matching ``session.cancel`` cooperatively stops the active mock;
-    Python remains authoritative for its sole terminal event.
+    and honor orderly shutdown. Tests may inject a provider to run one CAH-021 provider-neutral
+    turn; the launched ``main()`` path deliberately supplies none and remains on ``MockSession``.
+    Python remains authoritative for every terminal event.
 
     Args:
         workspace: Canonical existing directory owned by this runtime process.
@@ -182,6 +188,9 @@ async def run_runtime(
         transcript_settings: Optional explicit storage and redaction settings. When omitted and
             persistence is enabled, settings are derived from XDG and recognized sensitive
             environment values. Disabled mode never inspects those locations or values.
+        provider: Optional provider implementation for the test-oriented CAH-021 composition seam.
+        repository_instructions: Ordered, already-resolved instructions supplied only to an injected
+            provider session. Discovery and precedence remain later work.
 
     Raises:
         RuntimeConfigurationError: If ``workspace`` is not canonical or is no longer a directory.
@@ -205,10 +214,14 @@ async def run_runtime(
         settings = TranscriptSettings.from_environment()
 
     writer = OrderedEventWriter(_write_stdout_line)
-    mock_sessions = MockSessionRunner(writer)
+    session_runner: MockSessionRunner | ProviderSessionRunner
+    if provider is None:
+        session_runner = MockSessionRunner(writer)
+    else:
+        session_runner = ProviderSessionRunner(writer, provider, repository_instructions)
     transcript_available = transcript_enabled
     initialized = False
-    active_session: MockSession | None = None
+    active_session: MockSession | ProviderSession | None = None
     active_session_task: asyncio.Task[SessionId] | None = None
     active_transcript: SessionTranscript | None = None
     latest_terminal_session_id: SessionId | None = None
@@ -230,6 +243,8 @@ async def run_runtime(
                 if active_session is None:
                     raise RuntimeError("active session task is missing its lifecycle owner")
                 latest_terminal_session_id = active_session.session_id
+                if active_transcript is not None:
+                    await active_transcript.close()
                 active_session = None
                 active_session_task = None
                 active_transcript = None
@@ -241,6 +256,8 @@ async def run_runtime(
                 result = next_command.result()
             except StopAsyncIteration:
                 if active_session_task is not None:
+                    if isinstance(active_session, ProviderSession):
+                        await active_session.request_teardown()
                     await active_session_task
                 return
             next_command = asyncio.create_task(anext(commands))
@@ -258,6 +275,8 @@ async def run_runtime(
 
             if isinstance(result, RuntimeShutdownCommand):
                 if active_session_task is not None:
+                    if isinstance(active_session, ProviderSession):
+                        await active_session.request_teardown()
                     await active_session_task
                 return
 
@@ -338,7 +357,7 @@ async def run_runtime(
                         correlation_id=result.command_id,
                     )
                     continue
-                active_session = mock_sessions.create(result)
+                active_session = session_runner.create(result)
                 if transcript_available:
                     if settings is None:
                         raise RuntimeError("enabled transcripts are missing their settings")
@@ -386,6 +405,28 @@ async def run_runtime(
                             )
 
                         await active_session.attach_lifecycle_observer(_record_lifecycle)
+                        if isinstance(active_session, ProviderSession):
+
+                            async def _record_model_usage(
+                                observation: ModelUsageObserved,
+                            ) -> None:
+                                """Persist admitted usage or emit the one safe warning."""
+                                nonlocal transcript_available
+                                failure = await transcript.record_model_usage(observation)
+                                if failure is None:
+                                    return
+                                transcript_available = False
+                                await writer.emit_runtime(
+                                    "runtime.error",
+                                    {
+                                        "code": "transcript_persistence_failed",
+                                        "message": failure.message,
+                                        "recoverable": True,
+                                    },
+                                    correlation_id=start_command_id,
+                                )
+
+                            await active_session.attach_model_usage_observer(_record_model_usage)
                 active_session_task = asyncio.create_task(active_session.run())
                 continue
 
@@ -425,6 +466,8 @@ async def run_runtime(
                 # the TUI observes cancellation cannot race a stale active-session reference.
                 await active_session_task
                 latest_terminal_session_id = active_session.session_id
+                if active_transcript is not None:
+                    await active_transcript.close()
                 active_session = None
                 active_session_task = None
                 active_transcript = None
@@ -435,20 +478,25 @@ async def run_runtime(
         if not next_command.done():
             next_command.cancel()
         try:
-            await next_command
-        except (StopAsyncIteration, asyncio.CancelledError):
-            pass
-        await commands.aclose()
-
-        if active_session_task is not None and not active_session_task.done():
-            active_session_task.cancel()
-        if active_session_task is not None:
+            await asyncio.gather(next_command, return_exceptions=True)
+            await commands.aclose()
+        finally:
             try:
-                await active_session_task
-            except asyncio.CancelledError:
-                pass
-        if active_transcript is not None:
-            await active_transcript.close()
+                if active_session_task is not None:
+                    if isinstance(active_session, ProviderSession):
+                        await active_session.request_teardown()
+                    elif not active_session_task.done():
+                        active_session_task.cancel()
+            finally:
+                try:
+                    if active_session_task is not None:
+                        try:
+                            await active_session_task
+                        except asyncio.CancelledError:
+                            pass
+                finally:
+                    if active_transcript is not None:
+                        await active_transcript.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:

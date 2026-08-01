@@ -16,6 +16,7 @@ from uuid import uuid4
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -23,6 +24,7 @@ from pydantic import (
     ValidationError,
 )
 
+from ..model_evidence import MAX_MODEL_USAGE_TOKENS, ModelUsageObserved
 from ..protocol import (
     AssistantCompletedEvent,
     AssistantDeltaEvent,
@@ -47,8 +49,8 @@ from ..session_state import (
     reduce_session_state,
 )
 
-TRANSCRIPT_VERSION = 1
-"""Version of the local transcript envelope, independent of protocol v1."""
+TRANSCRIPT_VERSION = 2
+"""Version written for new local transcripts, independent of protocol v1."""
 
 MAX_TRANSCRIPT_LINE_BYTES = 128 * 1024
 """Maximum bytes in one encoded transcript object, excluding its newline."""
@@ -144,6 +146,7 @@ type TranscriptReplayFailureCode = Literal[
     "line_too_large",
     "invalid_utf8",
     "invalid_record",
+    "transcript_version_mismatch",
     "record_order_mismatch",
     "workspace_mismatch",
     "session_mismatch",
@@ -158,6 +161,13 @@ type TruncateFile = Callable[[int, int], None]
 type CloseFile = Callable[[int], None]
 type ReplaceFile = Callable[[Path, Path], None]
 type UnlinkFile = Callable[[Path], None]
+
+
+def _validate_transcript_version_type(value: object) -> object:
+    """Prevent JSON booleans from satisfying integer transcript versions."""
+    if type(value) is not int:
+        raise ValueError("transcript_version must be an integer")
+    return value
 
 
 def _validate_persisted_task(value: str) -> str:
@@ -179,6 +189,13 @@ class _TranscriptModel(BaseModel):
     """Apply strict immutable validation to every transcript-owned JSON shape."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+TranscriptVersion = Annotated[
+    Literal[1, 2],
+    BeforeValidator(_validate_transcript_version_type),
+]
+"""Transcript envelopes accepted by the current side-effect-free replay reader."""
 
 
 class TaskSubmittedInput(_TranscriptModel):
@@ -227,7 +244,7 @@ WorkspaceId = Annotated[
 class _TranscriptRecordBase(_TranscriptModel):
     """Fields common to every ordered transcript record."""
 
-    transcript_version: Literal[1]
+    transcript_version: TranscriptVersion
     record_order: Annotated[int, Field(gt=0)]
     recorded_at: Timestamp
     workspace_id: WorkspaceId
@@ -249,8 +266,17 @@ class SessionEventRecord(_TranscriptRecordBase):
     input: TranscriptSessionEvent
 
 
+class ModelUsageObservedRecord(_TranscriptRecordBase):
+    """One version-2 provider usage observation outside lifecycle state."""
+
+    transcript_version: Literal[2]
+    kind: Literal["model.usage_observed"]
+    input_tokens: Annotated[int, Field(ge=0, le=MAX_MODEL_USAGE_TOKENS)]
+    output_tokens: Annotated[int, Field(ge=0, le=MAX_MODEL_USAGE_TOKENS)]
+
+
 type TranscriptRecord = Annotated[
-    DomainFactRecord | SessionEventRecord,
+    DomainFactRecord | SessionEventRecord | ModelUsageObservedRecord,
     Field(discriminator="kind"),
 ]
 
@@ -358,11 +384,19 @@ class TranscriptReplayError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptEvidence:
+    """Validated non-lifecycle observations restored from one transcript."""
+
+    model_usage: ModelUsageObserved | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TranscriptReplay:
     """Validated replay result for a complete terminal tape or a safe incomplete prefix."""
 
     records: tuple[TranscriptRecord, ...]
     state: SessionState
+    evidence: TranscriptEvidence
     complete: bool
 
 
@@ -527,6 +561,7 @@ class SessionTranscript:
             text_limit_bytes=settings.text_limit_bytes,
         )
         self._state = INITIAL_SESSION_STATE
+        self._evidence = TranscriptEvidence()
         self._next_record_order = 1
         self._committed_bytes = 0
         self._lock = asyncio.Lock()
@@ -634,6 +669,11 @@ class SessionTranscript:
                 return None
             try:
                 safe_update = self._sanitizer.sanitize_update(update)
+                if self._evidence.model_usage is not None and isinstance(
+                    safe_update,
+                    AssistantDeltaEvent,
+                ):
+                    raise TranscriptPersistenceError("transcript_write_failed")
                 reduction = reduce_session_state(self._state, safe_update)
                 if not reduction.ok or not _same_lifecycle_invariants(
                     reduction.state,
@@ -652,18 +692,14 @@ class SessionTranscript:
                     workspace_id=self._workspace_id,
                     session_id=self._session_id,
                 )
-                line = _encode_record(record)
-                if (
-                    self._next_record_order > _MAX_TRANSCRIPT_RECORDS
-                    or self._committed_bytes + len(line) > _MAX_TRANSCRIPT_BYTES
-                ):
-                    raise TranscriptPersistenceError("transcript_write_failed")
-                self._append_and_flush(line)
+                self._append_record(record)
                 self._state = reduction.state
-                self._next_record_order += 1
-                self._committed_bytes += len(line)
                 if self._state.status in TERMINAL_SESSION_STATUSES:
-                    summary = _build_summary(self._state, self._transcript_path.name)
+                    summary = _build_summary(
+                        self._state,
+                        self._evidence,
+                        self._transcript_path.name,
+                    )
                     try:
                         self._write_summary(summary)
                     except TranscriptPersistenceError:
@@ -676,10 +712,72 @@ class SessionTranscript:
                 self._latch_failure("transcript_write_failed")
             return self._take_failure()
 
+    async def record_model_usage(
+        self,
+        observation: ModelUsageObserved,
+    ) -> TranscriptPersistenceFailure | None:
+        """Append one bounded model-usage observation without changing lifecycle state.
+
+        Args:
+            observation: Session-bound usage admitted by the provider-turn decision lock.
+
+        Returns:
+            The first payload-free persistence failure, or ``None`` after success and after any
+            already-reported failure.
+
+        Raises:
+            TypeError: If ``observation`` is not a validated model-usage value.
+        """
+        if not isinstance(observation, ModelUsageObserved):
+            raise TypeError("transcript model usage requires a validated observation")
+        async with self._lock:
+            if self._failure is not None:
+                return self._take_failure()
+            if self._closed:
+                return None
+            try:
+                if (
+                    observation.session_id != self._session_id
+                    or self._evidence.model_usage is not None
+                    or self._state.status != "running"
+                    or not self._state.assistant_text
+                    or self._state.assistant_completed
+                ):
+                    raise TranscriptPersistenceError("transcript_write_failed")
+                record = ModelUsageObservedRecord(
+                    transcript_version=TRANSCRIPT_VERSION,
+                    record_order=self._next_record_order,
+                    recorded_at=self._clock(),
+                    workspace_id=self._workspace_id,
+                    session_id=self._session_id,
+                    kind="model.usage_observed",
+                    input_tokens=observation.input_tokens,
+                    output_tokens=observation.output_tokens,
+                )
+                self._append_record(record)
+                self._evidence = TranscriptEvidence(model_usage=observation)
+            except TranscriptPersistenceError as error:
+                self._latch_failure(error.code)
+            except (OSError, RuntimeError, ValueError, ValidationError):
+                self._latch_failure("transcript_write_failed")
+            return self._take_failure()
+
     async def close(self) -> None:
         """Close the transcript without fabricating a terminal record or summary."""
         async with self._lock:
             self._close()
+
+    def _append_record(self, record: TranscriptRecord) -> None:
+        """Validate, append, and commit one record under the caller-held transcript lock."""
+        line = _encode_record(record)
+        if (
+            self._next_record_order > _MAX_TRANSCRIPT_RECORDS
+            or self._committed_bytes + len(line) > _MAX_TRANSCRIPT_BYTES
+        ):
+            raise TranscriptPersistenceError("transcript_write_failed")
+        self._append_and_flush(line)
+        self._next_record_order += 1
+        self._committed_bytes += len(line)
 
     def _append_and_flush(self, line: bytes) -> None:
         start_offset = os.lseek(self._descriptor, 0, os.SEEK_END)
@@ -813,6 +911,8 @@ def replay_transcript(
     """
     records: list[TranscriptRecord] = []
     state = INITIAL_SESSION_STATE
+    evidence = TranscriptEvidence()
+    expected_transcript_version: int | None = None
     expected_workspace_id: str | None = None
     expected_session_id: str | None = None
     scoped_workspace_id: str | None = None
@@ -863,6 +963,10 @@ def replay_transcript(
                     raise TranscriptReplayError("invalid_record", line_number) from None
                 if record.record_order != line_number:
                     raise TranscriptReplayError("record_order_mismatch", line_number)
+                if expected_transcript_version is None:
+                    expected_transcript_version = record.transcript_version
+                elif record.transcript_version != expected_transcript_version:
+                    raise TranscriptReplayError("transcript_version_mismatch", line_number)
                 if expected_workspace_id is None:
                     expected_workspace_id = record.workspace_id
                     expected_session_id = record.session_id
@@ -877,8 +981,35 @@ def replay_transcript(
                     raise TranscriptReplayError("session_mismatch", line_number)
                 if not _record_matches_session(record):
                     raise TranscriptReplayError("session_mismatch", line_number)
+                if isinstance(record, ModelUsageObservedRecord):
+                    if (
+                        evidence.model_usage is not None
+                        or state.status != "running"
+                        or not state.assistant_text
+                        or state.assistant_completed
+                    ):
+                        raise TranscriptReplayError(
+                            "lifecycle_invariant_failed",
+                            line_number,
+                        )
+                    try:
+                        model_usage = ModelUsageObserved(
+                            session_id=record.session_id,
+                            input_tokens=record.input_tokens,
+                            output_tokens=record.output_tokens,
+                        )
+                    except (TypeError, ValueError):
+                        raise TranscriptReplayError("invalid_record", line_number) from None
+                    evidence = TranscriptEvidence(model_usage=model_usage)
+                    records.append(record)
+                    continue
                 update = _record_update(record)
                 if isinstance(update, AssistantDeltaEvent):
+                    if evidence.model_usage is not None:
+                        raise TranscriptReplayError(
+                            "lifecycle_invariant_failed",
+                            line_number,
+                        )
                     assistant_content_bytes += len(update.payload.text.encode("utf-8"))
                     if assistant_content_bytes > _MAX_REPLAY_ASSISTANT_BYTES:
                         raise TranscriptReplayError("transcript_too_large", line_number)
@@ -898,6 +1029,7 @@ def replay_transcript(
     return TranscriptReplay(
         records=tuple(records),
         state=state,
+        evidence=evidence,
         complete=state.status in TERMINAL_SESSION_STATUSES,
     )
 
@@ -986,6 +1118,8 @@ def _record_update(record: TranscriptRecord) -> SessionUpdate:
 
 
 def _record_matches_session(record: TranscriptRecord) -> bool:
+    if isinstance(record, ModelUsageObservedRecord):
+        return True
     if isinstance(record, SessionEventRecord):
         return record.input.session_id == record.session_id
     if isinstance(record.input, TaskSubmittedInput):
@@ -1000,8 +1134,21 @@ def _encode_record(record: TranscriptRecord) -> bytes:
     return line + b"\n"
 
 
-def _build_summary(state: SessionState, transcript_name: str) -> bytes:
+def _build_summary(
+    state: SessionState,
+    evidence: TranscriptEvidence,
+    transcript_name: str,
+) -> bytes:
     task = _single_line(state.task or "unavailable")
+    usage = evidence.model_usage
+    usage_lines = (
+        ["Model usage: unavailable"]
+        if usage is None
+        else [
+            f"Model input tokens: {usage.input_tokens}",
+            f"Model output tokens: {usage.output_tokens}",
+        ]
+    )
     lines = [
         "Code Assist Harness session summary",
         "",
@@ -1009,6 +1156,7 @@ def _build_summary(state: SessionState, transcript_name: str) -> bytes:
         f"Session: {state.session_id or 'unavailable'}",
         f"Task: {task}",
         f"Outcome: {state.status}",
+        *usage_lines,
         "Changed files: unavailable - file-edit tools are not implemented in CAH-011.",
         "Check results: unavailable - validation tools are not implemented in CAH-011.",
     ]
