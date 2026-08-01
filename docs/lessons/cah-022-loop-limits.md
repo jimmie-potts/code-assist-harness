@@ -3,13 +3,15 @@
 - **Unit:** CAH-022
 - **Milestone:** M1 - Conversational core
 - **Lesson status:** Planned
-- **Implementation status:** Planned; the provider-neutral turn and hard limits are not implemented
+- **Implementation status:** Planned; CAH-021's provider-neutral turn is implemented, but the hard
+  limits in this unit are not
 - **Story:** [CAH-022](../../user-stories/cah-022-enforce-loop-limits.md)
 - **Related architecture:** [Agent loop](../agent-loop.md), [Safety model](../safety-model.md), and
   [ADR 0001](../adr/0001-own-the-agent-loop.md)
 
-> This lesson describes the accepted safety-budget design for the planned CAH-021 turn. It does not
-> claim that provider work is currently bounded or that a network adapter exists.
+> This lesson describes the accepted safety-budget design around CAH-021's implemented
+> provider-neutral turn. It does not claim that provider work is currently deadline-bounded or that
+> a network adapter exists.
 
 ## Quick summary
 

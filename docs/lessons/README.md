@@ -50,7 +50,7 @@ clarify or reinforce the concept; they must never weaken accuracy, legibility, o
 | 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Done |
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Verified against implementation |
 | 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | Verified against implementation |
-| 13 | CAH-021 | [One provider-neutral turn](cah-021-one-model-turn.md) | Planned |
+| 13 | CAH-021 | [One provider-neutral turn](cah-021-one-model-turn.md) | Verified against implementation |
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Planned |
 | 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Planned |
 

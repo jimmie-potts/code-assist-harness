@@ -5,8 +5,9 @@
 > normalized teaching tapes to that evidence. CAH-007 runs all current deterministic layers through
 > one offline repository gate and Linux workflow. CAH-010 adds equivalent pure lifecycle reducers
 > and shared transition/replay fixtures. CAH-020 adds the provider-neutral port and programmable
-> fake used by later loop and evaluation scenarios. Filesystem-backed `evals/` scenarios and a
-> provider-backed session turn are not implemented yet.
+> fake. CAH-021 uses them to prove one injected provider-backed session turn, including strict stream
+> grammar, usage evidence, races, and cleanup. Filesystem-backed `evals/` scenarios are not
+> implemented yet, and the launched TUI remains on the deterministic mock.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -43,7 +44,7 @@ Python script model.
 | --- | --- |
 | Normal streamed response | Deltas remain ordered and the session completes once. |
 | User cancellation | Active work stops and the session is cancelled once. Unit and boundary tests exist; a reusable evaluation scenario remains planned. |
-| Provider exception | The fake can emit a normalized provider failure; CAH-021 must translate it into one structured session failure before transcript persistence. |
+| Provider exception | The injected turn translates a normalized provider failure into one structured session failure; unexpected start, iteration, or grammar failure becomes `provider_invalid_response`. |
 | Invalid protocol line | The runtime survives when possible and reports a safe protocol error. |
 | Unknown tool | Dispatch is rejected and the model receives a structured result. |
 | Hard-limit exhaustion | CAH-022 stops before a disallowed operation or observation is accepted. |
@@ -86,6 +87,16 @@ single-consumer ownership, and cancellation before output and between deltas.
 modules are unavailable and that the project declares no OpenAI or LangChain dependency. A
 transcript regression models the later failure handoff and verifies that only normalized failure
 fields are persisted, never a raw adapter object.
+
+CAH-021 adds deterministic orchestration evidence without adding the filesystem scenario runner.
+`tests/test_provider_session.py` exercises exact request construction, one-operation ownership, the
+successful text/completion/usage grammar, exact 8,192-byte acceptance and over-limit rejection,
+normalized and invalid failures, tool rejection, cancellation before and between output, blocked
+wire and transcript observers, terminal races, teardown, and cleanup-contract violations. Every
+strict-fake path calls `assert_complete()`. `tests/test_runtime.py` injects the fake through
+`run_runtime`, proves transcript-enabled and disabled modes have identical wire outcomes, restores
+version-2 usage evidence, and verifies that shutdown, EOF, and outer-task cancellation join provider
+cleanup without fabricating a terminal. These tests use no SDK, credentials, model, or network.
 
 ## Assertion layers
 
@@ -137,10 +148,10 @@ fixtures test unsupported versions, bad discriminators, missing fields, and malf
 
 The walking-skeleton tests start the real Node parent and Python child with mocked runtime behavior.
 They assert ordered streamed completion, authoritative cancellation, another session after a
-terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. CAH-021 will
-integrate the CAH-020 fake through an injected Python runtime seam while leaving this launched mock
-honest. CAH-022 will add deterministic budget tests, and CAH-023 will activate the bounded path at
-the composition root. A later unit may add a fake or restricted executor.
+terminal outcome, shutdown, stderr/stdout separation, and visible lifecycle state. Separate Python
+integration tests now exercise the CAH-020 fake through CAH-021's injected runtime seam while leaving
+the launched mock honest. CAH-022 will add deterministic budget tests, and CAH-023 will activate the
+bounded path at the composition root. A later unit may add a fake or restricted executor.
 
 ### Live-provider smoke evaluations
 
@@ -158,11 +169,12 @@ environment values are never diagnostic artifacts.
 
 Because visible state is input-derived, replaying trusted domain facts and a stored validated event
 list reproduces the same terminal state. CAH-010 implements this fold in both languages and stops at
-the first structured invariant failure. CAH-011 now validates transcript-v1 JSONL framing, schema,
-contiguous record order, workspace/session identity, embedded protocol events, and reducer
-invariants before returning a terminal or explicitly incomplete projection. Replay does not
-re-execute tools or provider calls, recover redacted or bounded values, resume work, or trust later
-lines after a failure.
+the first structured invariant failure. The transcript writer now emits version 2, while replay
+accepts internally consistent versions 1 and 2, validates framing, schema, contiguous record order,
+workspace/session identity, embedded protocol events, reducer invariants, and version-2 usage
+placement. It returns lifecycle state plus a separate optional usage-evidence projection. Replay does
+not re-execute tools or provider calls, recover redacted or bounded values, resume work, treat usage
+as billing proof or limit authority, or trust later lines after a failure.
 
 ## Definition of done for behavioral work
 

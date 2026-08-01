@@ -13,8 +13,8 @@
 
 > This lesson describes the shipped CAH-020 provider contract and fake. The code samples below are
 > excerpts from the implementation and tests, not aspirational pseudocode. The current TUI still
-> runs `MockSession`; planned CAH-021 will prove one injected provider-neutral turn without changing
-> that launched path.
+> runs `MockSession`; CAH-021 now proves one injected provider-neutral turn without changing that
+> launched path.
 
 ## Quick summary
 
@@ -35,10 +35,10 @@ After completing this unit, you should be able to:
 
 ## Why this unit matters
 
-The agent loop in CAH-021 must react to partial text, tool requests, usage, failures, and user
-cancellation. Testing those branches against a live API would be slow, variable, credential-bound,
-and hard to force into rare races. Allowing SDK objects into the loop would make vendor response
-shapes part of the project's domain.
+The provider-neutral turn implemented in CAH-021 must react to partial text, tool requests, usage,
+failures, and user cancellation. Testing those branches against a live API would be slow, variable,
+credential-bound, and hard to force into rare races. Allowing SDK objects into the loop would make
+vendor response shapes part of the project's domain.
 
 CAH-020 creates a smaller, stable seam first. Later code can depend on `ProviderRequest`,
 `ProviderStreamEvent`, and `ProviderOperation` without knowing whether the implementation is the
@@ -93,8 +93,8 @@ An `async for` loop repeats that process until the iterator raises `StopAsyncIte
 `ProviderCompleted()` means, “the entire provider operation ended normally.” They are deliberately
 separate. A response may also report usage or tool calls before the operation closes.
 
-CAH-021 will compare completed text with accepted deltas and decide which session events to emit.
-CAH-020 only defines the observations.
+CAH-021 compares completed text with accepted deltas and decides which session events to emit.
+CAH-020 itself only defines the observations.
 
 ### 5. A fake is not merely a hard-coded answer
 
@@ -183,9 +183,9 @@ Important invariants:
 - mismatch diagnostics name only exchange ordinals and field paths, never request content; and
 - raw provider payloads are not provider events or transcript inputs.
 
-Deliberately deferred work includes CAH-021 event-to-session mapping, CAH-022 hard limits, CAH-023
-OpenAI and runtime composition, model selection, tool definitions, repository-instruction discovery,
-retries, and broader TUI integration.
+CAH-021 now supplies event-to-session mapping through an injected composition seam. Deliberately
+deferred work includes CAH-022 hard limits, CAH-023 OpenAI adapter activation and model selection,
+tool definitions, repository-instruction discovery, retries, and broader TUI integration.
 
 ## Practical walkthrough
 
@@ -201,7 +201,7 @@ retries, and broader TUI integration.
    then await `operation.cancel()`. The scripted suffix must not appear.
 6. Call `fake.assert_complete()` at test teardown. A missing request or partial stream turns the
    test red instead of silently passing.
-7. Keep `MockSession` in the launched runtime. CAH-021 will add an injected turn seam and map this
+7. Keep `MockSession` in the launched runtime. CAH-021 now adds an injected turn seam and maps this
    stream into authoritative session events; CAH-023 will activate it with explicit provider and
    model configuration after hard limits exist.
 
@@ -370,7 +370,8 @@ proves the cancellation checkpoint consumed its intended script branch.
 Transcript tests preserve the CAH-011 boundary: they store reducer-approved lifecycle inputs, not
 provider events. A regression maps an already-normalized failure into a validated `session.failed`
 test event and proves that a local raw adapter object, fake token, and body marker never enter the
-transcript. The actual provider-to-session mapping remains CAH-021 work.
+transcript. CAH-021 now implements the actual provider-to-session mapping; this CAH-020 regression
+remains intentionally limited to the provider-boundary handoff.
 
 ## Production expansion
 

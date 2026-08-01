@@ -115,8 +115,10 @@ execution environment.
 
 A compact session artifact containing the task, terminal outcome, changed files, and validation
 results. CAH-011 reports changed files and validation as unavailable because their producers do not
-exist yet; it never turns missing evidence into empty success. The summary complements rather than
-replaces the append-only lifecycle transcript.
+exist yet; it never turns missing evidence into empty success. A completed provider-backed turn also
+reports bounded provider-supplied input and output token counts when that optional evidence exists,
+or says model usage is unavailable. The summary complements rather than replaces the append-only
+transcript.
 
 ## Invariant failure
 
@@ -132,8 +134,9 @@ time. Planned CAH-022 charges model-turn admission before provider start, checks
 monotonic provider-work deadline, reserves cumulative UTF-8 output before emission, and counts tool
 request observations before handling them. The deadline starts supervised provider cancellation; a
 conforming provider stops, while failed or timed-out cleanup remains explicitly unconfirmed. It does
-not claim that a blocked local event or transcript sink has finished. The current runtime does not
-yet enforce those limits.
+not claim that a blocked local event or transcript sink has finished. CAH-021's fixed 8,192-byte
+assistant ceiling protects protocol compatibility, but it is not CAH-022's configurable output or
+work budget; the current runtime does not yet enforce those broader limits.
 
 ## Lesson
 
@@ -146,7 +149,8 @@ glossary. A lesson is educational context, not evidence that planned behavior ha
 One provider request and its complete streamed response. A model turn may produce assistant text,
 one or more tool-call requests, usage information, or a provider failure, and may end early through
 operation cancellation. Cancellation closes the provider stream rather than appearing as a
-provider stream event.
+provider stream event. CAH-021 implements exactly one turn for an injected provider; another turn,
+tool continuation, and launched-provider activation remain planned.
 
 ## NDJSON
 
@@ -183,7 +187,8 @@ An adapter that accepts harness-level model requests and emits provider-neutral 
 Provider SDK objects and raw responses remain inside the adapter. The implemented deterministic
 fake uses the same port without an SDK or network access; planned CAH-023 will add the first real
 adapter for one exact text-only foreground OpenAI Responses stream after hard limits exist. The
-current M0 `MockSession` is a runtime fixture, not a provider consumer.
+launched M0 `MockSession` is a runtime fixture, not a provider consumer; tests and later composition
+roots can inject a provider into `run_runtime` for CAH-021's implemented turn.
 
 ## Provider operation
 
@@ -202,10 +207,20 @@ context-selection policy.
 
 One harness-owned observation produced by an active provider operation. CAH-020 supports text
 deltas, completed text, serialized tool-call requests, usage reports, normal completion, and
-normalized failure. These are Python domain values, not protocol-v1 session events. Planned CAH-021
-will translate accepted text and terminal observations into the existing lifecycle while reducing
-optional bounded usage through a transcript-only `model.usage_observed` evidence record in transcript
-version 2. That record does not change protocol v1 or the shared lifecycle reducers.
+normalized failure. These are Python domain values, not protocol-v1 session events. CAH-021
+translates accepted text and terminal observations into the existing lifecycle and stores optional
+bounded usage through a transcript-only `model.usage_observed` evidence record in transcript version
+2. That record does not change protocol v1 or the shared lifecycle reducers.
+
+## Provider session
+
+The CAH-021 harness-owned orchestrator for one injected provider-neutral turn. `ProviderSession`
+builds one request, starts and claims one operation, validates its strict stream grammar, admits
+each lifecycle publication as one serialized, cancellation-shielded wire/reducer/observer
+transaction, selects one outcome, and joins cleanup. This protects admission against competing
+cancellation or terminal selection; it does not promise rollback after an ordinary sink or observer
+failure. The session is distinct from the launched `MockSession`, provider adapter, multi-turn loop,
+and TUI projection.
 
 ## Reducer
 
@@ -223,7 +238,8 @@ filesystem, or subprocess effects.
 
 The Python process entry point that reads protocol commands, supervises sessions and active work,
 writes ordered events, and coordinates shutdown. It hosts the harness core but is not itself the
-terminal interface.
+terminal interface. `run_runtime` supports injected-provider composition for deterministic tests;
+`main()` currently injects none and therefore launches `MockSession`.
 
 ## Sequence number
 
@@ -271,11 +287,13 @@ its capability and effective policy.
 
 ## Transcript
 
-An append-only JSONL record of trusted lifecycle inputs stored under the WSL XDG state directory
-unless disabled. It preserves reducer order across application-owned domain facts and validated
-session events after redaction and bounding; it never contains raw provider payloads or environment
-values and does not replace authoritative in-memory state. A complete safe tape can be replayed;
-an incomplete prefix is inspectable but not resumable.
+An append-only JSONL record stored under the WSL XDG state directory unless disabled. The current
+writer emits version 2; replay accepts an internally consistent version-1 or version-2 tape and
+rejects mixed versions. It preserves reducer order across application-owned domain facts and
+validated session events after redaction and bounding. Version 2 may also contain one typed,
+transcript-only model-usage observation exposed through separate replay evidence. A transcript never
+contains raw provider payloads or environment values and does not replace authoritative in-memory
+state. A complete safe tape can be replayed; an incomplete prefix is inspectable but not resumable.
 
 ## TUI
 

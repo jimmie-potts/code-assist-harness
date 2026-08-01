@@ -12,6 +12,10 @@ from typing import cast
 import pytest
 
 import code_assist_harness.persistence.transcript as transcript_module
+from code_assist_harness.model_evidence import (
+    MAX_MODEL_USAGE_TOKENS,
+    ModelUsageObserved,
+)
 from code_assist_harness.persistence import (
     SessionTranscript,
     TranscriptFileOperations,
@@ -101,6 +105,38 @@ async def _record_updates(
     for update, state in accepted:
         failures.append(await transcript.record(update, state))
     return accepted[-1][1], failures
+
+
+async def _record_completed_turn_with_usage(
+    transcript: SessionTranscript,
+    observation: ModelUsageObserved,
+) -> tuple[SessionState, list[object | None]]:
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Measure one model turn"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.completed", 3, text="Done"),
+        _event("session.completed", 4),
+    ]
+    accepted = _accepted_updates(updates)
+    failures = [
+        *[await transcript.record(update, state) for update, state in accepted[:3]],
+        await transcript.record_model_usage(observation),
+        *[await transcript.record(update, state) for update, state in accepted[3:]],
+    ]
+    return accepted[-1][1], failures
+
+
+def _read_json_records(path: Path) -> list[dict[str, object]]:
+    return [cast(dict[str, object], json.loads(line)) for line in path.read_bytes().splitlines()]
+
+
+def _write_json_records(path: Path, records: Iterable[dict[str, object]]) -> None:
+    path.write_bytes(
+        b"".join(
+            json.dumps(record, separators=(",", ":")).encode("utf-8") + b"\n" for record in records
+        )
+    )
 
 
 def _settings(tmp_path: Path, **overrides: object) -> TranscriptSettings:
@@ -248,6 +284,7 @@ def test_completed_transcript_redacts_split_secrets_replays_and_summarizes(
     assert FAKE_SECRET[14:].encode() not in transcript_bytes
     assert b"[REDACTED]" in transcript_bytes
     assert [record["record_order"] for record in records] == list(range(1, 7))
+    assert {record["transcript_version"] for record in records} == {2}
     assert [record["kind"] for record in records] == [
         "domain_fact",
         "session_event",
@@ -269,8 +306,293 @@ def test_completed_transcript_redacts_split_secrets_replays_and_summarizes(
     )
     assert stored_completion == "".join(stored_deltas)
     assert "Outcome: completed" in transcript.summary_path.read_text(encoding="utf-8")
+    assert "Model usage: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
     assert "Changed files: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
     assert "Check results: unavailable" in transcript.summary_path.read_text(encoding="utf-8")
+
+
+def test_replay_accepts_a_complete_version_one_lifecycle_tape(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Replay an older tape"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Compatible"),
+        _event("assistant.completed", 3, text="Compatible"),
+        _event("session.completed", 4),
+    ]
+    asyncio.run(_record_updates(transcript, updates))
+    records = _read_json_records(transcript.transcript_path)
+    for record in records:
+        record["transcript_version"] = 1
+    _write_json_records(transcript.transcript_path, records)
+
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert replay.complete
+    assert replay.state.status == "completed"
+    assert replay.state.assistant_text == "Compatible"
+    assert replay.evidence.model_usage is None
+    assert {record.transcript_version for record in replay.records} == {1}
+
+
+def test_replay_rejects_mixed_transcript_versions_at_the_first_change(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Reject mixed versions"),
+        _event("session.started", 1),
+    ]
+    asyncio.run(_record_updates(transcript, updates))
+    records = _read_json_records(transcript.transcript_path)
+    records[1]["transcript_version"] = 1
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == "transcript_version_mismatch"
+    assert replay_error.value.line_number == 2
+
+
+@pytest.mark.parametrize("boolean_version", [False, True])
+def test_replay_rejects_boolean_transcript_versions(
+    tmp_path: Path,
+    boolean_version: bool,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Reject boolean versions"),
+    ]
+    asyncio.run(_record_updates(transcript, updates))
+    records = _read_json_records(transcript.transcript_path)
+    records[0]["transcript_version"] = boolean_version
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == "invalid_record"
+    assert replay_error.value.line_number == 1
+
+
+@pytest.mark.parametrize(
+    ("input_tokens", "output_tokens"),
+    [(0, 0), (MAX_MODEL_USAGE_TOKENS, MAX_MODEL_USAGE_TOKENS)],
+)
+def test_model_usage_is_version_two_evidence_and_appears_in_the_summary(
+    tmp_path: Path,
+    input_tokens: int,
+    output_tokens: int,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    observation = ModelUsageObserved(
+        session_id=SESSION_ID,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+    live_state, failures = asyncio.run(_record_completed_turn_with_usage(transcript, observation))
+    replay = replay_transcript(transcript.transcript_path)
+    records = _read_json_records(transcript.transcript_path)
+    usage_record = records[3]
+    summary = transcript.summary_path.read_text(encoding="utf-8")
+
+    assert failures == [None] * 6
+    assert live_state.status == "completed"
+    assert replay.complete
+    assert replay.evidence.model_usage == observation
+    assert usage_record == {
+        "transcript_version": 2,
+        "record_order": 4,
+        "recorded_at": TIMESTAMP,
+        "workspace_id": records[0]["workspace_id"],
+        "session_id": SESSION_ID,
+        "kind": "model.usage_observed",
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+    assert f"Model input tokens: {input_tokens}" in summary
+    assert f"Model output tokens: {output_tokens}" in summary
+    assert "Model usage: unavailable" not in summary
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code", "line_number"),
+    [
+        ("before_text", "lifecycle_invariant_failed", 3),
+        ("duplicate", "lifecycle_invariant_failed", 5),
+        ("wrong_session", "session_mismatch", 4),
+        ("version_one_usage", "invalid_record", 4),
+    ],
+)
+def test_replay_rejects_invalid_model_usage_records(
+    tmp_path: Path,
+    mutation: str,
+    expected_code: str,
+    line_number: int,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    observation = ModelUsageObserved(
+        session_id=SESSION_ID,
+        input_tokens=12,
+        output_tokens=4,
+    )
+    asyncio.run(_record_completed_turn_with_usage(transcript, observation))
+    records = _read_json_records(transcript.transcript_path)
+    if mutation == "before_text":
+        records.insert(2, records.pop(3))
+    elif mutation == "duplicate":
+        records.insert(4, dict(records[3]))
+    elif mutation == "wrong_session":
+        records[3]["session_id"] = "ses_other"
+    else:
+        records[3]["transcript_version"] = 1
+    for record_order, record in enumerate(records, start=1):
+        record["record_order"] = record_order
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == expected_code
+    assert replay_error.value.line_number == line_number
+
+
+def test_replay_rejects_an_assistant_delta_after_model_usage(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    observation = ModelUsageObserved(
+        session_id=SESSION_ID,
+        input_tokens=12,
+        output_tokens=4,
+    )
+    asyncio.run(_record_completed_turn_with_usage(transcript, observation))
+    records = _read_json_records(transcript.transcript_path)
+    late_delta = cast(dict[str, object], json.loads(json.dumps(records[2])))
+    late_input = cast(dict[str, object], late_delta["input"])
+    late_input["sequence"] = 3
+    cast(dict[str, object], late_input["payload"])["text"] = " late"
+    completed_input = cast(dict[str, object], records[4]["input"])
+    completed_input["sequence"] = 4
+    cast(dict[str, object], completed_input["payload"])["text"] = "Done late"
+    cast(dict[str, object], records[5]["input"])["sequence"] = 5
+    records.insert(4, late_delta)
+    for record_order, record in enumerate(records, start=1):
+        record["record_order"] = record_order
+    _write_json_records(transcript.transcript_path, records)
+
+    with pytest.raises(TranscriptReplayError) as replay_error:
+        replay_transcript(transcript.transcript_path)
+
+    assert replay_error.value.code == "lifecycle_invariant_failed"
+    assert replay_error.value.line_number == 5
+
+
+@pytest.mark.parametrize("invalid_case", ["before_text", "after_completion", "wrong_session"])
+def test_writer_rejects_model_usage_outside_its_single_valid_window(
+    tmp_path: Path,
+    invalid_case: str,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Keep usage ordered"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.completed", 3, text="Done"),
+    ]
+    accepted = _accepted_updates(updates)
+    accepted_count = 2 if invalid_case == "before_text" else 3
+    if invalid_case == "after_completion":
+        accepted_count = 4
+
+    async def record_invalid_usage() -> object | None:
+        for update, state in accepted[:accepted_count]:
+            assert await transcript.record(update, state) is None
+        return await transcript.record_model_usage(
+            ModelUsageObserved(
+                session_id="ses_other" if invalid_case == "wrong_session" else SESSION_ID,
+                input_tokens=3,
+                output_tokens=1,
+            )
+        )
+
+    failure = asyncio.run(record_invalid_usage())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == "transcript_write_failed"
+    assert replay.evidence.model_usage is None
+    assert len(replay.records) == accepted_count
+    assert not transcript.summary_path.exists()
+
+
+def test_writer_rejects_an_assistant_delta_after_model_usage(tmp_path: Path) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Keep usage after the final delta"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+        _event("assistant.delta", 3, text=" late"),
+    ]
+    accepted = _accepted_updates(updates)
+    observation = ModelUsageObserved(
+        session_id=SESSION_ID,
+        input_tokens=8,
+        output_tokens=2,
+    )
+
+    async def record_late_delta() -> object | None:
+        for update, state in accepted[:3]:
+            assert await transcript.record(update, state) is None
+        assert await transcript.record_model_usage(observation) is None
+        return await transcript.record(*accepted[3])
+
+    failure = asyncio.run(record_late_delta())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == "transcript_write_failed"
+    assert replay.state.assistant_text == "Done"
+    assert replay.evidence.model_usage == observation
+    assert [record.kind for record in replay.records] == [
+        "domain_fact",
+        "session_event",
+        "session_event",
+        "model.usage_observed",
+    ]
+    assert not transcript.summary_path.exists()
+
+
+def test_writer_rejects_duplicate_model_usage_and_preserves_the_first_observation(
+    tmp_path: Path,
+) -> None:
+    transcript = _create_transcript(tmp_path)
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Record usage once"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+    ]
+    accepted = _accepted_updates(updates)
+    observation = ModelUsageObserved(
+        session_id=SESSION_ID,
+        input_tokens=8,
+        output_tokens=2,
+    )
+
+    async def record_duplicate() -> tuple[object | None, object | None]:
+        for update, state in accepted:
+            assert await transcript.record(update, state) is None
+        first = await transcript.record_model_usage(observation)
+        duplicate = await transcript.record_model_usage(observation)
+        return first, duplicate
+
+    first_failure, duplicate_failure = asyncio.run(record_duplicate())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert first_failure is None
+    assert duplicate_failure is not None
+    assert duplicate_failure.code == "transcript_write_failed"
+    assert replay.evidence.model_usage == observation
+    assert [record.kind for record in replay.records].count("model.usage_observed") == 1
+    assert not transcript.summary_path.exists()
 
 
 def test_unicode_content_is_bounded_before_json_and_remains_replayable(tmp_path: Path) -> None:
@@ -640,6 +962,69 @@ def test_append_failure_preserves_valid_prefix_and_reports_only_once(
     assert len(replay.records) == 2
     assert replay.state.status == "running"
     assert not replay.complete
+    assert transcript.transcript_path.read_bytes().endswith(b"\n")
+    assert not transcript.summary_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("failing_operation", "expected_code"),
+    [("write", "transcript_write_failed"), ("flush", "transcript_flush_failed")],
+)
+def test_model_usage_append_failure_rolls_back_to_the_lifecycle_prefix(
+    tmp_path: Path,
+    failing_operation: str,
+    expected_code: str,
+) -> None:
+    write_count = 0
+    flush_count = 0
+
+    def write(descriptor: int, contents: bytes) -> int:
+        nonlocal write_count
+        write_count += 1
+        if failing_operation == "write" and write_count == 4:
+            return os.write(descriptor, contents[: max(1, len(contents) // 2)])
+        if failing_operation == "write" and write_count == 5:
+            raise OSError("injected model usage write failure")
+        return os.write(descriptor, contents)
+
+    def flush(descriptor: int) -> None:
+        nonlocal flush_count
+        flush_count += 1
+        if failing_operation == "flush" and flush_count == 4:
+            raise OSError("injected model usage flush failure")
+        os.fsync(descriptor)
+
+    transcript = _create_transcript(
+        tmp_path,
+        operations=TranscriptFileOperations(write=write, flush=flush),
+    )
+    updates: list[SessionUpdate] = [
+        TaskSubmitted(command_id=START_COMMAND_ID, task="Preserve usage prefix"),
+        _event("session.started", 1),
+        _event("assistant.delta", 2, text="Done"),
+    ]
+    accepted = _accepted_updates(updates)
+
+    async def record_usage_failure() -> object | None:
+        for update, state in accepted:
+            assert await transcript.record(update, state) is None
+        return await transcript.record_model_usage(
+            ModelUsageObserved(
+                session_id=SESSION_ID,
+                input_tokens=21,
+                output_tokens=5,
+            )
+        )
+
+    failure = asyncio.run(record_usage_failure())
+    replay = replay_transcript(transcript.transcript_path)
+
+    assert failure is not None
+    assert failure.code == expected_code
+    assert len(replay.records) == 3
+    assert replay.state.status == "running"
+    assert replay.state.assistant_text == "Done"
+    assert replay.evidence.model_usage is None
     assert transcript.transcript_path.read_bytes().endswith(b"\n")
     assert not transcript.summary_path.exists()
 

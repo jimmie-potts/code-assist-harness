@@ -117,8 +117,9 @@ emits `session.cancelled` at the next sequence. The terminal cancellation alone 
 command correlation ID.
 
 CAH-006 exercises the deterministic mock only. CAH-020 defines the provider-operation cancellation
-contract, and CAH-021 will integrate it with this lifecycle; later tool stories must add
-subprocess-tree propagation and cleanup.
+contract, and CAH-021 now integrates it with this lifecycle through an injected provider session;
+the launched path remains mocked, and later tool stories must add subprocess-tree propagation and
+cleanup.
 
 ## Practical walkthrough
 

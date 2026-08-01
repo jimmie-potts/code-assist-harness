@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError, fields
 import pytest
 
 from code_assist_harness.provider import (
+    MAX_MODEL_USAGE_TOKENS,
     MAX_PROVIDER_FAILURE_MESSAGE_CHARS,
     ProviderCompleted,
     ProviderFailed,
@@ -43,6 +44,7 @@ def test_request_is_immutable_and_preserves_caller_supplied_order() -> None:
     ("factory", "expected_error"),
     [
         (lambda: ProviderMessage(role="user", content=""), ValueError),
+        (lambda: ProviderMessage(role="user", content="\ud800"), ValueError),
         (lambda: ProviderMessage(role="system", content="x"), ValueError),
         (lambda: RepositoryInstruction(source="", content="x"), ValueError),
         (lambda: RepositoryInstruction(source="AGENTS.md", content=""), ValueError),
@@ -114,6 +116,8 @@ def test_tool_arguments_preserve_malformed_serialized_input_without_parsing() ->
         (True, 0, TypeError),
         (0, False, TypeError),
         (1.5, 0, TypeError),
+        (MAX_MODEL_USAGE_TOKENS + 1, 0, ValueError),
+        (0, MAX_MODEL_USAGE_TOKENS + 1, ValueError),
     ],
 )
 def test_usage_rejects_negative_or_non_integer_counts(
@@ -156,6 +160,8 @@ def test_normalized_failure_is_bounded_single_line_and_has_no_raw_payload_field(
             message="x" * (MAX_PROVIDER_FAILURE_MESSAGE_CHARS + 1),
             retryable=False,
         )
+    with pytest.raises(ValueError):
+        ProviderFailure(code="unknown", message="\ud800", retryable=False)
     with pytest.raises(ValueError):
         ProviderFailure(code="vendor_secret_code", message="safe", retryable=False)
     with pytest.raises(TypeError):

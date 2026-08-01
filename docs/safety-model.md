@@ -111,20 +111,25 @@ including sensitive data.
 
 ## Transcripts and privacy
 
-Trusted lifecycle inputs—application-owned domain facts and validated session events—are
-append-only evidence, not raw debug capture. By default, session transcripts live under the
-WSL XDG state directory, normally
+Trusted lifecycle inputs—application-owned domain facts and validated session events—and explicitly
+typed non-lifecycle evidence are append-only evidence, not raw debug capture. By default, session
+transcripts live under the WSL XDG state directory, normally
 `~/.local/state/code-assist-harness/transcripts/`, indexed by a stable workspace hash, session ID,
 and random transcript ID rather than a personal path in the filename. Application directories are
 `0700`; transcript and summary files are `0600`; each accepted record is flushed and fsynced.
 
-CAH-011 transcripts include user tasks, assistant text, validated session events, cancellation
-intent, and the approval wait/resume lifecycle facts introduced by CAH-010. Typed tool metadata,
-tool results, approval decision details, changed-file paths, and validation outcomes remain future
-fields; the current summary reports those unavailable rather than inventing them. Raw provider
-payloads and environment mappings are excluded. Values discovered under recognized secret-like
-environment names and recognized credential syntax are redacted before a lifecycle input is
-persisted. Redaction is a safety net, so producers should avoid emitting secrets in the first place.
+Lifecycle records include user tasks, assistant text, validated session events, cancellation intent,
+and the approval wait/resume facts introduced by CAH-010. CAH-021 moves new transcripts to version 2
+and permits one `model.usage_observed` record containing only a session ID and non-negative,
+JavaScript-safe input/output token counts. Those provider-supplied counters are bounded local
+evidence, not a protocol event, lifecycle input, billing proof, or limit authority; replay exposes
+them separately from session state, and `--no-transcript` suppresses them with the rest of the local
+record. Typed tool metadata, tool results, approval decision details, changed-file paths, and
+validation outcomes remain future fields; the current summary reports those unavailable rather than
+inventing them. Raw provider payloads and environment mappings are excluded. Values discovered under
+recognized secret-like environment names and recognized credential syntax are redacted before a
+lifecycle input is persisted. Redaction is a safety net, so producers should avoid emitting secrets
+in the first place.
 
 The CLI implements `--no-transcript`, which disables local JSONL and summary files without changing
 the event tape. It does not govern future provider-side storage. A first transcript failure becomes

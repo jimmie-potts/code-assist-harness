@@ -1,8 +1,8 @@
 # Agent Loop
 
-> Status: proposed model-loop design with the CAH-020 provider port and deterministic fake complete.
-> CAH-010 verifies the pure session-state and replay precursor in Python and TypeScript; no
-> provider-backed loop exists yet, and the current `MockSession` path is unchanged.
+> Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn through
+> an injected runtime seam and the CAH-020 deterministic fake. The launched `main()` path and TUI
+> remain on `MockSession`; CAH-022 is next and owns configurable hard limits.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -53,13 +53,19 @@ The single event writer is an important invariant: multiple async producers may 
 events, but only one task assigns final sequence numbers and writes protocol lines. This prevents
 interleaving and makes transcript replay deterministic.
 
-The current M0 precursor uses that same event loop without pretending to be an agent loop.
-`run_runtime` keeps reading commands while one `MockSession` task streams. The session owns a
-cooperative cancellation event and serializes delta writes, completion, and cancellation through
-one state lock. This proves request routing and terminal selection before provider and tool child
-tasks make propagation deeper. The [walking-skeleton guide](walking-skeleton.md) traces this
-implemented precursor from the Ink keypress through its authoritative Python terminal event and
-back to rendering; it does not describe the future provider loop as shipped.
+The launched M0 path uses that same event loop without pretending that its fixed response is a model
+turn. `run_runtime` keeps reading commands while one `MockSession` task streams. The session owns a
+cooperative cancellation event and serializes delta writes, completion, and cancellation through one
+state lock. The [walking-skeleton guide](walking-skeleton.md) traces this path from the Ink keypress
+through its authoritative Python terminal event and back to rendering.
+
+CAH-021 adds a parallel composition seam for tests and later adapters. When `run_runtime` receives an
+injected `Provider`, `ProviderSessionRunner` creates one `ProviderSession` instead of a `MockSession`.
+The session starts exactly one operation and claims its stream exactly once. Each accepted lifecycle
+publication is one shielded transaction under the session decision lock: ordered protocol write,
+Python reduction, and transcript-observer attempt all settle before cancellation or teardown may
+select an outcome. This is a real provider-neutral orchestration slice, but `main()` deliberately
+injects no provider, so it does not alter the visible mock or the TypeScript protocol-v1 projection.
 
 ## Bounded loop
 
@@ -141,9 +147,53 @@ only bounded differing field paths rather than conversation or instruction conte
 and retryable observation. It has no raw exception, response, header, environment, or credential
 field; retryability does not authorize the loop to retry. Malformed tool arguments remain serialized
 text at this boundary so later tool validation can return a structured harness result. Provider
-contract tests run without vendor modules, framework packages, API keys, or network access. Planned
-CAH-021 will consume this port for one fake-backed turn, CAH-022 will enforce hard limits, and
+contract tests run without vendor modules, framework packages, API keys, or network access. CAH-021
+now consumes this port for one fake-backed turn. CAH-022 will enforce configurable hard limits, and
 CAH-023 will then target the OpenAI Responses API at this boundary.
+
+## Implemented one-turn grammar
+
+`ProviderSession` builds one `ProviderRequest` containing the accepted task as its sole `user`
+message plus an ordered tuple of already-resolved repository instructions. It does not discover
+instructions, select repository context, import an SDK, start another turn, or execute tools.
+
+A successful stream must contain one or more non-empty `ProviderTextDelta` observations, exactly one
+`ProviderTextCompleted` equal to their byte-for-byte concatenation, optionally one
+`ProviderUsageReported`, and exactly one `ProviderCompleted`, in that order. Completed text remains a
+candidate until provider completion validates the entire grammar and `wait_closed()` has been
+attempted. Only then does the session emit `assistant.completed` followed by `session.completed`.
+A missing, duplicate, out-of-order, empty, mismatched, or early-ended success observation becomes the
+safe `provider_invalid_response` failure.
+
+Empty completed text has one deliberately narrow non-success use: the session may retain it as a
+candidate until a following tool request arrives. That request still becomes `tool_unavailable` and
+triggers cancellation. Empty text cannot authorize usage or provider completion, so it never emits
+an empty `assistant.completed` event.
+
+The turn rejects a delta in full before emission when cumulative accepted assistant text would exceed
+8,192 UTF-8 bytes. This fixed compatibility ceiling keeps protocol lines bounded; it is not the
+configurable output budget, model-turn limit, tool-observation limit, or provider-work deadline owned
+by CAH-022. A `ProviderFailed` observation becomes one normalized `session.failed` outcome, while a
+tool request becomes `tool_unavailable`, triggers operation cancellation, and never exposes or parses
+its arguments.
+
+Optional usage is bounded to non-negative JavaScript-safe integers and recorded outside lifecycle
+state as `model.usage_observed`. It consumes neither a protocol-v1 sequence number nor a reducer
+transition. Transcript version 2 stores the observation before the terminal record and replay exposes
+it through a separate evidence projection; version-1 tapes remain replayable. Usage admission shares
+the decision lock, so an admitted evidence write settles before cancellation competes, while a
+terminal outcome that wins first suppresses later usage.
+
+Completion, normalized failure, user cancellation, invalid response, and runtime teardown select one
+shared outcome before cleanup. User cancellation calls and awaits `ProviderOperation.cancel()`.
+Shutdown, stdin EOF, or outer-task cancellation use teardown: they cancel and join active provider
+work without fabricating `session.cancelled`, leaving an incomplete replayable transcript prefix when
+teardown wins. After the cleanup attempt, the loop cancels and awaits any pending local read. For a
+cancellation-responsive iterator, that join prevents local task scheduling from hanging
+finalization. A successful cleanup return is trusted; a cleanup or reaping exception emits at most
+one start-correlated, payload-free `provider_cleanup_failed` diagnostic before any selected terminal
+and cannot rewrite that outcome. An iterator that suppresses task cancellation requires stronger
+process isolation beyond CAH-021.
 
 ## State and terminal outcomes
 
@@ -178,12 +228,14 @@ second outcome.
 
 CAH-006 proves the first cancellation/completion race rule: a `MockSession` lock lets the first
 valid terminal selection win, repeated or recent-terminal requests become no-ops, and the TUI waits
-for Python's event instead of treating a local request as acknowledgement. Provider completion,
-deadlines, tool cleanup, and child exit will reuse or extend that rule. It is not safe to rely on
-every provider or executor stopping immediately after cancellation.
+for Python's event instead of treating a local request as acknowledgement. CAH-021 applies the rule
+to provider completion, normalized failure, user cancellation, and runtime teardown through one
+decision lock and shared finalizer. Deadlines and tool execution remain later extensions. It is not
+safe to rely on every provider or executor stopping immediately after cancellation.
 
 ## Limits and failures
 
+CAH-021 enforces only the fixed 8,192-byte protocol-compatibility ceiling described above.
 Configuration will include maximum model turns, a provider-work deadline, assistant output bytes,
 and observed provider tool calls. Model-turn admission is charged before provider work starts;
 output and tool-call limits are checked before an observation is admitted for publication. An
@@ -195,7 +247,8 @@ failure.
 
 Failures are converted at their ownership boundary:
 
-- Provider exceptions become provider failure domain events.
+- Provider adapters normalize expected failures before exposure; an unexpected start, iteration, or
+  grammar failure in the implemented turn becomes the safe `provider_invalid_response` outcome.
 - Invalid tool arguments become structured tool results the model can reason about.
 - Policy denials and rejected approvals become explicit results without side effects.
 - Harness invariant violations fail the session and preserve diagnostic detail on stderr.
@@ -231,12 +284,14 @@ cancellation before output and between deltas without a provider dependency or n
 > As an agent-loop developer, I want one provider-neutral turn to run through the harness-owned
 > lifecycle so that orchestration is proven before network integration.
 
-This is the next dependency-ready unit. It builds one request from a task and injected instruction
-tuple, starts one fake-provider operation, enforces a strict text/completion grammar, keeps optional
-usage as bounded local metadata, rejects tool requests as unavailable, and preserves cancellation and
-terminal invariants. An admitted event publication is shielded through the ordered wire write,
-Python reducer, and transcript-observer attempt so cancellation cannot split those views. The story
-adds a runtime injection seam without replacing the launched `MockSession`.
+This story is complete. `provider_session.py` builds one request from a task and injected instruction
+tuple, starts one fake-provider operation, enforces the strict text/completion grammar and fixed
+8,192-byte ceiling, persists optional bounded usage as separate evidence, rejects tool requests as
+unavailable, and preserves one terminal winner through cleanup. Focused session tests exercise valid
+and invalid streams, failure and tool mapping, output bounds, usage ordering, cancellation races,
+blocked publication and evidence transactions, teardown, and cleanup-contract violations. Runtime
+tests prove the injected composition seam and transcript-mode parity without replacing the launched
+`MockSession` or changing protocol v1.
 
 ### CAH-022 — Enforce loop limits
 

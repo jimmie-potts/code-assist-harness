@@ -95,14 +95,20 @@ provider-neutral, but abstraction beyond demonstrated needs is deferred.
 ## Implementation status
 
 This remains the accepted target decision. At acceptance time, the repository contained only the
-Python scaffold and no agent loop or provider adapter. CAH-020 now implements the first part of the
-decision in `src/code_assist_harness/provider/`: immutable harness-owned request and stream values,
-structural async provider-operation protocols, normalized safe failures, and a strict programmable
-fake with exact request matching, logical delay gates, and explicit cancellation checkpoints.
+Python scaffold and no agent loop or provider adapter. CAH-020 implements the provider boundary in
+`src/code_assist_harness/provider/`: immutable harness-owned request and stream values, structural
+async provider-operation protocols, normalized safe failures, and a strict programmable fake with
+exact request matching, logical delay gates, and explicit cancellation checkpoints.
 
-That package is deliberately not connected to the current `MockSession` runtime or TUI. It imports
-without a provider SDK or orchestration framework, and default tests remain model-free and
-network-free. CAH-021 is next and will consume the port for one injected, fake-backed turn while the
-launched mock remains unchanged. CAH-022 follows with hard loop limits, then CAH-023 adds the OpenAI
-Responses adapter and explicit runtime activation. All three remain Planned; the tool loop and
-broader orchestration remain future work.
+CAH-021 implements the next vertical slice in `provider_session.py`. One injected provider-neutral
+turn builds an exact request, claims one operation, validates a strict streamed-success grammar,
+maps bounded failure and unavailable-tool outcomes, records optional transcript-only usage, and
+selects one terminal outcome before awaited cleanup. A shared decision lock and finalizer serialize
+accepted event transactions, cancellation, teardown, and cleanup diagnostics. `run_runtime` exposes
+the injection seam, but `main()` deliberately supplies no provider: the launched `MockSession`, TUI,
+and protocol version 1 remain unchanged.
+
+The implementation imports without a provider SDK or orchestration framework, and default tests
+remain model-free and network-free. CAH-022 is next with configurable hard limits; CAH-023 then adds
+the OpenAI Responses adapter and explicit runtime activation. The tool loop and broader orchestration
+remain future work.

@@ -83,10 +83,10 @@ cancellation, and normalization boundaries. Document the fake script format for 
   project metadata contains no OpenAI or LangChain dependency. Transcript regression coverage
   proves that only a normalized provider failure reaches persisted session evidence in the modeled
   handoff.
-- The current `MockSession`, Python runtime, protocol, and TUI are intentionally unchanged.
-  [CAH-021](cah-021-complete-one-model-turn.md) is the next unit and will connect this port to one
-  injected provider-neutral turn. CAH-022 will add hard limits before
-  [CAH-023](cah-023-add-openai-responses-adapter.md) activates the real adapter.
+- The launched `MockSession`, protocol, and TUI remain intentionally unchanged. The Python runtime
+  now has the [CAH-021](cah-021-complete-one-model-turn.md) injection seam that connects this port to
+  one provider-neutral turn without activating it in `main()`. CAH-022 is next and will add hard
+  limits before [CAH-023](cah-023-add-openai-responses-adapter.md) activates the real adapter.
 
 ## Completion evidence
 

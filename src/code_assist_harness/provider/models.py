@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
+from ..model_evidence import MAX_MODEL_USAGE_TOKENS
+
 MAX_PROVIDER_FAILURE_MESSAGE_CHARS = 1024
 """Largest normalized provider failure message accepted by the domain."""
 
@@ -28,6 +30,10 @@ type ProviderFailureCode = Literal[
 def _require_string(value: object, field_name: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{field_name} must be a string")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(f"{field_name} must be valid UTF-8") from None
     return value
 
 
@@ -144,8 +150,9 @@ class ProviderTextDelta:
 class ProviderTextCompleted:
     """The provider's complete assistant text observation.
 
-    Empty text is legal for a tool-call-only response. CAH-021 will reconcile non-empty completed
-    text with accepted deltas before creating session events.
+    Empty text is legal for a tool-call-only response. The session may retain that candidate long
+    enough to classify the next observation; usage and successful completion still require accepted
+    non-empty deltas.
     """
 
     kind: ClassVar[Literal["text.completed"]] = "text.completed"
@@ -202,8 +209,8 @@ class ProviderUsageReported:
         ):
             if type(value) is not int:
                 raise TypeError(f"{field_name} must be an integer")
-            if value < 0:
-                raise ValueError(f"{field_name} must not be negative")
+            if value < 0 or value > MAX_MODEL_USAGE_TOKENS:
+                raise ValueError(f"{field_name} must be between 0 and {MAX_MODEL_USAGE_TOKENS}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +293,7 @@ PROVIDER_STREAM_EVENT_TYPES = (
 
 
 __all__ = [
+    "MAX_MODEL_USAGE_TOKENS",
     "MAX_PROVIDER_FAILURE_MESSAGE_CHARS",
     "PROVIDER_STREAM_EVENT_TYPES",
     "ProviderCompleted",

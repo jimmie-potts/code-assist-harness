@@ -10,8 +10,9 @@
   [Protocol](../protocol.md)
 
 > This lesson records the accepted future adapter boundary using official OpenAI documentation
-> current at planning time. CAH-021 and CAH-022 must implement the provider-neutral turn and hard
-> limits first. Nothing below is shipped code or evidence of a configured provider.
+> current at planning time. CAH-021 now supplies the provider-neutral turn; CAH-022 must implement
+> hard limits before this adapter can be activated. Nothing below is shipped code or evidence of a
+> configured provider.
 
 ## Quick summary
 
