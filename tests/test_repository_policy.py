@@ -330,6 +330,18 @@ def test_internal_markdown_links_resolve() -> None:
     assert broken == {}
 
 
+def test_future_lesson_policy_is_markdown_only_by_default() -> None:
+    agents = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    template = (REPOSITORY_ROOT / "docs" / "lessons" / "lesson-template.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Starting with CAH-025" in agents
+    assert "do not add a visual deck unless the user explicitly requests one" in agents
+    assert "Every new written lesson includes a compact architecture" in agents
+    assert "Optional starting with CAH-025" in template
+
+
 def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:
     violations: list[str] = []
     for path in _repository_files(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):

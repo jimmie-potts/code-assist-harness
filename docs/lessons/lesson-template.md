@@ -6,20 +6,21 @@
   Verified against implementation
 - **Implementation status:** Match the linked user story
 - **Story:** Replace this text with a link to the CAH-XXX delivery contract
-- **Visual companion:** Link `assets/cah-xxx-unit-title.pptx` when the unit is complete
+- **Visual companion:** Optional starting with CAH-025; link a requested deck when one exists
 - **Related architecture:** Link the most relevant ADR and conceptual document
 
 > State clearly whether the lesson describes accepted design, planned behavior, or observed
 > implementation. Never present a future component as shipped.
 
-Before marking the lesson verified, render the linked presentation slide by slide, inspect every
-render, and run the presentation overflow test. Visual flair should make the concept memorable
-without weakening technical accuracy, status honesty, legibility, or caveats.
+When a visual companion is explicitly requested, render it slide by slide, inspect every render,
+and run the presentation overflow test before treating it as evidence. Visual flair should make the
+concept memorable without weakening technical accuracy, status honesty, legibility, or caveats.
 
 Keep the lesson tight. Prioritize system design, agent-loop design, and harness ownership over a
-long inventory of implementation details. The written lesson and visual companion each include a
-compact architecture diagram that shows where this unit sits in the TUI, Python harness, provider,
-tool, and evidence boundaries that are relevant to it.
+long inventory of implementation details. The written lesson includes a compact architecture
+diagram that shows where this unit sits in the TUI, Python harness, provider, tool, and evidence
+boundaries that are relevant to it. Any explicitly requested visual companion shows the same
+placement.
 
 ## Quick summary
 

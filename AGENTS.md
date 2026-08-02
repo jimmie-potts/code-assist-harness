@@ -24,8 +24,9 @@ The TypeScript application lives in `tui/`, with source in `tui/src/` and tests 
 language's generated output the unreviewed source of truth during the first implementation.
 Evaluation scenarios belong in `evals/`. Architecture guidance belongs in `docs/`, accepted
 decisions in `docs/adr/`, unit learning companions in `docs/lessons/`, and dependency-ordered
-delivery work in `user-stories/`. Visual lessons for CAH-007 and all newly completed units going
-forward belong in `docs/lessons/assets/` as linked PowerPoint files.
+delivery work in `user-stories/`. The visual lesson series from CAH-007 through CAH-024 belongs
+in `docs/lessons/assets/` as linked PowerPoint files. Starting with CAH-025, the Markdown lesson is
+the default learning artifact; do not add a visual deck unless the user explicitly requests one.
 
 Do not add empty planned directories. Introduce a path with the story that first uses it. Project
 metadata, Python dependencies, and tool settings are defined in `pyproject.toml`; commit `uv.lock`
@@ -126,13 +127,13 @@ Every implementation-ready story, including documentation-only work, must keep i
 consistent with the story status and delivered evidence. The additional behavioral checks below
 apply when the story changes executable behavior.
 
-CAH-007 and every unit completed going forward include a linked visual lesson deck under
-`docs/lessons/assets/`, named for the story ID and topic. This prospective rule does not retroactively
-change the evidence contract of units that were already Done. Render the PowerPoint slide by slide,
-inspect every rendered image, and run the presentation overflow test before treating the deck as
-evidence. Use visual storytelling, small moments of tasteful fun, and memorable flair where they
-improve learning, but never let a joke, metaphor, or decorative choice weaken technical accuracy,
-status honesty, legibility, or caveats.
+CAH-007 through CAH-024 include linked visual lesson decks under `docs/lessons/assets/`, named for
+the story ID and topic. Starting with CAH-025, a unit does not include a deck unless the user
+explicitly requests one. When a deck is requested, render it slide by slide, inspect every rendered
+image, and run the presentation overflow test before treating it as evidence. Use visual
+storytelling, small moments of tasteful fun, and memorable flair where they improve learning, but
+never let a joke, metaphor, or decorative choice weaken technical accuracy, status honesty,
+legibility, or caveats.
 
 A behavioral story is complete only when:
 
@@ -166,14 +167,16 @@ link them to their source files, and explain each sample line-by-line or in smal
 junior engineer can connect syntax to behavior. Planned lessons may use clearly labeled pseudocode,
 but must not present it as shipped code.
 
-CAH-007 and lessons completed going forward link a visual PPTX companion and record the
-rendered-slide and overflow validation evidence in the story note. The deck should introduce the
+CAH-007 through CAH-024 link a visual PPTX companion and record rendered-slide and overflow
+validation evidence in the story note. CAH-025 and later require only the Markdown lesson unless the
+user explicitly requests a visual companion. When one is requested, the deck should introduce the
 same junior-level foundations before the deeper architecture.
 
 Starting with CAH-022, keep new lessons concise and centered on system design, agentic-loop design,
-and harness ownership. Every new written lesson and visual companion includes a compact architecture
-diagram that locates the unit in the relevant TUI, Python harness, provider, tool, and evidence
-boundaries. This requirement is prospective; do not retrofit older completed lessons.
+and harness ownership. Every new written lesson includes a compact architecture diagram that
+locates the unit in the relevant TUI, Python harness, provider, tool, and evidence boundaries. Any
+explicitly requested visual companion locates the unit in those same boundaries. This requirement
+is prospective; do not retrofit older completed lessons.
 
 Production-tool examples are illustrative rather than approved dependencies. Include three to five
 representative tools with official references, describe the capability being compared, and discuss
