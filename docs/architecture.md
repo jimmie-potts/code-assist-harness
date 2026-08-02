@@ -40,8 +40,10 @@ validated hard limits, per-session accounting, deterministic deadline and cleanu
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
 an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
-protocol v1 is unchanged. Tool execution, workspace discovery and reads, policy, and broader agent
-behavior remain target architecture.
+protocol v1 is unchanged. CAH-024 is implementation-ready but still planned; it will add the first
+M2 primitive, an immutable Python workspace boundary, without file reads or protocol changes. Tool
+execution, workspace discovery and reads, policy, and broader agent behavior remain target
+architecture.
 
 ## Product boundary
 
@@ -204,6 +206,7 @@ dependency-resolution changes commit `uv.lock`.
 | Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
+| Workspace path containment | Python workspace boundary | Planned in CAH-024: one immutable canonical root resolves contained, workspace-relative targets; later tools recheck at access time. |
 | Context selection | Python context subsystem | Context items retain their source path, line range, and inclusion reason. |
 | Tool validation and execution policy | Python tool and safety subsystems | The model and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
@@ -245,6 +248,13 @@ through harness-owned values. `runtime.py` keeps the mock default, but an explic
 selection lazily imports the concrete adapter and supplies the CAH-022 safety budget to
 `ProviderSessionRunner`. Future `core/`, `context/`, `tools/`, and `safety/` paths remain conceptual
 and will be introduced only by their owning stories.
+
+CAH-024 plans one sibling module; it is not part of the implemented tree above:
+
+```text
+src/code_assist_harness/
+└── workspace.py        Planned immutable root, contained target resolution, and relative labels
+```
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 
@@ -456,6 +466,11 @@ documentation, respects ignored paths and size limits, and preserves provenance 
 item. The context builder must be able to explain why an item was included and enforce a total
 budget before calling a provider.
 
+CAH-024 is the planned foundation for that subsystem. The Python harness will own an immutable
+boundary around the canonical launch root and return only contained targets with workspace-relative
+labels. Instruction discovery, content reads, ignored-path policy, context budgeting, and
+execution-time race protection remain outside that unit.
+
 Evaluation scenarios will check whether known relevant files were selected, how much context was
 used, and whether unnecessary reads occurred. These mechanisms are target behavior for the
 read-only assistant milestone, not part of the initial scaffold.
@@ -545,7 +560,7 @@ The architecture is delivered as vertical slices rather than as disconnected sub
 | --- | --- | --- |
 | M0 | Mock runtime through the real Node–Python boundary | Tasks stream, cancel, and terminate authoritatively across the protocol. |
 | M1 | Explicit loop with fake and OpenAI providers | One bounded model conversation can complete or cancel. |
-| M2 | Repository context and native read tools | The agent can inspect, explain, and form grounded plans. |
+| M2 | Repository context and native read tools | CAH-024 is planned as the first boundary unit; the completed milestone lets the agent inspect, explain, and form grounded plans. |
 | M3 | Approval, edit, subprocess, and diff workflow | Approved changes and validation are controlled and auditable. |
 | M4 | Evaluation, replay, and failure hardening | Behavioral regressions are measurable and reproducible. |
 | M5 | Packaging and executor/provider extension points | The core can support other interfaces and isolation models. |
