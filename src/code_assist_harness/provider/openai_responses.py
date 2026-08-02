@@ -326,7 +326,10 @@ class OpenAIResponsesOperation:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 raise
-            return _OPERATION_CANCELLED
+            async with self._state_lock:
+                if self._cancel_selected or self._state != "active":
+                    return _OPERATION_CANCELLED
+            raise _IndependentSDKCancellation from None
         finally:
             async with self._state_lock:
                 if self._owned_task is task:
@@ -377,7 +380,11 @@ class OpenAIResponsesOperation:
                 task.cancel()
             try:
                 result = await task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                if _current_task_is_cancelling():
+                    raise
+                result = None
+            except Exception:
                 result = None
             if kind == "create" and result is not None and self._stream is None:
                 self._stream = cast(_SDKStream, result)
@@ -393,7 +400,9 @@ class OpenAIResponsesOperation:
                 try:
                     await stream.close()
                 except asyncio.CancelledError:
-                    raise
+                    if _current_task_is_cancelling():
+                        raise
+                    failed = True
                 except Exception:
                     failed = True
         finally:
@@ -401,7 +410,9 @@ class OpenAIResponsesOperation:
                 try:
                     await client.close()
                 except asyncio.CancelledError:
-                    raise
+                    if _current_task_is_cancelling():
+                        raise
+                    failed = True
                 except Exception:
                     failed = True
 
@@ -466,6 +477,10 @@ class _OperationCancelled:
 
 
 _OPERATION_CANCELLED = _OperationCancelled()
+
+
+class _IndependentSDKCancellation(RuntimeError):
+    """Normalize an SDK awaitable's own cancellation as provider failure, not task control flow."""
 
 
 class _ResponsesAutomaton:
@@ -878,8 +893,9 @@ def _validate_message(value: object, *, content_count: int, completed: bool) -> 
     content = _required_list(_field(value, "content"))
     if len(content) != content_count:
         raise InvalidSDKObservation
-    status = _optional_field(value, "status")
-    if completed and status is not None and (not isinstance(status, str) or status != "completed"):
+    expected_status = "completed" if completed else "in_progress"
+    status = _field(value, "status")
+    if not isinstance(status, str) or status != expected_status:
         raise InvalidSDKObservation
     return item_id
 
@@ -900,26 +916,17 @@ def _validate_reasoning_item(value: object, *, completed: bool) -> str:
 
 def _validate_reasoning_configuration(value: object) -> None:
     """Confirm any echoed reasoning settings preserve the reviewed Luna request mode."""
-    if value is None:
-        return
     missing = object()
-    effort = _optional_field(value, "effort", default=missing)
-    context = _optional_field(value, "context", default=missing)
+    effort = _field(value, "effort")
+    context = _field(value, "context")
     summary = _optional_field(value, "summary", default=missing)
     generate_summary = _optional_field(value, "generate_summary", default=missing)
     mode = _optional_field(value, "mode", default=missing)
-    if all(field is missing for field in (effort, context, summary, generate_summary, mode)):
-        raise InvalidSDKObservation
     if (
-        effort is not missing
-        and effort is not None
-        and (not isinstance(effort, str) or effort != "none")
-    ):
-        raise InvalidSDKObservation
-    if (
-        context is not missing
-        and context is not None
-        and (not isinstance(context, str) or context != "current_turn")
+        not isinstance(effort, str)
+        or effort != "none"
+        or not isinstance(context, str)
+        or context != "current_turn"
     ):
         raise InvalidSDKObservation
     if summary is not missing and summary is not None:
@@ -932,6 +939,12 @@ def _validate_reasoning_configuration(value: object) -> None:
         and (not isinstance(mode, str) or mode != "standard")
     ):
         raise InvalidSDKObservation
+
+
+def _current_task_is_cancelling() -> bool:
+    """Distinguish shared-task cancellation from a close awaitable's own cancellation error."""
+    current = asyncio.current_task()
+    return current is not None and current.cancelling() > 0
 
 
 async def _join_cleanup(task: asyncio.Task[bool]) -> bool:

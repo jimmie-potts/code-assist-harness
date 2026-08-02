@@ -284,7 +284,7 @@ def test_live_provider_marker_skips_without_explicit_opt_in() -> None:
                 "OPENAI_API_KEY": "syntactically-valid-key",
                 "OPENAI_BASE_URL": "https://unsafe-endpoint.invalid/sentinel",
             },
-            "Unsupported OpenAI configuration is present.",
+            "Unsupported OpenAI or TLS key-logging configuration is present.",
             "https://unsafe-endpoint.invalid/sentinel",
         ),
     ],

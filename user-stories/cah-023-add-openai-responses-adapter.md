@@ -62,8 +62,10 @@
   process startup solely to seed transcript redaction; that privacy scan cannot select or construct
   a provider. OpenAI selection fails generically, before SDK import/client construction, when any
   other `OPENAI_*` key is present, including `OPENAI_BASE_URL`, `OPENAI_ORG_ID`,
-  `OPENAI_PROJECT_ID`, `OPENAI_CUSTOM_HEADERS`, or `OPENAI_LOG`. The async HTTP client is the
-  SDK-exported `DefaultAsyncHttpxClient` configured with
+  `OPENAI_PROJECT_ID`, `OPENAI_CUSTOM_HEADERS`, or `OPENAI_LOG`, or when `SSLKEYLOGFILE` could export
+  TLS session secrets. The normal supervisor removes that selector and launches Python with `-E`;
+  provider validation repeats the fixed rejection for direct and lazy construction. The SDK-exported
+  `DefaultAsyncHttpxClient` is configured with
   `trust_env=false` and `follow_redirects=false`; the official `https://api.openai.com/v1` endpoint
   is explicit, the constructor receives null organization and project only after ambient values are
   rejected again at lazy construction, and SDK retries are disabled with `max_retries=0`. Proxy
@@ -79,10 +81,14 @@
   Repository-root `dev.env` is ignored by the `/dev.env` pattern, must be a readable regular
   non-symlink file with mode `0600`, and contains
   exactly one non-empty `OPENAI_API_KEY=...` assignment plus optional blank lines/comments. The
-  wrapper rejects an already exported key and every other assignment, never sources/evaluates the
-  file, runs through absolute `/usr/bin/python3 -I` so ambient Python import settings cannot alter
-  credential admission, and uses `exec` to preserve the selected command. Provider/model remain CLI
-  arguments, and the runtime retains `uv --no-env-file`.
+  wrapper rejects every ambient `OPENAI_*` setting, `SSLKEYLOGFILE`, and every other assignment, never
+  sources/evaluates the file, runs through absolute `/usr/bin/python3 -I` so ambient Python import
+  settings cannot alter credential admission, and uses `exec` to preserve the selected command. Its
+  separate `--init` mode
+  creates the root file exclusively with no-follow semantics and mode `0600` before a hidden prompt,
+  refuses to replace an existing path, never accepts the key through argv, and removes its created
+  file when entry, validation, or persistence fails. Provider/model remain CLI arguments, and the
+  runtime retains `uv --no-env-file`.
 - SDK objects, raw exceptions, response bodies, headers, request objects, and credentials never enter
   provider-neutral, session, protocol, diagnostic, shared-fixture, or transcript types. Adapter-local
   SDK fakes may construct SDK-shaped values only inside adapter tests.
@@ -94,8 +100,10 @@
   natural-terminal or cancellation path creates exactly one resource-cleanup task and captures any
   initiating owned create/next-event task that must not cancel itself. The cleanup task cancels and
   reaps other pending owned work, attempts stream close, and attempts client close in a `finally`
-  stage even when stream close fails. Stream, client, or both close failures collapse into one
-  bounded success/failure sentinel; raw close exceptions never escape.
+  stage even when stream close fails. Stream, client, or both close failures—including a close
+  coroutine that independently raises `CancelledError`—collapse into one bounded success/failure
+  sentinel; raw close exceptions never escape. Cancellation of the cleanup owner itself is detected
+  separately and remains cancellation control flow.
 - Every terminal, `cancel()`, and `wait_closed()` join shields that shared cleanup task. Cancelling a
   joiner propagates cancellation control flow without cancelling the cleanup owner; a later joiner
   observes the same eventual sentinel on every ordinary success or `Exception` path. Direct
@@ -104,6 +112,10 @@
   five-second grace expires while the shielded owner may continue and resource release remains
   explicitly unconfirmed. A later sequential session receives fresh resources, so closing one
   operation does not make the `Provider` unusable.
+- An SDK create or stream-read awaitable that independently raises `CancelledError` is not treated as
+  selected harness cancellation. It enters the closed failure table as one bounded provider failure,
+  starts resource cleanup, and cannot leave `wait_closed()` pending. Only cancellation selected by the
+  operation or its event consumer may end the stream without a provider terminal.
 - A mapped SDK terminal is buffered until the resource cleanup attempt finishes. On cleanup success,
   the pending provider sequence is either `ProviderFailed`, `ProviderCompleted`, or optional
   `ProviderUsageReported` followed by `ProviderCompleted`. The operation remains `terminal_pending`
@@ -134,12 +146,13 @@
      `response.output_item.added` and `response.output_item.done` events with one stable ID, empty
      summary, absent or empty content, and valid progress/completed status;
   3. `response.output_item.added` for one `message` item at `output_index=0` without the reasoning
-     envelope or `output_index=1` after it, with a stable item ID, role `assistant`, and empty content;
+     envelope or `output_index=1` after it, with a stable item ID, role `assistant`, exact status
+     `in_progress`, and empty content;
   4. `response.content_part.added` for that item at `content_index=0`, containing empty
      `output_text` and no annotations;
   5. one or more non-empty `response.output_text.delta` events with those exact IDs and indices;
   6. exactly one `response.output_text.done`, `response.content_part.done`, and
-     `response.output_item.done`, in that order; and
+     `response.output_item.done` with exact message status `completed`, in that order; and
   7. exactly one `response.completed` for the same response.
 - The concatenated text deltas must equal the text in `output_text.done`, the completed content part,
   the sole content of the completed message item, and that message in `response.completed`.
@@ -147,8 +160,9 @@
   annotations. If the optional reasoning item is present, the completed output reconciles it before
   the message without copying, parsing, persisting, or exposing `encrypted_content`. The completed
   response has status `completed`, the exact allowlisted model, null error and incomplete details,
-  and optional non-negative safe-integer input/output usage. Any present total usage equals their
-  sum; any present reasoning-token detail is already included in output tokens and cannot exceed it.
+  exact echoed reasoning effort `none` and context `current_turn`, and optional non-negative
+  safe-integer input/output usage. Any present total usage equals their sum; any present
+  reasoning-token detail is already included in output tokens and cannot exceed it.
 - `response.failed` or `response.incomplete` may replace the remaining success suffix after
   `response.created` and any valid subsequent prefix, but must retain response identity and sequence.
   A top-level `error` may be the first event or may terminate any valid prefix; its sequence becomes
@@ -235,20 +249,24 @@
    name a fixed safe option or environment label but never echo its value or dump the environment.
    The launcher/Python allowlist parity test accepts only `gpt-5.6-luna` and rejects unknown,
    alias-like, and fine-tuned model IDs before SDK import or network access.
-   The local credential wrapper rejects unsafe file shape, permissions, content, and ambient-key
-   ambiguity without echoing the key; repository policy proves root `dev.env` is ignored/untracked.
+   The local credential wrapper rejects unsafe file shape, permissions, content, every ambient
+   `OPENAI_*` setting, and `SSLKEYLOGFILE` without echoing the key; its initializer safely creates but
+   never replaces the owner-only file. Repository policy proves root `dev.env` is ignored/untracked.
 10. Local transcript enablement does not alter `store=false`, and transcript redaction/opt-out behavior
     remains unchanged.
 11. SDK-fake tests cover request/model mapping, every transition and reconciliation check in the
-    automaton, usage, accepted opaque reasoning envelopes, rejected reasoning text/tool events,
-    every failure-table row, premature EOF,
+    automaton, usage, exact message statuses and completed reasoning echo, accepted opaque reasoning
+    envelopes, rejected reasoning text/tool events, every failure-table row, premature EOF,
     response-validation and JSON/Unicode decode failures, unexpected SDK exceptions, unknown events,
     cancellation before and between output, cancellation after usage, and terminal races without
     HTTP. Resource tests separately cover stream-close failure,
     client-close failure, both failures, and CAH-022 grace cancellation while create, stream close,
     or client close is pending. They distinguish resource closure from operation closure, prove both
     resource closes are attempted, prove cancelling a joiner does not cancel shared cleanup, and
-    prove `wait_closed()` cannot finish while a terminal remains pending.
+    prove `wait_closed()` cannot finish while a terminal remains pending. Hostile-close tests prove an
+    independently raised close-time `CancelledError` cannot strand cleanup, while true cleanup-owner
+    cancellation remains control flow. Separate hostile create/read cases prove an independently
+    raised `CancelledError` becomes one bounded failure and cannot strand operation closure.
 12. The opt-in `live_provider` smoke test performs one minimal bounded response, requires the named
     run option, exact allowlisted model, and locally valid credentials, normalizes remote rejection
     after the request, and is excluded from `./scripts/check` and default CI even when a credential
@@ -259,8 +277,8 @@
     it from provider-neutral loop, session, protocol, persistence, and tool modules.
 15. Client-construction tests prove the official endpoint, `trust_env=false`,
     `follow_redirects=false`, null account arguments after construction-time environment revalidation,
-    and `max_retries=0`; recognized ambient routing, header, log, and proxy values cannot redirect or
-    duplicate the request.
+    `max_retries=0`, and no Python TLS key log under isolated mode; recognized ambient routing, header,
+    log, proxy, and TLS key-log settings cannot redirect, duplicate, or expose the request.
 
 ## Validation
 
@@ -283,7 +301,8 @@
 - Prove the registered marker plus explicit opt-in are both required, and that the default gate
   deselects the marker even when the parent shell contains a fake credential.
 - Exercise the explicit `dev.env` reader with a fake child and prove exact argument forwarding,
-  non-leakage, non-evaluation, strict permissions, and rejection before child execution.
+  non-leakage, non-evaluation, strict permissions, exclusive safe initialization, and rejection before
+  child execution.
 - Optionally run the separately documented live smoke command; it is supplemental evidence, not a
   completion requirement.
 
@@ -301,11 +320,13 @@ the required written and visual CAH-023 learning evidence when implemented.
 - `openai_responses.py` implements the lazy async adapter, exact request mapper, closed stream
   automaton, bounded failure table, cancellation, and shared resource-cleanup owner behind the
   existing provider port.
-- The TypeScript launcher and supervisor forward provider/model as separate child arguments, while
-  Python independently revalidates them at the authoritative composition root. A shared fixture
-  locks cross-language allowlist parity.
-- `scripts/with-openai-dev-key` imports only the ignored root development key into one explicitly
-  selected command; normal runtime and validation paths never auto-load the file.
+- The TypeScript launcher and supervisor forward provider/model as separate child arguments, remove
+  ambient TLS key logging, and start Python with `-E`, while Python independently revalidates provider
+  configuration at the authoritative composition root. A shared fixture locks cross-language
+  allowlist parity.
+- `scripts/with-openai-dev-key` safely initializes or imports only the ignored root development key
+  into one explicitly selected command and rejects pre-existing OpenAI or TLS key-logging environment
+  configuration; normal runtime and validation paths never auto-load the file.
 - Deterministic SDK fakes cover request mapping, successful and malformed streams, failure
   normalization, partial output, terminal races, cancellation, and resource-close failures without
   HTTP. The separately registered live smoke remains explicit and supplemental.
@@ -314,7 +335,9 @@ the required written and visual CAH-023 learning evidence when implemented.
 
 Detailed validation and presentation evidence is recorded in the original
 [CAH-023 implementation note](notes/2026-08-01-cah-023-openai-responses-adapter.md) and its
-[Luna/local-environment migration note](notes/2026-08-01-cah-023-luna-dev-environment.md).
+[Luna/local-environment migration note](notes/2026-08-01-cah-023-luna-dev-environment.md). The
+[adversarial-review hardening note](notes/2026-08-02-cah-023-adversarial-review-hardening.md) records
+the later boundary fixes and current validation.
 
 ## Out of scope
 

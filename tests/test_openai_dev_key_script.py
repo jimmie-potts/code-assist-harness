@@ -172,7 +172,14 @@ def test_helper_rejects_a_nul_byte_before_starting_the_command(tmp_path: Path) -
     assert not invoked.exists()
 
 
-def test_helper_rejects_an_ambient_key_before_reading_dev_environment(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "ambient_name",
+    ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_FUTURE_OPTION", "SSLKEYLOGFILE"],
+)
+def test_helper_rejects_ambient_provider_configuration_before_reading_dev_environment(
+    tmp_path: Path,
+    ambient_name: str,
+) -> None:
     repository, helper = _prepare_helper(tmp_path)
     dev_environment = repository / "dev.env"
     dev_environment.write_text(f"OPENAI_API_KEY={FAKE_API_KEY}\n", encoding="utf-8")
@@ -181,14 +188,109 @@ def test_helper_rejects_an_ambient_key_before_reading_dev_environment(tmp_path: 
     child = tmp_path / "must-not-run"
     _write_executable(child, f"#!/bin/sh\ntouch '{invoked}'\n")
 
-    result = _run(helper, child, environment=_environment(OPENAI_API_KEY="ambient-key"))
+    result = _run(helper, child, environment=_environment(**{ambient_name: "ambient-value"}))
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "OPENAI_API_KEY is already set" in result.stderr
-    assert "ambient-key" not in result.stderr
+    assert "Unset every OPENAI_* variable and SSLKEYLOGFILE" in result.stderr
+    if ambient_name != "SSLKEYLOGFILE":
+        assert ambient_name not in result.stderr
+    assert "ambient-value" not in result.stderr
     assert FAKE_API_KEY not in result.stderr
     assert not invoked.exists()
+
+
+def test_helper_initializes_a_new_owner_only_dev_environment_without_argv_secret(
+    tmp_path: Path,
+) -> None:
+    repository, helper = _prepare_helper(tmp_path)
+
+    result = subprocess.run(
+        [str(helper), "--init"],
+        capture_output=True,
+        check=False,
+        env=_environment(),
+        input=f"{FAKE_API_KEY}\n",
+        text=True,
+    )
+
+    dev_environment = repository / "dev.env"
+    assert result.returncode == 0
+    assert result.stdout == "Created repository-root dev.env with mode 0600.\n"
+    assert FAKE_API_KEY not in result.stdout + result.stderr
+    assert dev_environment.read_text(encoding="utf-8") == f"OPENAI_API_KEY={FAKE_API_KEY}\n"
+    assert dev_environment.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("existing_kind", ["file", "symlink"])
+def test_helper_init_refuses_to_replace_an_existing_path_before_prompting(
+    tmp_path: Path,
+    existing_kind: str,
+) -> None:
+    repository, helper = _prepare_helper(tmp_path)
+    dev_environment = repository / "dev.env"
+    target = tmp_path / "existing-credential"
+    target.write_text("unchanged\n", encoding="utf-8")
+    if existing_kind == "file":
+        dev_environment.write_text("unchanged\n", encoding="utf-8")
+    else:
+        dev_environment.symlink_to(target)
+
+    result = subprocess.run(
+        [str(helper), "--init"],
+        capture_output=True,
+        check=False,
+        env=_environment(),
+        stdin=subprocess.DEVNULL,
+        text=True,
+        timeout=2,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == "dev.env already exists; refusing to replace it.\n"
+    if existing_kind == "file":
+        assert dev_environment.read_text(encoding="utf-8") == "unchanged\n"
+    else:
+        assert dev_environment.is_symlink()
+        assert target.read_text(encoding="utf-8") == "unchanged\n"
+
+
+def test_helper_init_removes_the_created_file_when_key_validation_fails(tmp_path: Path) -> None:
+    repository, helper = _prepare_helper(tmp_path)
+
+    result = subprocess.run(
+        [str(helper), "--init"],
+        capture_output=True,
+        check=False,
+        env=_environment(),
+        input="key with spaces\n",
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "must not contain whitespace or control characters" in result.stderr
+    assert "key with spaces" not in result.stderr
+    assert not (repository / "dev.env").exists()
+
+
+def test_helper_init_rejects_a_blank_key_and_removes_the_created_file(tmp_path: Path) -> None:
+    repository, helper = _prepare_helper(tmp_path)
+
+    result = subprocess.run(
+        [str(helper), "--init"],
+        capture_output=True,
+        check=False,
+        env=_environment(),
+        input="\n",
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "exactly one non-empty OPENAI_API_KEY assignment" in result.stderr
+    assert not (repository / "dev.env").exists()
 
 
 def test_helper_rejects_missing_symlinked_and_permissive_dev_environment_files(

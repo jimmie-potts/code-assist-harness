@@ -160,7 +160,9 @@ the same port to OpenAI Responses without changing its types.
 `openai_config.py` validates provider, exact model ID, environment names, and
 `OPENAI_API_KEY` without importing the SDK. The mock ignores ambient provider credentials. OpenAI is
 constructed only after explicit selection; every other `OPENAI_*` variable is rejected with a fixed
-message rather than being inherited as hidden SDK routing.
+message rather than being inherited as hidden SDK routing. `SSLKEYLOGFILE` is stripped by the normal
+supervisor and rejected again at the provider boundary; Python starts with `-E` so remaining ambient
+`PYTHON*` settings cannot alter the child interpreter.
 
 `openai_responses.py` maps the ordered conversation and caller-supplied instructions into one
 foreground text request with `background=false`, `store=false`, reasoning effort `none`,
@@ -170,14 +172,21 @@ client and one stream, validates the exact lifecycle/item/text/completion sequen
 provider-neutral text, usage, completion, or fixed failure values. One optional opaque empty
 reasoning envelope before the message is validated and suppressed. Tool, reasoning text/summary,
 multimodal, duplicate, missing, or inconsistent observations fail closed without retaining raw values.
+Message items must move from `in_progress` to `completed`, and the completed response must echo the
+reviewed reasoning effort `none` and context `current_turn` before completion is trusted.
+An SDK create or read awaitable that independently raises `CancelledError` becomes a bounded provider
+failure; only cancellation selected by the operation remains cancellation control flow.
 
 Natural termination and cancellation converge on one operation-owned, shielded cleanup task that
 attempts both stream and client close. A cleanup failure becomes one safe adapter exception consumed
 by the existing `ProviderSession` cleanup boundary; it never changes the already selected session
-failure. SDK objects, exceptions, request IDs, headers, and raw response bodies remain inside the
-adapter. The credential is confined to the provider-specific validation, composition, and adapter
-boundary and never enters a provider-neutral or protocol value. Deterministic SDK fakes cover this
-path by default; the separately selected live smoke remains outside the canonical gate and default CI.
+failure. A close coroutine that independently raises `CancelledError` is treated as a bounded cleanup
+failure so the other resource is still attempted; only cancellation of the cleanup owner remains task
+control flow. SDK objects, exceptions, request IDs, headers, and raw response bodies remain inside
+the adapter. The credential is confined to the provider-specific validation, composition, and
+adapter boundary and never enters a provider-neutral or protocol value. Deterministic SDK fakes cover
+this path by default; the separately selected live smoke remains outside the canonical gate and
+default CI.
 
 ## Implemented one-turn grammar
 

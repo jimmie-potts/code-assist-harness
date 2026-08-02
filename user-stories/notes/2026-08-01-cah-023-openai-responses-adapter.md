@@ -1,7 +1,9 @@
 # 2026-08-01 CAH-023 OpenAI Responses adapter
 
 > Historical implementation record. The model-specific request and local-key setup were superseded
-> later that day by the [Luna migration note](2026-08-01-cah-023-luna-dev-environment.md).
+> later that day by the [Luna migration note](2026-08-01-cah-023-luna-dev-environment.md); the
+> [adversarial-review hardening note](2026-08-02-cah-023-adversarial-review-hardening.md) supersedes
+> its cleanup, stream-validation, environment-isolation, and final evidence details.
 
 ## Outcome
 

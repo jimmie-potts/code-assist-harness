@@ -25,7 +25,7 @@ After completing this unit, you should be able to:
 - locate the adapter inside the TUI-to-provider system;
 - explain why an SDK stream is untrusted input;
 - trace one text delta from Responses into the harness;
-- distinguish operation closure from resource cleanup; and
+- distinguish operation closure, resource cleanup failure, and cleanup-task cancellation; and
 - explain why deterministic fakes, not a live request, are the default proof.
 
 ## Why this unit matters
@@ -60,7 +60,9 @@ remains cancellation control flow; it does not rewrite resource truth.
 ## Architecture and design
 
 ```text
-User flags + explicit dev.env reader
+safe --init -> ignored mode-0600 dev.env -> explicit reader
+                                              |
+User provider/model flags --------------------+
    |
    v
 TypeScript TUI launcher ---- NDJSON UI commands/events ---- Python runtime
@@ -88,26 +90,32 @@ still decides completion and enforces limits.
 Three invariants hold the boundary together:
 
 1. **Configuration before capability.** Mock remains the default. OpenAI requires the exact allowlisted
-   Luna model and a locally valid `OPENAI_API_KEY`; other `OPENAI_*` variables are rejected before SDK
-   import or client construction.
+   Luna model and a locally valid `OPENAI_API_KEY`; other `OPENAI_*` variables and `SSLKEYLOGFILE` are
+   rejected before SDK import or client construction. The normal child also starts Python with `-E`.
 2. **Validation before meaning.** Sequence, response identity, item identity, indices, text snapshots,
-   model, and usage must reconcile before completion is trusted.
+   message statuses, model, reasoning mode, and usage must reconcile before completion is trusted.
 3. **Cleanup before terminal release.** A natural terminal is buffered until stream and client close
-   have both been attempted. Cancellation and natural completion share the same cleanup task.
+   have both been attempted. Cancellation and natural completion share the same cleanup task; an
+   independently raised close-time `CancelledError` is failure evidence, not owner cancellation.
+
+The same distinction applies before cleanup: if an SDK create or stream-read awaitable independently
+raises `CancelledError`, the adapter emits a bounded provider failure and still closes every resource
+it acquired. Only harness-selected cancellation ends the event stream silently.
 
 The request sets `stream=True`, `background=False`, `store=False`, reasoning effort `none`, reasoning
 context `current_turn`, and a generated-token cap of 8,192. It omits tools, disables SDK retries,
 rejects redirects and ambient proxy routing, and fixes the official API endpoint. Luna may still
 send one opaque empty reasoning item before its message; the adapter validates its identity and
-placement while deliberately ignoring encrypted content. Local transcript opt-out and provider
-storage are separate controls.
+placement while deliberately ignoring encrypted content. The message must move from `in_progress`
+to `completed`, and the final response must echo `none`/`current_turn`. Local transcript opt-out and
+provider storage are separate controls.
 
 ## Practical walkthrough
 
 1. Start at the TUI provider configuration and follow the shell-free child arguments into
    `runtime.py`.
-2. Observe that SDK-free validation completes before `_create_openai_provider()` imports the
-   concrete adapter.
+2. Observe that the launcher removes TLS key logging, starts Python with `-E`, and completes SDK-free
+   validation before `_create_openai_provider()` imports the concrete adapter.
 3. Follow `_map_request()` into the async create call. `Provider.start()` itself performs no I/O.
 4. Step through `_ResponsesAutomaton.accept()`: structural events change adapter state, text events
    cross the port, and the terminal is buffered for cleanup.
@@ -197,11 +205,12 @@ not timing against a network service.
 
 | Scenario | Responsible boundary | Safe result | Evidence |
 | --- | --- | --- | --- |
-| Unsupported model or ambient SDK routing | Composition root | Fixed startup error before SDK import | configuration and runtime tests |
+| Non-string/unsupported provider, model, or ambient SDK/TLS logging | Composition root | Fixed startup error before SDK import | configuration and runtime tests |
 | Out-of-order, mismatched, tool, or reasoning-text event | Adapter automaton | `invalid_response`; no raw payload | parameterized malformed-stream tests |
 | Provider exception after partial text | Adapter failure table | One fixed provider failure | closed-table exception tests |
+| Create or stream read independently raises `CancelledError` | Operation lifecycle | fixed provider failure; acquired resources close | hostile SDK-cancellation tests |
 | Cancellation during create or next event | Operation lifecycle | owned task reaped; no later event | blocked-create/read tests |
-| Stream or client close fails | Cleanup owner | completion replaced or prior failure preserved; bounded cleanup error | close-failure matrix |
+| Stream/client close fails or independently raises `CancelledError` | Cleanup owner | both closes attempted; completion replaced or prior failure preserved; bounded cleanup error | hostile close-failure matrix |
 
 ## Production expansion
 
@@ -227,7 +236,7 @@ authority into the SDK.
 | --- | --- | --- |
 | Routing | One explicit provider and Luna model | regions, projects, canaries, failover |
 | Reliability | one bounded foreground stream | SLOs, reconnect or background workflows |
-| Credentials | ignored mode-`0600` plaintext `dev.env`, explicitly injected into the process environment | managed identity, rotation, audit |
+| Credentials | exclusive mode-`0600` plaintext `dev.env` initializer, then explicit process injection | managed identity, rotation, audit |
 | Evidence | deterministic fakes plus optional smoke | conformance, load, and fault injection |
 | Cost | low setup and cognitive load | governance services and on-call ownership |
 
@@ -243,7 +252,8 @@ conformance evidence before allowlisting.
 
 1. Point to the first line where an SDK value becomes a harness value.
 2. Mutate one response identity in the success fixture and predict the normalized result.
-3. Explain why `wait_closed()` cannot return between usage and completion.
+3. Explain why an independent close-time `CancelledError` is cleanup failure but task cancellation of
+   the cleanup owner remains control flow.
 4. Run the adapter tests and identify which ones prove “no HTTP by default.”
 
 ## Key takeaways

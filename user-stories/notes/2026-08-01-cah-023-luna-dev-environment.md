@@ -1,5 +1,8 @@
 # 2026-08-01 CAH-023 Luna and local development environment
 
+> The later [adversarial-review hardening pass](2026-08-02-cah-023-adversarial-review-hardening.md)
+> supersedes this note's credential initializer, ambient-environment, and final validation details.
+
 ## Outcome
 
 CAH-023 now selects `gpt-5.6-luna` and provides one explicit local `dev.env` reader for developer

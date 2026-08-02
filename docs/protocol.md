@@ -36,7 +36,7 @@ CAH-003 launches one child with this shell-free argument array:
 PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   --python VENV_PYTHON
-  -- python -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
+  -- python -E -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
      --workspace CANONICAL_WORKSPACE
 ```
 
@@ -52,8 +52,9 @@ pair for early feedback and Python validates it again before SDK import. Provide
 process configuration and never enters protocol stdin. The launch directory is
 the default workspace, and `--workspace PATH` selects an override relative to that launch directory
 before both Node and Python canonicalize and validate it. The child environment removes
-`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable so ambient selectors cannot
-bypass the preflight or redirect the requested harness module.
+`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `SSLKEYLOGFILE`, and every `UV_*` variable so ambient
+selectors cannot bypass the preflight, redirect the requested harness module, or export TLS session
+secrets. The argument array starts Python with `-E` so any remaining `PYTHON*` variables are ignored.
 
 `src/code_assist_harness/runtime.py` feeds stdin bytes to `CommandLineReader`, validates commands,
 and emits only models serialized by `OrderedEventWriter`. `tui/src/runtime-supervisor.ts` feeds

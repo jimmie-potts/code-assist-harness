@@ -96,7 +96,7 @@ CAH-003 implements that launch as one shell-free argument array:
 PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   --python VENV_PYTHON
-  -- python -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
+  -- python -E -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
      --workspace CANONICAL_WORKSPACE
 ```
 

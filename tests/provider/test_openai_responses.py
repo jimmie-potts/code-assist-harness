@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -43,7 +46,7 @@ RAW_SECRET = "raw-sdk-secret-that-must-not-cross"
 @dataclass
 class _FakeResponses:
     stream: _FakeStream | None = None
-    error: Exception | None = None
+    error: BaseException | None = None
     create_gate: asyncio.Event | None = None
     create_cancel_gate: asyncio.Event | None = None
 
@@ -74,9 +77,9 @@ class _FakeStream:
         self,
         events: list[object],
         *,
-        next_error: Exception | None = None,
+        next_error: BaseException | None = None,
         block_before_index: int | None = None,
-        close_error: Exception | None = None,
+        close_error: BaseException | None = None,
         close_gate: asyncio.Event | None = None,
         return_event_on_cancel: bool = False,
     ) -> None:
@@ -143,7 +146,7 @@ class _FakeClient:
         self,
         responses: _FakeResponses,
         *,
-        close_error: Exception | None = None,
+        close_error: BaseException | None = None,
         close_gate: asyncio.Event | None = None,
     ) -> None:
         self.responses = responses
@@ -374,10 +377,10 @@ async def _collect(operation) -> list[object]:
 def _provider_with(
     stream: _FakeStream,
     *,
-    responses_error: Exception | None = None,
+    responses_error: BaseException | None = None,
     create_gate: asyncio.Event | None = None,
     create_cancel_gate: asyncio.Event | None = None,
-    client_close_error: Exception | None = None,
+    client_close_error: BaseException | None = None,
     client_close_gate: asyncio.Event | None = None,
 ) -> tuple[OpenAIResponsesProvider, _FakeResponses, _FakeClient, list[_FakeClient]]:
     responses = _FakeResponses(stream, responses_error, create_gate, create_cancel_gate)
@@ -477,8 +480,12 @@ def test_optional_opaque_reasoning_prefix_is_validated_but_never_published() -> 
         lambda events: events[11]["response"].update(
             reasoning={"effort": "medium", "context": "all_turns"}
         ),
+        lambda events: events[11]["response"].pop("reasoning"),
+        lambda events: events[11]["response"].update(reasoning=None),
         lambda events: events[11]["response"].update(reasoning="medium"),
         lambda events: events[11]["response"].update(reasoning={}),
+        lambda events: events[11]["response"].update(reasoning={"context": "current_turn"}),
+        lambda events: events[11]["response"].update(reasoning={"effort": "none"}),
         lambda events: events[11]["response"].update(
             reasoning={"effort": [], "context": "current_turn"}
         ),
@@ -581,6 +588,9 @@ def test_absent_none_or_empty_logprobs_are_compatible(representation: str) -> No
         (lambda events: events[2]["item"].update(type="reasoning"), []),
         (lambda events: events[2]["item"].update(role="user"), []),
         (lambda events: events[2]["item"].update(content=[{}]), []),
+        (lambda events: events[2]["item"].pop("status"), []),
+        (lambda events: events[2]["item"].update(status=None), []),
+        (lambda events: events[2]["item"].update(status="completed"), []),
         (lambda events: events[3].update(content_index=1), []),
         (lambda events: events[3]["part"].update(type="refusal"), []),
         (lambda events: events[3]["part"].update(annotations=[{"type": "citation"}]), []),
@@ -598,6 +608,7 @@ def test_absent_none_or_empty_logprobs_are_compatible(representation: str) -> No
         ),
         (lambda events: events[7]["part"].update(text="mismatch"), ["Bounded ", "answer."]),
         (lambda events: events[8]["item"].update(id="other"), ["Bounded ", "answer."]),
+        (lambda events: events[8]["item"].pop("status"), ["Bounded ", "answer."]),
         (
             lambda events: events[8]["item"].update(status="in_progress"),
             ["Bounded ", "answer."],
@@ -618,6 +629,14 @@ def test_absent_none_or_empty_logprobs_are_compatible(representation: str) -> No
         (lambda events: events[9]["response"].update(output=[]), ["Bounded ", "answer."]),
         (
             lambda events: events[9]["response"]["output"][0].update(id="other"),
+            ["Bounded ", "answer."],
+        ),
+        (
+            lambda events: events[9]["response"]["output"][0].pop("status"),
+            ["Bounded ", "answer."],
+        ),
+        (
+            lambda events: events[9]["response"]["output"][0].update(status="in_progress"),
             ["Bounded ", "answer."],
         ),
         (
@@ -851,6 +870,36 @@ def test_iteration_exceptions_use_the_same_closed_safe_table(
     assert isinstance(observations[-1], ProviderFailed)
     assert observations[-1].failure.code == provider_code
     assert RAW_SECRET not in repr(observations)
+
+
+@pytest.mark.parametrize("cancelled_stage", ["create", "next"])
+def test_independent_sdk_cancellation_fails_safely_and_closes_resources(
+    cancelled_stage: str,
+) -> None:
+    async def scenario():
+        stream = _FakeStream(
+            _success_events(),
+            next_error=asyncio.CancelledError() if cancelled_stage == "next" else None,
+        )
+        provider, _responses, client, _created = _provider_with(
+            stream,
+            responses_error=(asyncio.CancelledError() if cancelled_stage == "create" else None),
+        )
+        operation = provider.start(_request())
+        observations = await asyncio.wait_for(_collect(operation), timeout=1)
+        await asyncio.wait_for(operation.wait_closed(), timeout=1)
+        cancellation = await asyncio.wait_for(operation.cancel(), timeout=1)
+        return observations, stream, client, cancellation
+
+    observations, stream, client, cancellation = asyncio.run(scenario())
+
+    assert len(observations) == 1
+    assert isinstance(observations[0], ProviderFailed)
+    assert observations[0].failure.code == "unknown"
+    assert stream.close_calls == (0 if cancelled_stage == "create" else 1)
+    assert client.close_calls == 1
+    assert client.close_finished.is_set()
+    assert cancellation == "already_closed"
 
 
 def test_cancellation_before_consumption_is_idempotent_and_constructs_no_client() -> None:
@@ -1099,6 +1148,77 @@ def test_cleanup_failure_replaces_completion_and_attempts_both_closes(
     assert RAW_SECRET not in repr(observations) + str(first) + str(second)
 
 
+@pytest.mark.parametrize("cancelled_stage", ["stream", "client", "both"])
+def test_independent_close_cancellation_is_a_bounded_cleanup_failure(
+    cancelled_stage: str,
+) -> None:
+    async def scenario():
+        stream = _FakeStream(
+            _success_events(),
+            close_error=(
+                asyncio.CancelledError() if cancelled_stage in {"stream", "both"} else None
+            ),
+        )
+        provider, _responses, client, _created = _provider_with(
+            stream,
+            client_close_error=(
+                asyncio.CancelledError() if cancelled_stage in {"client", "both"} else None
+            ),
+        )
+        operation = provider.start(_request())
+        observations = await asyncio.wait_for(_collect(operation), timeout=1)
+        with pytest.raises(OpenAIAdapterCleanupError) as wait_failure:
+            await asyncio.wait_for(operation.wait_closed(), timeout=1)
+        with pytest.raises(OpenAIAdapterCleanupError) as cancel_failure:
+            await asyncio.wait_for(operation.cancel(), timeout=1)
+        return observations, stream, client, wait_failure.value, cancel_failure.value
+
+    observations, stream, client, wait_failure, cancel_failure = asyncio.run(scenario())
+
+    assert isinstance(observations[-1], ProviderFailed)
+    assert observations[-1].failure.code == "unknown"
+    assert not any(isinstance(event, ProviderUsageReported) for event in observations)
+    assert stream.close_calls == 1
+    assert stream.close_finished.is_set()
+    assert client.close_calls == 1
+    assert client.close_finished.is_set()
+    assert str(wait_failure) == str(cancel_failure)
+
+
+@pytest.mark.parametrize("cancelled_stage", ["stream", "client"])
+def test_explicit_cancel_cannot_be_stranded_by_independent_close_cancellation(
+    cancelled_stage: str,
+) -> None:
+    async def scenario():
+        stream = _FakeStream(
+            _success_events(),
+            block_before_index=0,
+            close_error=asyncio.CancelledError() if cancelled_stage == "stream" else None,
+        )
+        provider, _responses, client, _created = _provider_with(
+            stream,
+            client_close_error=(asyncio.CancelledError() if cancelled_stage == "client" else None),
+        )
+        operation = provider.start(_request())
+        pending = asyncio.create_task(anext(operation.events()))
+        await stream.blocked_next_started.wait()
+        with pytest.raises(OpenAIAdapterCleanupError) as cancel_failure:
+            await asyncio.wait_for(operation.cancel(), timeout=1)
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(pending, timeout=1)
+        with pytest.raises(OpenAIAdapterCleanupError) as wait_failure:
+            await asyncio.wait_for(operation.wait_closed(), timeout=1)
+        return stream, client, cancel_failure.value, wait_failure.value
+
+    stream, client, cancel_failure, wait_failure = asyncio.run(scenario())
+
+    assert stream.close_calls == 1
+    assert stream.close_finished.is_set()
+    assert client.close_calls == 1
+    assert client.close_finished.is_set()
+    assert str(cancel_failure) == str(wait_failure)
+
+
 def test_cleanup_failure_preserves_already_buffered_provider_failure() -> None:
     async def scenario():
         events = [
@@ -1226,8 +1346,40 @@ def test_official_client_construction_fixes_endpoint_routing_and_retry_policy(
     ]
 
 
+def test_python_isolated_mode_prevents_real_client_tls_key_logging() -> None:
+    environment = os.environ.copy()
+    environment["SSLKEYLOGFILE"] = RAW_SECRET
+    probe = "\n".join(
+        [
+            "import asyncio",
+            "from openai import DefaultAsyncHttpxClient",
+            "async def main():",
+            "    client = DefaultAsyncHttpxClient(trust_env=False, follow_redirects=False)",
+            "    context = client._transport._pool._ssl_context",
+            "    print(repr(context.keylog_filename))",
+            "    await client.aclose()",
+            "asyncio.run(main())",
+        ]
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-E", "-c", probe],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "None\n"
+    assert RAW_SECRET not in completed.stderr
+
+
+@pytest.mark.parametrize("environment_name", ["OPENAI_BASE_URL", "SSLKEYLOGFILE"])
 def test_lazy_client_construction_rejects_a_post_start_environment_mutation(
     monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
 ) -> None:
     _clear_unsupported_openai_environment(monkeypatch)
     http_arguments: list[dict[str, object]] = []
@@ -1245,7 +1397,7 @@ def test_lazy_client_construction_rejects_a_post_start_environment_mutation(
     )
     provider = OpenAIResponsesProvider(_configuration())
     operation = provider.start(_request())
-    monkeypatch.setenv("OPENAI_BASE_URL", RAW_SECRET)
+    monkeypatch.setenv(environment_name, RAW_SECRET)
 
     observations = asyncio.run(_collect(operation))
 

@@ -29,10 +29,10 @@ OPENAI_MODEL_REQUIRED_MESSAGE = "--provider openai requires --model MODEL."
 """Fixed rejection for an incomplete OpenAI selection."""
 
 UNSUPPORTED_OPENAI_ENVIRONMENT_MESSAGE = (
-    "Unsupported OpenAI configuration is present. Remove every OPENAI_* variable "
-    "except OPENAI_API_KEY."
+    "Unsupported OpenAI or TLS key-logging configuration is present. Remove every OPENAI_* "
+    "variable except OPENAI_API_KEY and remove SSLKEYLOGFILE."
 )
-"""Fixed rejection for ambient OpenAI SDK routing or logging configuration."""
+"""Fixed rejection for ambient SDK routing, logging, or TLS key material configuration."""
 
 INVALID_OPENAI_API_KEY_MESSAGE = "OPENAI_API_KEY is required and must be a valid local credential."
 """Fixed rejection for a missing or locally malformed credential."""
@@ -82,7 +82,7 @@ def validate_provider_name(value: object) -> ProviderName:
     Raises:
         ProviderConfigurationError: If the value is not one of the two fixed names.
     """
-    if value not in SUPPORTED_PROVIDERS:
+    if not isinstance(value, str) or value not in SUPPORTED_PROVIDERS:
         raise ProviderConfigurationError(UNSUPPORTED_PROVIDER_MESSAGE)
     return cast(ProviderName, value)
 
@@ -144,20 +144,24 @@ def resolve_provider_configuration(
 
 
 def validate_openai_environment(environment: Mapping[str, str]) -> None:
-    """Reject ambient OpenAI SDK settings other than the selected credential.
+    """Reject ambient SDK settings other than the selected credential.
 
     This check runs both at configuration resolution and immediately before lazy client
-    construction. Repeating it detects ambient SDK routing, header, or logging configuration added
-    during the ordinary gap after :class:`OpenAIProviderConfiguration` was created.
+    construction. Repeating it detects ambient SDK routing, header, logging, or TLS key-log
+    configuration added during the ordinary gap after :class:`OpenAIProviderConfiguration` was
+    created.
 
     Args:
         environment: Current process environment names and values. Values are never inspected or
             copied into an error.
 
     Raises:
-        ProviderConfigurationError: If any unsupported ``OPENAI_*`` name is present.
+        ProviderConfigurationError: If any unsupported ``OPENAI_*`` name or ``SSLKEYLOGFILE`` is
+            present.
     """
-    if any(name.startswith("OPENAI_") and name != OPENAI_API_KEY_NAME for name in environment):
+    if "SSLKEYLOGFILE" in environment or any(
+        name.startswith("OPENAI_") and name != OPENAI_API_KEY_NAME for name in environment
+    ):
         raise ProviderConfigurationError(UNSUPPORTED_OPENAI_ENVIRONMENT_MESSAGE)
 
 

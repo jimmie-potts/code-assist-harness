@@ -55,7 +55,10 @@ def test_python_provider_constants_match_the_hand_reviewed_cross_language_fixtur
     assert DEFAULT_OPENAI_TEXT_STREAM_MODEL == VALID_MODEL
 
 
-@pytest.mark.parametrize("provider", ["anthropic", "OPENAI", "", 1, True, None])
+@pytest.mark.parametrize(
+    "provider",
+    ["anthropic", "OPENAI", "", 1, True, None, [], {}, {"mock"}],
+)
 def test_provider_name_rejection_is_fixed_and_does_not_echo_candidate(provider: object) -> None:
     with pytest.raises(ProviderConfigurationError) as captured:
         validate_provider_name(provider)
@@ -179,9 +182,10 @@ def test_api_key_has_no_provider_prefix_assumption() -> None:
         ("OPENAI_CUSTOM_HEADERS", "x-secret: value"),
         ("OPENAI_LOG", "debug"),
         ("OPENAI_FUTURE_OPTION", ""),
+        ("SSLKEYLOGFILE", "/tmp/tls-keys.log"),
     ],
 )
-def test_any_other_openai_environment_name_is_rejected_without_echoing_it(
+def test_unsupported_network_environment_name_is_rejected_without_echoing_it(
     name: str,
     value: str,
 ) -> None:
@@ -193,22 +197,25 @@ def test_any_other_openai_environment_name_is_rejected_without_echoing_it(
         )
 
     assert str(captured.value) == UNSUPPORTED_OPENAI_ENVIRONMENT_MESSAGE
-    assert name not in str(captured.value)
+    if name != "SSLKEYLOGFILE":
+        assert name not in str(captured.value)
     if value:
         assert value not in str(captured.value)
 
 
-def test_environment_can_be_revalidated_after_initial_configuration() -> None:
+@pytest.mark.parametrize("late_name", ["OPENAI_FUTURE_OPTION", "SSLKEYLOGFILE"])
+def test_environment_can_be_revalidated_after_initial_configuration(late_name: str) -> None:
     environment = {"OPENAI_API_KEY": FAKE_API_KEY}
     configuration = resolve_provider_configuration("openai", VALID_MODEL, environment)
-    environment["OPENAI_FUTURE_OPTION"] = "late-secret-value"
+    environment[late_name] = "late-secret-value"
 
     with pytest.raises(ProviderConfigurationError) as captured:
         validate_openai_environment(environment)
 
     assert configuration is not None
     assert str(captured.value) == UNSUPPORTED_OPENAI_ENVIRONMENT_MESSAGE
-    assert "OPENAI_FUTURE_OPTION" not in str(captured.value)
+    if late_name != "SSLKEYLOGFILE":
+        assert late_name not in str(captured.value)
     assert "late-secret-value" not in str(captured.value)
 
 

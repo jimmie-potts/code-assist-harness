@@ -42,6 +42,7 @@ const DEFAULT_TERMINATE_PERIOD_MS = 1000;
 const DEFAULT_READINESS_TIMEOUT_MS = 5000;
 const PYTHON_RUNTIME_OVERRIDE_NAMES = new Set(['PYTHONHOME', 'PYTHONPATH']);
 const VIRTUAL_ENVIRONMENT_NAME = 'VIRTUAL_ENV';
+const TLS_KEY_LOG_ENVIRONMENT_NAME = 'SSLKEYLOGFILE';
 
 /**
  * A projection-only description of the Python child lifecycle.
@@ -100,7 +101,7 @@ export interface RuntimeLaunchRequest {
     readonly shell: false;
     readonly stdio: readonly ['pipe', 'pipe', 'pipe'];
     readonly detached: true;
-    /** Parent environment snapshot without Python, virtual-environment, or uv selectors. */
+    /** Parent environment without Python, virtual-environment, uv, or TLS key-log selectors. */
     readonly env: NodeJS.ProcessEnv;
   };
 }
@@ -180,10 +181,11 @@ export class SessionSubmissionError extends Error {
  *
  * The uv project root is the harness repository while the target workspace, provider, and optional
  * model are separate explicit Python arguments. Provider configuration never enters the NDJSON
- * protocol. Python, virtual-environment, and uv selectors are removed from the inherited
- * environment. stdin/stdout/stderr are all pipes; CAH-004 validates stdout as protocol events
- * before any child output can enter trusted lifecycle state. An invalid provider/model pair is
- * rejected locally with a fixed message before preflight or spawn.
+ * protocol. Python, virtual-environment, uv, and TLS key-log selectors are removed from the
+ * inherited environment, and Python ignores any remaining `PYTHON*` settings. stdin/stdout/stderr
+ * are all pipes; CAH-004 validates stdout as protocol events before any child output can enter
+ * trusted lifecycle state. An invalid provider/model pair is rejected locally with a fixed message
+ * before preflight or spawn.
  */
 export function buildRuntimeLaunchRequest(
   repositoryRoot: string,
@@ -213,6 +215,7 @@ export function buildRuntimeLaunchRequest(
       pythonExecutable,
       '--',
       'python',
+      '-E',
       '-m',
       'code_assist_harness.runtime',
       '--provider',
@@ -923,10 +926,11 @@ function spawnRuntimeProcess(request: RuntimeLaunchRequest): ChildProcessWithout
 function buildRuntimeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const runtimeEnvironment: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(environment)) {
-    // Python and uv environment selectors can bypass the exact prepared-environment contract.
+    // Runtime selectors can bypass the exact environment contract or export TLS session secrets.
     const isRuntimeOverride =
       PYTHON_RUNTIME_OVERRIDE_NAMES.has(name) ||
       name === VIRTUAL_ENVIRONMENT_NAME ||
+      name === TLS_KEY_LOG_ENVIRONMENT_NAME ||
       name.startsWith('UV_');
     if (value !== undefined && !isRuntimeOverride) {
       runtimeEnvironment[name] = value;

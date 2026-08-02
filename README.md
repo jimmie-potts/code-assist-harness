@@ -130,10 +130,11 @@ See [architecture.md](docs/architecture.md) for the complete target structure an
 
 An OpenAI API key is not needed for the walking skeleton, default launch, or default tests. The
 adapter consumes `OPENAI_API_KEY` only after OpenAI and the exact model are explicitly
-selected; Python rejects every other ambient `OPENAI_*` setting before SDK import. CAH-011 may inspect
-a recognized credential value solely to seed transcript redaction. Credentials and `.env` files must
-never be committed. The optional repository-root `dev.env` is ignored, stores one local plaintext
-key, and is read only by the explicit `scripts/with-openai-dev-key` helper.
+selected; Python rejects every other ambient `OPENAI_*` setting and `SSLKEYLOGFILE` before SDK
+import. CAH-011 may inspect a recognized credential value solely to seed transcript redaction.
+Credentials and `.env` files must never be committed. The optional repository-root `dev.env` is
+ignored, stores one local plaintext key, and is read only by the explicit
+`scripts/with-openai-dev-key` helper.
 
 ## Setup, launch, and checks
 
@@ -168,9 +169,10 @@ interpreter, working-directory, and no-project selectors so local Python checks 
 away from the repository's prepared environment, and clears isolated-run mode so `uv run` cannot
 substitute an ephemeral environment. The top-level Python and Node checks preload guards that reject
 common socket/network client entry points. The runtime supervisor deliberately strips ambient Python
-selectors, including `PYTHONPATH`, before its real Python child. Source policy permits the approved SDK
-and network surface only inside the concrete OpenAI adapter; provider-neutral code remains isolated.
-The canonical gate deselects the live-provider marker and removes OpenAI credentials and routing
+selectors, including `PYTHONPATH`, and `SSLKEYLOGFILE` before its real Python child, then starts Python
+with `-E` so remaining `PYTHON*` variables are ignored. Source policy permits the approved SDK and
+network surface only inside the concrete OpenAI adapter; provider-neutral code remains isolated. The
+canonical gate deselects the live-provider marker and removes OpenAI credentials and routing
 configuration. These are defense-in-depth controls, not a general-purpose network sandbox for
 arbitrary native executables.
 
@@ -185,22 +187,18 @@ supervised shell from the repository root inside Ubuntu WSL:
 ```
 
 That command selects the deterministic mock. To keep a local development key outside shell history,
-create the ignored repository-root `dev.env` from an interactive Bash prompt:
+create the ignored repository-root `dev.env` from an interactive prompt:
 
 ```bash
-(
-  umask 077
-  IFS= read -rsp 'OpenAI API key: ' cah_openai_key
-  printf '\n'
-  printf 'OPENAI_API_KEY=%s\n' "$cah_openai_key" > dev.env
-  chmod 600 dev.env
-)
+./scripts/with-openai-dev-key --init
 ```
 
-The file may contain blank lines and comments, but exactly one non-empty
-`OPENAI_API_KEY=...` assignment and no other setting. It remains plaintext; mode `0600` limits access
-to its owner but is not encryption. Keep provider/model selection out of the file. Then opt into the
-real bounded turn through the explicit reader and the reviewed Luna model:
+The initializer refuses to replace an existing file or symlink, creates the path exclusively at mode
+`0600` before prompting, never places the key on the command line, and removes the file if entry,
+validation, or persistence fails. The file may contain blank lines and comments, but exactly one
+non-empty `OPENAI_API_KEY=...` assignment and no other setting. It remains plaintext; mode `0600`
+limits access to its owner but is not encryption. Keep provider/model selection out of the file. Then
+opt into the real bounded turn through the explicit reader and the reviewed Luna model:
 
 ```bash
 ./scripts/with-openai-dev-key \
@@ -210,11 +208,11 @@ real bounded turn through the explicit reader and the reviewed Luna model:
 Provider and model are child-process configuration, not NDJSON fields. TypeScript validates the pair
 for early feedback and Python validates it again before importing or constructing the SDK adapter.
 The helper never sources or evaluates `dev.env`; it rejects symlinks, permissions other than `0600`,
-an already exported key, malformed assignments, and unsafe whitespace/control characters in the key
-before preserving the command arguments with `exec`. It runs through Ubuntu's absolute system Python
-in isolated mode so ambient Python import settings cannot alter credential admission. Direct
-`run-tui`, `uv`, and `./scripts/check` commands never read `dev.env` automatically, and the canonical
-gate removes provider credentials from its children.
+every already exported `OPENAI_*` variable, `SSLKEYLOGFILE`, malformed assignments, and unsafe
+whitespace/control characters in the key before preserving the command arguments with `exec`. It
+runs through Ubuntu's absolute system Python in isolated mode so ambient Python import settings
+cannot alter credential admission. Direct `run-tui`, `uv`, and `./scripts/check` commands never read
+`dev.env` automatically, and the canonical gate removes provider credentials from its children.
 
 The directory from which the launcher is invoked is the default workspace. Select a different
 single workspace with an absolute path, or with a path relative to that launch directory:
@@ -283,8 +281,9 @@ Startup troubleshooting:
   `.venv/bin/python` before `uv` starts, so this failure does not create or update `.venv`.
 - If Python exits with an environment or import diagnostic, rerun `uv sync --dev`; launch never
   updates the lockfile or prepared environment for you. The supervised child intentionally removes
-  inherited `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable; supported project,
-  environment, and interpreter choices are supplied explicitly in the argument array instead.
+  inherited `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `SSLKEYLOGFILE`, and every `UV_*` variable;
+  Python also starts with `-E`, while supported project, environment, and interpreter choices are
+  supplied explicitly in the argument array instead.
 - If workspace selection fails before Ink renders, check that the `--workspace` value exists, is a
   directory, and is accessible from Ubuntu WSL.
 - If Python exits after spawning, the TUI shows a bounded, sanitized stderr summary and remains in
