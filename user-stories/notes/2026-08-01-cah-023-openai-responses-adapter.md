@@ -1,5 +1,8 @@
 # 2026-08-01 CAH-023 OpenAI Responses adapter
 
+> Historical implementation record. The model-specific request and local-key setup were superseded
+> later that day by the [Luna migration note](2026-08-01-cah-023-luna-dev-environment.md).
+
 ## Outcome
 
 CAH-023 adds the first real-provider capability without transferring agent-loop ownership to a

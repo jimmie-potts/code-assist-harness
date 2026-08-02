@@ -129,7 +129,7 @@ cancellation and does not prove remote cleanup succeeded. File-size, search-resu
 command-duration, whole-session, and later tool-execution limits remain future controls.
 
 CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
-validate the explicit `openai` provider plus exact `gpt-4.1-mini-2025-04-14` snapshot, while Python
+validate the explicit `openai` provider plus exact `gpt-5.6-luna` model, while Python
 remains authoritative before SDK import. `OPENAI_API_KEY` is inspected only after that selection;
 every other `OPENAI_*` setting is rejected so ambient routing, headers, or logging cannot silently
 alter the request. The adapter fixes the official endpoint, disables environment proxy trust,

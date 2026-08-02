@@ -1,4 +1,4 @@
-"""Strict foreground OpenAI Responses adapter for one text-only model turn."""
+"""Strict foreground OpenAI Responses adapter for one text-only Luna turn."""
 
 from __future__ import annotations
 
@@ -27,6 +27,9 @@ from .port import ProviderCancellationResult, ProviderOperation
 
 OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1"
 """Only endpoint the CAH-023 client may address."""
+
+OPENAI_MAX_OUTPUT_TOKENS = 8192
+"""Provider-side cap covering visible output and any hidden reasoning tokens."""
 
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 """Largest integer represented exactly by protocol-adjacent JavaScript consumers."""
@@ -94,7 +97,7 @@ type _ClientFactory = Callable[[], _SDKClient]
 
 
 class OpenAIResponsesProvider:
-    """Create lazy operations for the one allowlisted text-stream snapshot.
+    """Create lazy operations for the one allowlisted text-stream model.
 
     The provider retains validated configuration but creates a fresh SDK client only when an
     operation's iterator is consumed. A client and stream are never shared across model turns.
@@ -466,14 +469,16 @@ _OPERATION_CANCELLED = _OperationCancelled()
 
 
 class _ResponsesAutomaton:
-    """Validate the exact CAH-023 text-stream compatibility subset."""
+    """Validate the exact CAH-023 Luna text-stream compatibility subset."""
 
     def __init__(self, model: str) -> None:
         self._model = model
         self._state = "created"
         self._next_sequence: int | None = None
         self._response_id: str | None = None
+        self._reasoning_item_id: str | None = None
         self._item_id: str | None = None
+        self._message_output_index = 0
         self._text_fragments: list[str] = []
 
     def accept(self, event: object) -> tuple[ProviderStreamEvent, ...]:
@@ -546,9 +551,17 @@ class _ResponsesAutomaton:
         return ()
 
     def _output_item_added(self, event: object) -> tuple[ProviderStreamEvent, ...]:
-        self._require_state("output_item_added")
-        _require_index(event, "output_index", 0)
+        if self._state not in {"output_item_added", "message_item_added"}:
+            raise InvalidSDKObservation
         item = _field(event, "item")
+        if self._state == "output_item_added" and _optional_field(item, "type") == "reasoning":
+            _require_index(event, "output_index", 0)
+            self._reasoning_item_id = _validate_reasoning_item(item, completed=False)
+            self._state = "reasoning_item_done"
+            return ()
+
+        self._message_output_index = 1 if self._reasoning_item_id is not None else 0
+        _require_index(event, "output_index", self._message_output_index)
         self._item_id = _validate_message(item, content_count=0, completed=False)
         self._state = "content_part_added"
         return ()
@@ -588,8 +601,16 @@ class _ResponsesAutomaton:
         return ()
 
     def _output_item_done(self, event: object) -> tuple[ProviderStreamEvent, ...]:
+        if self._state == "reasoning_item_done":
+            _require_index(event, "output_index", 0)
+            item_id = _validate_reasoning_item(_field(event, "item"), completed=True)
+            if item_id != self._reasoning_item_id:
+                raise InvalidSDKObservation
+            self._state = "message_item_added"
+            return ()
+
         self._require_state("output_item_done")
-        _require_index(event, "output_index", 0)
+        _require_index(event, "output_index", self._message_output_index)
         item = _field(event, "item")
         item_id = _validate_message(item, content_count=1, completed=True)
         if item_id != self._item_id:
@@ -611,13 +632,20 @@ class _ResponsesAutomaton:
             raise InvalidSDKObservation
         if _optional_field(response, "incomplete_details") is not None:
             raise InvalidSDKObservation
+        _validate_reasoning_configuration(_optional_field(response, "reasoning"))
         output = _required_list(_field(response, "output"))
-        if len(output) != 1:
+        expected_output_count = 2 if self._reasoning_item_id is not None else 1
+        if len(output) != expected_output_count:
             raise InvalidSDKObservation
-        item_id = _validate_message(output[0], content_count=1, completed=True)
+        if self._reasoning_item_id is not None:
+            reasoning_id = _validate_reasoning_item(output[0], completed=True)
+            if reasoning_id != self._reasoning_item_id:
+                raise InvalidSDKObservation
+        message = output[self._message_output_index]
+        item_id = _validate_message(message, content_count=1, completed=True)
         if item_id != self._item_id:
             raise InvalidSDKObservation
-        content = _required_list(_field(output[0], "content"))
+        content = _required_list(_field(message, "content"))
         _validate_output_text(content[0], expected_text=self._text())
 
         mapped: list[ProviderStreamEvent] = []
@@ -628,6 +656,11 @@ class _ResponsesAutomaton:
             total_tokens = _safe_integer(_field(usage, "total_tokens"))
             if input_tokens + output_tokens != total_tokens or total_tokens > MAX_SAFE_INTEGER:
                 raise InvalidSDKObservation
+            output_details = _optional_field(usage, "output_tokens_details")
+            if output_details is not None:
+                reasoning_tokens = _safe_integer(_field(output_details, "reasoning_tokens"))
+                if reasoning_tokens > output_tokens:
+                    raise InvalidSDKObservation
             mapped.append(ProviderUsageReported(input_tokens, output_tokens))
         mapped.append(ProviderCompleted())
         self._state = "terminal"
@@ -649,7 +682,7 @@ class _ResponsesAutomaton:
     def _require_item_coordinates(self, event: object) -> None:
         if _required_string(_field(event, "item_id")) != self._item_id:
             raise InvalidSDKObservation
-        _require_index(event, "output_index", 0)
+        _require_index(event, "output_index", self._message_output_index)
         _require_index(event, "content_index", 0)
 
     def _require_state(self, state: str) -> None:
@@ -688,6 +721,8 @@ def _map_request(request: ProviderRequest, model: str) -> dict[str, object]:
         "input": [
             {"role": message.role, "content": message.content} for message in request.conversation
         ],
+        "reasoning": {"effort": "none", "context": "current_turn"},
+        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
         "stream": True,
         "background": False,
         "store": False,
@@ -725,6 +760,8 @@ def _normalize_exception(error: Exception) -> ProviderFailed:
         return _failed("unavailable")
     if isinstance(error, openai.APIStatusError):
         status = error.status_code
+        if type(status) is not int:
+            return _failed("unknown")
         if status == 401:
             return _failed("authentication_failed")
         if status == 429:
@@ -842,9 +879,59 @@ def _validate_message(value: object, *, content_count: int, completed: bool) -> 
     if len(content) != content_count:
         raise InvalidSDKObservation
     status = _optional_field(value, "status")
-    if completed and status not in {None, "completed"}:
+    if completed and status is not None and (not isinstance(status, str) or status != "completed"):
         raise InvalidSDKObservation
     return item_id
+
+
+def _validate_reasoning_item(value: object, *, completed: bool) -> str:
+    """Validate an opaque Luna reasoning envelope without retaining its encrypted content."""
+    if _field(value, "type") != "reasoning":
+        raise InvalidSDKObservation
+    item_id = _required_string(_field(value, "id"))
+    _require_empty_list(_field(value, "summary"))
+    _require_absent_or_empty_list(_optional_field(value, "content"))
+    status = _optional_field(value, "status")
+    expected_status = "completed" if completed else "in_progress"
+    if status is not None and (not isinstance(status, str) or status != expected_status):
+        raise InvalidSDKObservation
+    return item_id
+
+
+def _validate_reasoning_configuration(value: object) -> None:
+    """Confirm any echoed reasoning settings preserve the reviewed Luna request mode."""
+    if value is None:
+        return
+    missing = object()
+    effort = _optional_field(value, "effort", default=missing)
+    context = _optional_field(value, "context", default=missing)
+    summary = _optional_field(value, "summary", default=missing)
+    generate_summary = _optional_field(value, "generate_summary", default=missing)
+    mode = _optional_field(value, "mode", default=missing)
+    if all(field is missing for field in (effort, context, summary, generate_summary, mode)):
+        raise InvalidSDKObservation
+    if (
+        effort is not missing
+        and effort is not None
+        and (not isinstance(effort, str) or effort != "none")
+    ):
+        raise InvalidSDKObservation
+    if (
+        context is not missing
+        and context is not None
+        and (not isinstance(context, str) or context != "current_turn")
+    ):
+        raise InvalidSDKObservation
+    if summary is not missing and summary is not None:
+        raise InvalidSDKObservation
+    if generate_summary is not missing and generate_summary is not None:
+        raise InvalidSDKObservation
+    if (
+        mode is not missing
+        and mode is not None
+        and (not isinstance(mode, str) or mode != "standard")
+    ):
+        raise InvalidSDKObservation
 
 
 async def _join_cleanup(task: asyncio.Task[bool]) -> bool:
@@ -864,6 +951,7 @@ async def _settle_state_transition(task: asyncio.Task[None]) -> None:
 
 __all__ = [
     "InvalidSDKObservation",
+    "OPENAI_MAX_OUTPUT_TOKENS",
     "OPENAI_RESPONSES_BASE_URL",
     "OpenAIAdapterCleanupError",
     "OpenAIResponsesOperation",

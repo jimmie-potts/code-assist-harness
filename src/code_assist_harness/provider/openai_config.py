@@ -7,16 +7,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
-SUPPORTED_OPENAI_TEXT_STREAM_MODELS = frozenset({"gpt-4.1-mini-2025-04-14"})
-"""Exact model snapshots whose stream shape CAH-023 validates."""
+SUPPORTED_OPENAI_TEXT_STREAM_MODELS = frozenset({"gpt-5.6-luna"})
+"""Exact model IDs whose stream shape CAH-023 validates."""
 
-DEFAULT_OPENAI_TEXT_STREAM_MODEL = "gpt-4.1-mini-2025-04-14"
-"""Single allowlisted snapshot named in safe configuration guidance."""
+DEFAULT_OPENAI_TEXT_STREAM_MODEL = "gpt-5.6-luna"
+"""Single allowlisted model named in safe configuration guidance."""
 
 OPENAI_API_KEY_NAME = "OPENAI_API_KEY"
 """Only OpenAI-prefixed environment setting accepted by the adapter."""
 
-UNSUPPORTED_OPENAI_MODEL_MESSAGE = "Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14."
+UNSUPPORTED_OPENAI_MODEL_MESSAGE = "Unsupported OpenAI model. Use gpt-5.6-luna."
 """Fixed model rejection that never repeats an untrusted candidate."""
 
 UNSUPPORTED_PROVIDER_MESSAGE = "--provider must be either mock or openai."
@@ -56,7 +56,7 @@ class OpenAIProviderConfiguration:
     """Validated values required to construct the concrete adapter lazily.
 
     Args:
-        model: Exact repository-allowlisted model snapshot.
+        model: Exact repository-allowlisted model ID.
         api_key: Locally validated credential retained only at the adapter boundary.
     """
 
@@ -88,13 +88,13 @@ def validate_provider_name(value: object) -> ProviderName:
 
 
 def validate_openai_model(value: object) -> str:
-    """Validate one model ID before exact snapshot membership is checked.
+    """Validate one model ID before exact allowlist membership is checked.
 
     Args:
         value: Candidate model supplied outside the protocol.
 
     Returns:
-        The exact allowlisted model snapshot.
+        The exact allowlisted model ID.
 
     Raises:
         ProviderConfigurationError: If encoding, size, characters, or membership are invalid.
@@ -175,7 +175,7 @@ def validate_provider_selection(
         model: Optional model candidate supplied outside protocol stdin.
 
     Returns:
-        The normalized provider name and exact OpenAI snapshot, or ``None`` for the mock model.
+        The normalized provider name and exact OpenAI model, or ``None`` for the mock model.
 
     Raises:
         ProviderConfigurationError: If the pair is incomplete, mismatched, or unsupported.

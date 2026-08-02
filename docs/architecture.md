@@ -38,7 +38,7 @@ changing the launched `MockSession` runtime or TUI. CAH-021 adds `ProviderSessio
 fake-backed turn, an injected-provider runtime seam, and bounded usage evidence. CAH-022 adds four
 validated hard limits, per-session accounting, deterministic deadline and cleanup supervision, and
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
-an exact-snapshot foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
+an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
 protocol v1 is unchanged. Tool execution, workspace discovery and reads, policy, and broader agent
 behavior remain target architecture.
@@ -107,7 +107,7 @@ real path, and rejects a path under `/mnt` or a name ending in `.exe`. It also r
 preflight does not invoke `uv`, create `.venv`, or otherwise mutate the repository. The harness
 repository is `uv`'s project and child working directory, while the target repository is a distinct,
 canonical `--workspace` value. `PROVIDER` defaults to `mock`; `openai` requires the exact
-`gpt-4.1-mini-2025-04-14` snapshot. TypeScript validates the pair before child construction, and
+`gpt-5.6-luna` model. TypeScript validates the pair before child construction, and
 Python validates it again before SDK import. These launch values are configuration arguments, not
 NDJSON fields.
 
@@ -288,7 +288,7 @@ Escape binding, and visible feedback.
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. The CAH-010 lifecycle fixtures contain domain facts and
 complete validated wire envelopes without making the fixture schema part of protocol v1. The
-separate runtime-configuration fixture keeps provider names and the OpenAI snapshot aligned across
+separate runtime-configuration fixture keeps provider names and the OpenAI model aligned across
 languages; it is not a wire-message definition. Schema generation is deferred until contract drift
 demonstrates that its additional machinery is worthwhile.
 

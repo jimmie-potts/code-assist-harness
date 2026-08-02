@@ -559,6 +559,27 @@ def test_repository_file_discovery_respects_git_ignore_rules(tmp_path: Path) -> 
     assert broken == {}
 
 
+def test_root_dev_environment_is_ignored_and_cannot_be_tracked() -> None:
+    git = shutil.which("git")
+    assert git is not None
+
+    ignored = subprocess.run(
+        [git, "check-ignore", "--quiet", "--no-index", "--", "dev.env"],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+    )
+    tracked = subprocess.run(
+        [git, "ls-files", "--error-unmatch", "--", "dev.env"],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert ignored.returncode == 0
+    assert tracked.returncode != 0
+
+
 def test_markdown_policy_rejects_synthetic_missing_target_and_heading(tmp_path: Path) -> None:
     guide = tmp_path / "guide.md"
     guide.write_text(

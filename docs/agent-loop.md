@@ -69,7 +69,7 @@ decision lock: protocol write, Python reduction, and transcript-observer attempt
 cancellation or teardown may select an outcome. An ordinary later sink or observer failure does not
 roll back an earlier accepted view. CAH-023 keeps the mock default but lets `main()` supply the
 concrete adapter only after the TUI and Python composition roots validate `--provider openai --model
-gpt-4.1-mini-2025-04-14`. Provider selection does not alter the TypeScript protocol-v1 projection.
+gpt-5.6-luna`. Provider selection does not alter the TypeScript protocol-v1 projection.
 
 ## Bounded loop
 
@@ -157,17 +157,19 @@ the same port to OpenAI Responses without changing its types.
 
 ## OpenAI Responses adapter
 
-`openai_config.py` validates provider, exact model snapshot, environment names, and
+`openai_config.py` validates provider, exact model ID, environment names, and
 `OPENAI_API_KEY` without importing the SDK. The mock ignores ambient provider credentials. OpenAI is
 constructed only after explicit selection; every other `OPENAI_*` variable is rejected with a fixed
 message rather than being inherited as hidden SDK routing.
 
 `openai_responses.py` maps the ordered conversation and caller-supplied instructions into one
-foreground text request with `background=false`, `store=false`, no tools, and no tool choice.
+foreground text request with `background=false`, `store=false`, reasoning effort `none`,
+current-turn reasoning context, a generated-token cap, no tools, and no tool choice.
 `Provider.start()` remains synchronous, lazy, and I/O-free. Consuming the operation creates one async
 client and one stream, validates the exact lifecycle/item/text/completion sequence, and exposes only
-provider-neutral text, usage, completion, or fixed failure values. Tool, reasoning, multimodal,
-duplicate, missing, or inconsistent observations fail closed without retaining their raw values.
+provider-neutral text, usage, completion, or fixed failure values. One optional opaque empty
+reasoning envelope before the message is validated and suppressed. Tool, reasoning text/summary,
+multimodal, duplicate, missing, or inconsistent observations fail closed without retaining raw values.
 
 Natural termination and cancellation converge on one operation-owned, shielded cleanup task that
 attempts both stream and client close. A cleanup failure becomes one safe adapter exception consumed

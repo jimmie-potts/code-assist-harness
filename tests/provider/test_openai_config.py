@@ -35,7 +35,7 @@ PROVIDER_MODELS_FIXTURE = (
     / "v1"
     / "provider-models.json"
 )
-VALID_MODEL = "gpt-4.1-mini-2025-04-14"
+VALID_MODEL = "gpt-5.6-luna"
 FAKE_API_KEY = "FAKE_CAH_OPENAI_KEY_023"
 
 
@@ -90,9 +90,9 @@ def test_openai_requires_the_explicit_exact_model() -> None:
     "model",
     [
         "",
-        "gpt-4.1-mini",
+        "gpt-5.6",
         "o3-2025-04-16",
-        "ft:gpt-4.1-mini-2025-04-14:example",
+        "ft:gpt-5.6-luna:example",
         "unknown-model",
         f"{VALID_MODEL}\u00a0",
         f"{VALID_MODEL}\n",
@@ -214,7 +214,7 @@ def test_environment_can_be_revalidated_after_initial_configuration() -> None:
 
 def test_direct_configuration_construction_preserves_validation_invariants() -> None:
     with pytest.raises(ProviderConfigurationError) as model_failure:
-        OpenAIProviderConfiguration(model="gpt-4.1-mini", api_key=FAKE_API_KEY)
+        OpenAIProviderConfiguration(model="gpt-5.6", api_key=FAKE_API_KEY)
     with pytest.raises(ProviderConfigurationError) as key_failure:
         OpenAIProviderConfiguration(model=VALID_MODEL, api_key="bad key")
 

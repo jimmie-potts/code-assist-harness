@@ -147,7 +147,7 @@ describe('run-tui launcher', () => {
           '--provider',
           'openai',
           '--model',
-          'gpt-4.1-mini-2025-04-14',
+          'gpt-5.6-luna',
           '--workspace',
           'target with spaces',
         ],
@@ -166,7 +166,7 @@ describe('run-tui launcher', () => {
       expect(result.stdout).toContain('argument=<--provider>');
       expect(result.stdout).toContain('argument=<openai>');
       expect(result.stdout).toContain('argument=<--model>');
-      expect(result.stdout).toContain('argument=<gpt-4.1-mini-2025-04-14>');
+      expect(result.stdout).toContain('argument=<gpt-5.6-luna>');
       expect(result.stdout).toContain('argument=<--workspace>');
       expect(result.stdout).toContain('argument=<target with spaces>');
     } finally {

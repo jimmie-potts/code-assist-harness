@@ -27,7 +27,10 @@
 
 ## Locked adapter contract
 
-- Every foreground request sets `stream=true`, `background=false`, and `store=false` explicitly.
+- Every foreground request sets `stream=true`, `background=false`, and `store=false` explicitly. It
+  also sets `reasoning={"effort":"none","context":"current_turn"}` so Luna does not inherit its
+  broader reasoning defaults, and `max_output_tokens=8192` bounds visible plus hidden generated
+  tokens at the provider boundary.
 - Ordered conversation messages map one-for-one to Responses `input` roles and contents. When the
   repository-instruction tuple is non-empty, the Responses `instructions` value is the literal
   prefix `Repository instructions in precedence order (JSON):\n` followed immediately by a JSON
@@ -39,9 +42,9 @@
   OpenAI function call can become a valid provider-neutral observation.
 - The launcher defaults to the existing mock, and `--provider` accepts only `mock` or `openai`.
   OpenAI requires the explicit pair `--provider openai --model MODEL`; `--model` is rejected for the
-  mock, and OpenAI is rejected when the model is absent. CAH-023's repository-owned exact-snapshot
-  allowlist is `SUPPORTED_OPENAI_TEXT_STREAM_MODELS = {"gpt-4.1-mini-2025-04-14"}`. Aliases,
-  prefixes, fine-tunes, reasoning families, and every other model value are rejected locally. The
+  mock, and OpenAI is rejected when the model is absent. CAH-023's repository-owned exact-model
+  allowlist is `SUPPORTED_OPENAI_TEXT_STREAM_MODELS = {"gpt-5.6-luna"}`. Aliases, prefixes,
+  fine-tunes, and every other model value are rejected locally. The
   repository does not silently track a changing provider default or alias.
 - `run-tui` parses and validates those options, its application configuration passes them to
   `PythonRuntimeSupervisor`, and the supervisor forwards them as separate shell-free Python child
@@ -51,7 +54,7 @@
   Unicode whitespace, control, surrogate, or other category-C code point. TypeScript and Python use
   the same constant and a parity test, while Python remains authoritative before SDK import or
   network access. The fixed rejection is
-  `Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14.` and never echoes the supplied value.
+  `Unsupported OpenAI model. Use gpt-5.6-luna.` and never echoes the supplied value.
 - Missing or locally invalid provider configuration fails safely before a session starts and never
   prints a credential or environment value.
 - `OPENAI_API_KEY` is the only accepted `OPENAI_*` provider configuration and the adapter consumes it
@@ -69,9 +72,17 @@
 - Local API-key validation requires `1..4096` UTF-8 bytes and rejects every Unicode whitespace,
   control, surrogate, or other category-C code point; it makes no prefix assumption. A missing or
   locally malformed key, and a missing, malformed, or non-allowlisted model, fail before network
-  access. A syntactically valid but revoked or unauthorized key, or later inaccessibility/retirement
-  of the one allowlisted snapshot, can be decided only by the API and is normalized after the one
+  access. A syntactically valid but revoked or unauthorized key, or later inaccessibility of the one
+  allowlisted model, can be decided only by the API and is normalized after the one
   explicitly opted-in request.
+- The optional local `dev.env` workflow is an explicit wrapper rather than ambient runtime loading.
+  Repository-root `dev.env` is ignored by the `/dev.env` pattern, must be a readable regular
+  non-symlink file with mode `0600`, and contains
+  exactly one non-empty `OPENAI_API_KEY=...` assignment plus optional blank lines/comments. The
+  wrapper rejects an already exported key and every other assignment, never sources/evaluates the
+  file, runs through absolute `/usr/bin/python3 -I` so ambient Python import settings cannot alter
+  credential admission, and uses `exec` to preserve the selected command. Provider/model remain CLI
+  arguments, and the runtime retains `uv --no-env-file`.
 - SDK objects, raw exceptions, response bodies, headers, request objects, and credentials never enter
   provider-neutral, session, protocol, diagnostic, shared-fixture, or transcript types. Adapter-local
   SDK fakes may construct SDK-shaped values only inside adapter tests.
@@ -119,20 +130,25 @@
 
   1. `response.created`, then optionally one `response.queued`, then exactly one
      `response.in_progress`, all with one response identity;
-  2. `response.output_item.added` at `output_index=0` for one `message` item with a stable item ID,
-     role `assistant`, and empty content;
-  3. `response.content_part.added` for that item at `content_index=0`, containing empty
+  2. optionally one opaque `reasoning` item at `output_index=0`, represented only by consecutive
+     `response.output_item.added` and `response.output_item.done` events with one stable ID, empty
+     summary, absent or empty content, and valid progress/completed status;
+  3. `response.output_item.added` for one `message` item at `output_index=0` without the reasoning
+     envelope or `output_index=1` after it, with a stable item ID, role `assistant`, and empty content;
+  4. `response.content_part.added` for that item at `content_index=0`, containing empty
      `output_text` and no annotations;
-  4. one or more non-empty `response.output_text.delta` events with those exact IDs and indices;
-  5. exactly one `response.output_text.done`, `response.content_part.done`, and
+  5. one or more non-empty `response.output_text.delta` events with those exact IDs and indices;
+  6. exactly one `response.output_text.done`, `response.content_part.done`, and
      `response.output_item.done`, in that order; and
-  6. exactly one `response.completed` for the same response.
+  7. exactly one `response.completed` for the same response.
 - The concatenated text deltas must equal the text in `output_text.done`, the completed content part,
-  the sole content of the completed message item, and the sole output item in `response.completed`.
+  the sole content of the completed message item, and that message in `response.completed`.
   Every snapshot retains item/part identity, index, assistant role, `output_text` type, and empty
-  annotations. The completed response has status `completed`, the exact allowlisted snapshot as its
-  model, null error and incomplete details, and optional non-negative safe-integer input/output
-  usage. Any present total usage equals their sum.
+  annotations. If the optional reasoning item is present, the completed output reconciles it before
+  the message without copying, parsing, persisting, or exposing `encrypted_content`. The completed
+  response has status `completed`, the exact allowlisted model, null error and incomplete details,
+  and optional non-negative safe-integer input/output usage. Any present total usage equals their
+  sum; any present reasoning-token detail is already included in output tokens and cannot exceed it.
 - `response.failed` or `response.incomplete` may replace the remaining success suffix after
   `response.created` and any valid subsequent prefix, but must retain response identity and sequence.
   A top-level `error` may be the first event or may terminate any valid prefix; its sequence becomes
@@ -147,12 +163,12 @@
   `invalid_response`; the adapter neither accumulates nor logs its arguments. CAH-021's
   `tool_unavailable` behavior remains covered through the provider-neutral fake, not this text-only
   adapter.
-- Duplicate, missing, inconsistent, multi-message, multi-part, reasoning, multimodal, refusal, audio,
-  image, tool, annotation, unknown, or otherwise unsupported events become a bounded
-  `invalid_response` provider failure. Reasoning is a defensive contract violation because the sole
-  allowlisted snapshot is documented as operating without a reasoning step; a future model requires
-  an automaton expansion before allowlisting. Raw SDK values are never converted with `str()` or
-  `repr()` for diagnostics.
+- Duplicate, missing, inconsistent, multi-message, multi-part, multimodal, refusal, audio, image,
+  tool, annotation, unknown, or otherwise unsupported events become a bounded `invalid_response`
+  provider failure. The sole admitted reasoning shape is the optional opaque empty item envelope
+  before the message. A second or late reasoning item, non-empty summary/content, reasoning text or
+  summary stream event, inconsistent identity/status/index, or a non-`none` effective reasoning mode
+  fails closed. Raw SDK values are never converted with `str()` or `repr()` for diagnostics.
 - Failure normalization uses a closed table and fixed safe messages. SDK exceptions are checked in
   subclass-first order. Task cancellation remains control flow. Premature `StopAsyncIteration`,
   `APIResponseValidationError`, JSON/Unicode decode failure while consuming SSE, and adapter-local
@@ -186,10 +202,10 @@
   broader data controls; neither setting is described as universal deletion, an abuse-monitoring
   control, or Zero Data Retention.
 - The live test is registered as `live_provider` and runs only with `--run-live-provider` plus
-  `--live-provider-model gpt-4.1-mini-2025-04-14` and `OPENAI_API_KEY`; ambient credential presence
+  `--live-provider-model gpt-5.6-luna` and `OPENAI_API_KEY`; ambient credential presence
   alone never selects it. Marker selection without the opt-in flag skips, while explicit opt-in with
   a missing or malformed key, or a missing, malformed, or non-allowlisted model, fails before network
-  access. Remote authentication, access, or snapshot-retirement rejection is one bounded failed smoke
+  access. Remote authentication or model-access rejection is one bounded failed smoke
   result after the deliberate request. `./scripts/check` and default CI use
   `-m "not live_provider"`, unset provider credentials/configuration for the test process, and retain
   the existing socket guard.
@@ -200,8 +216,8 @@
 2. The adapter structurally implements the existing provider port without changing loop or session
    domain types.
 3. Request mapping preserves ordered conversation and repository instructions, selects the exact
-   allowlisted snapshot, enables foreground streaming, disables background mode, and sets
-   `store=false`.
+   allowlisted model, enables foreground streaming, disables background mode, sets `store=false`,
+   disables reasoning effort with current-turn context, and caps generated tokens.
 4. Supported SDK stream events match the locked success/failure automaton, snapshot reconciliation,
    and exact provider-neutral ordering required by CAH-021. Structural lifecycle/item/part events
    advance only adapter state and never produce `None` or another placeholder across the port.
@@ -217,12 +233,15 @@
    are valid.
 9. Missing credentials or unsupported configuration produces actionable bounded diagnostics that may
    name a fixed safe option or environment label but never echo its value or dump the environment.
-   The launcher/Python allowlist parity test accepts only `gpt-4.1-mini-2025-04-14` and rejects its
-   alias plus unknown, reasoning, and fine-tuned model IDs before SDK import or network access.
+   The launcher/Python allowlist parity test accepts only `gpt-5.6-luna` and rejects unknown,
+   alias-like, and fine-tuned model IDs before SDK import or network access.
+   The local credential wrapper rejects unsafe file shape, permissions, content, and ambient-key
+   ambiguity without echoing the key; repository policy proves root `dev.env` is ignored/untracked.
 10. Local transcript enablement does not alter `store=false`, and transcript redaction/opt-out behavior
     remains unchanged.
 11. SDK-fake tests cover request/model mapping, every transition and reconciliation check in the
-    automaton, usage, rejected reasoning/tool events, every failure-table row, premature EOF,
+    automaton, usage, accepted opaque reasoning envelopes, rejected reasoning text/tool events,
+    every failure-table row, premature EOF,
     response-validation and JSON/Unicode decode failures, unexpected SDK exceptions, unknown events,
     cancellation before and between output, cancellation after usage, and terminal races without
     HTTP. Resource tests separately cover stream-close failure,
@@ -231,7 +250,7 @@
     resource closes are attempted, prove cancelling a joiner does not cancel shared cleanup, and
     prove `wait_closed()` cannot finish while a terminal remains pending.
 12. The opt-in `live_provider` smoke test performs one minimal bounded response, requires the named
-    run option, exact allowlisted snapshot, and locally valid credentials, normalizes remote rejection
+    run option, exact allowlisted model, and locally valid credentials, normalizes remote rejection
     after the request, and is excluded from `./scripts/check` and default CI even when a credential
     happens to be present.
 13. The default repository gate deselects `live_provider`, unsets provider configuration, and passes
@@ -263,12 +282,14 @@
   and proves the canonical gate rejects it.
 - Prove the registered marker plus explicit opt-in are both required, and that the default gate
   deselects the marker even when the parent shell contains a fake credential.
+- Exercise the explicit `dev.env` reader with a fake child and prove exact argument forwarding,
+  non-leakage, non-evaluation, strict permissions, and rejection before child execution.
 - Optionally run the separately documented live smoke command; it is supplemental evidence, not a
   completion requirement.
 
 ## Documentation impact
 
-Document provider/model selection, credential setup, request and event mapping, foreground
+Document provider/model selection, the explicit local `dev.env` workflow, request and event mapping, foreground
 cancellation, storage and transcript boundaries, SDK-fake testing, and the opt-in live command.
 Update the agent-loop, architecture, safety, evaluation, README, glossary, and provider lesson. Add
 the required written and visual CAH-023 learning evidence when implemented.
@@ -276,28 +297,31 @@ the required written and visual CAH-023 learning evidence when implemented.
 ## Delivered implementation
 
 - `openai_config.py` validates the provider/model pair and accepted environment before the SDK is
-  imported. The mock remains the default; OpenAI requires the one repository-approved snapshot.
+  imported. The mock remains the default; OpenAI requires the one repository-approved Luna model.
 - `openai_responses.py` implements the lazy async adapter, exact request mapper, closed stream
   automaton, bounded failure table, cancellation, and shared resource-cleanup owner behind the
   existing provider port.
 - The TypeScript launcher and supervisor forward provider/model as separate child arguments, while
   Python independently revalidates them at the authoritative composition root. A shared fixture
   locks cross-language allowlist parity.
+- `scripts/with-openai-dev-key` imports only the ignored root development key into one explicitly
+  selected command; normal runtime and validation paths never auto-load the file.
 - Deterministic SDK fakes cover request mapping, successful and malformed streams, failure
   normalization, partial output, terminal races, cancellation, and resource-close failures without
   HTTP. The separately registered live smoke remains explicit and supplemental.
 - The linked lesson and visual companion locate the adapter inside the TUI, harness, provider, tool,
   and evidence boundaries and focus on loop ownership rather than SDK mechanics.
 
-Detailed validation and presentation evidence is recorded in the
-[CAH-023 implementation note](notes/2026-08-01-cah-023-openai-responses-adapter.md).
+Detailed validation and presentation evidence is recorded in the original
+[CAH-023 implementation note](notes/2026-08-01-cah-023-openai-responses-adapter.md) and its
+[Luna/local-environment migration note](notes/2026-08-01-cah-023-luna-dev-environment.md).
 
 ## Out of scope
 
 - Background or resumable Responses, conversation objects, `previous_response_id`, provider-hosted
   tools, built-in tools, application retries, backoff, routing, failover, or multiple providers.
-- Additional model snapshots or aliases, reasoning-output compatibility, tool execution, workspace
-  context discovery, multiple model turns, or LangChain. A future model is added only with an
+- Additional model IDs or aliases, reasoning summaries/text or non-`none` effort, tool execution,
+  workspace context discovery, multiple model turns, or LangChain. A future model is added only with an
   explicit compatibility review and matching automaton/fake/live-smoke evidence.
 - Production telemetry pipelines, quota services, cost governance, or organization-wide retention
   configuration.
@@ -309,4 +333,5 @@ Detailed validation and presentation evidence is recorded in the
 - [Responses data controls](https://developers.openai.com/api/docs/guides/your-data#v1responses)
 - [Background mode and cancellation limits](https://developers.openai.com/api/docs/guides/background#limits)
 - [Official OpenAI Python SDK](https://github.com/openai/openai-python)
-- [GPT-4.1 mini model](https://developers.openai.com/api/docs/models/gpt-4.1-mini)
+- [GPT-5.6 Luna model](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
+- [GPT-5.6 reasoning parameters](https://developers.openai.com/api/docs/guides/latest-model#update-api-and-model-parameters)

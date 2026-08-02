@@ -33,7 +33,7 @@ describe('provider configuration', () => {
     expect(resolveProviderSelection('mock', undefined)).toEqual({provider: 'mock'});
   });
 
-  it('accepts only the exact reviewed OpenAI snapshot', () => {
+  it('accepts only the exact reviewed OpenAI model ID', () => {
     expect(resolveProviderSelection('openai', OPENAI_TEXT_STREAM_MODEL)).toEqual({
       provider: 'openai',
       model: OPENAI_TEXT_STREAM_MODEL,
@@ -65,9 +65,9 @@ describe('provider configuration', () => {
   });
 
   it.each([
-    'gpt-4.1-mini',
+    'gpt-5.6',
     'o4-mini-2025-04-16',
-    'ft:gpt-4.1-mini-2025-04-14:organization:custom',
+    'ft:gpt-5.6-luna:organization:custom',
     'model-value-that-must-not-be-echoed',
     'a'.repeat(257),
     'gpt-4.1 mini',
@@ -76,7 +76,7 @@ describe('provider configuration', () => {
     'gpt-4.1\u200dmini',
     '\ud800',
   ])('rejects an unsupported or malformed OpenAI model safely', (model) => {
-    const expectedMessage = 'Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14.';
+    const expectedMessage = 'Unsupported OpenAI model. Use gpt-5.6-luna.';
 
     expect(() => resolveProviderSelection('openai', model)).toThrow(
       new ProviderConfigurationError(expectedMessage),

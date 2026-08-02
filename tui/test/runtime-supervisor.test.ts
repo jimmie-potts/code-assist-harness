@@ -281,7 +281,7 @@ describe('PythonRuntimeSupervisor', () => {
       buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {}, true, 'mock', model),
     ).toThrow('--model is supported only with --provider openai.');
     const message = launchConfigurationErrorMessage('openai', model);
-    expect(message).toBe('Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14.');
+    expect(message).toBe('Unsupported OpenAI model. Use gpt-5.6-luna.');
     expect(message).not.toContain(model);
   });
 

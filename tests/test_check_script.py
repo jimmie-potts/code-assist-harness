@@ -261,14 +261,14 @@ def test_live_provider_marker_skips_without_explicit_opt_in() -> None:
         (
             ("--run-live-provider", "--live-provider-model", "unsafe-model-sentinel"),
             {"OPENAI_API_KEY": "syntactically-valid-key"},
-            "Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14.",
+            "Unsupported OpenAI model. Use gpt-5.6-luna.",
             "unsafe-model-sentinel",
         ),
         (
             (
                 "--run-live-provider",
                 "--live-provider-model",
-                "gpt-4.1-mini-2025-04-14",
+                "gpt-5.6-luna",
             ),
             {},
             "OPENAI_API_KEY is required and must be a valid local credential.",
@@ -278,7 +278,7 @@ def test_live_provider_marker_skips_without_explicit_opt_in() -> None:
             (
                 "--run-live-provider",
                 "--live-provider-model",
-                "gpt-4.1-mini-2025-04-14",
+                "gpt-5.6-luna",
             ),
             {
                 "OPENAI_API_KEY": "syntactically-valid-key",

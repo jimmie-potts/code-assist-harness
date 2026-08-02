@@ -1,5 +1,5 @@
 {
   "default_provider": "mock",
   "supported_providers": ["mock", "openai"],
-  "supported_openai_text_stream_models": ["gpt-4.1-mini-2025-04-14"]
+  "supported_openai_text_stream_models": ["gpt-5.6-luna"]
 }

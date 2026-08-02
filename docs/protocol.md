@@ -47,7 +47,7 @@ rejects a path under `/mnt` or a name ending in `.exe`. It also requires
 before `uv` can create or change the project environment. `REPOSITORY_ROOT` identifies the harness
 project for `uv`, while `--python VENV_PYTHON` fixes its prepared interpreter. The separately
 resolved `CANONICAL_WORKSPACE` identifies the one future target repository. `PROVIDER` defaults to
-`mock`; `openai` requires `EXACT_SNAPSHOT` to be `gpt-4.1-mini-2025-04-14`. TypeScript validates this
+`mock`; `openai` requires `EXACT_MODEL` to be `gpt-5.6-luna`. TypeScript validates this
 pair for early feedback and Python validates it again before SDK import. Provider/model selection is
 process configuration and never enters protocol stdin. The launch directory is
 the default workspace, and `--workspace PATH` selects an override relative to that launch directory

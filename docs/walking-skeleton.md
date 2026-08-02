@@ -274,7 +274,7 @@ deadline supervision, bounded cleanup, and transcript-v3 loop evidence around th
 [lesson](lessons/cah-022-loop-limits.md) and
 [visual companion](lessons/assets/cah-022-loop-limits.pptx) explain the shipped boundary.
 [CAH-023](../user-stories/cah-023-add-openai-responses-adapter.md) now adds the strict OpenAI Responses
-adapter and explicit `--provider openai --model gpt-4.1-mini-2025-04-14` launch path. Default launch,
+adapter and explicit `--provider openai --model gpt-5.6-luna` launch path. Default launch,
 default tests, and this guide remain on `MockSession`; workspace discovery, tools, and approvals are
 still absent.
 

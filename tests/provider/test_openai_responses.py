@@ -17,6 +17,7 @@ from code_assist_harness.protocol import OrderedEventWriter, SessionStartCommand
 from code_assist_harness.provider import (
     ProviderCompleted,
     ProviderFailed,
+    ProviderFailure,
     ProviderMessage,
     ProviderRequest,
     ProviderTextCompleted,
@@ -26,6 +27,7 @@ from code_assist_harness.provider import (
 )
 from code_assist_harness.provider.openai_config import OpenAIProviderConfiguration
 from code_assist_harness.provider.openai_responses import (
+    OPENAI_MAX_OUTPUT_TOKENS,
     OPENAI_RESPONSES_BASE_URL,
     REPOSITORY_INSTRUCTIONS_PREFIX,
     OpenAIAdapterCleanupError,
@@ -33,7 +35,7 @@ from code_assist_harness.provider.openai_responses import (
 )
 from code_assist_harness.provider_session import ProviderSession
 
-MODEL = "gpt-4.1-mini-2025-04-14"
+MODEL = "gpt-5.6-luna"
 API_KEY = "fake-openai-key-for-adapter-tests"
 RAW_SECRET = "raw-sdk-secret-that-must-not-cross"
 
@@ -196,8 +198,10 @@ def _success_events(
     base: int = 7,
     queued: bool = False,
     usage: tuple[int, int] | None = (11, 5),
+    reasoning: bool = False,
 ) -> list[dict[str, object]]:
     response_id = "resp_fake_023"
+    reasoning_id = "rs_fake_023"
     item_id = "msg_fake_023"
     text = "Bounded answer."
     part = {"type": "output_text", "text": text, "annotations": []}
@@ -208,6 +212,15 @@ def _success_events(
         "status": "completed",
         "content": [part],
     }
+    reasoning_item = {
+        "type": "reasoning",
+        "id": reasoning_id,
+        "summary": [],
+        "content": None,
+        "encrypted_content": RAW_SECRET,
+        "status": "completed",
+    }
+    message_output_index = 1 if reasoning else 0
     events: list[dict[str, object]] = [
         {
             "type": "response.created",
@@ -223,17 +236,39 @@ def _success_events(
                 "response": {"id": response_id},
             }
         )
+    events.append(
+        {
+            "type": "response.in_progress",
+            "sequence_number": 0,
+            "response": {"id": response_id},
+        }
+    )
+    if reasoning:
+        events.extend(
+            [
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 0,
+                    "output_index": 0,
+                    "item": {
+                        **deepcopy(reasoning_item),
+                        "status": "in_progress",
+                    },
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 0,
+                    "output_index": 0,
+                    "item": deepcopy(reasoning_item),
+                },
+            ]
+        )
     events.extend(
         [
             {
-                "type": "response.in_progress",
-                "sequence_number": 0,
-                "response": {"id": response_id},
-            },
-            {
                 "type": "response.output_item.added",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "item": {
                     "type": "message",
                     "id": item_id,
@@ -245,7 +280,7 @@ def _success_events(
             {
                 "type": "response.content_part.added",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
                 "part": {"type": "output_text", "text": "", "annotations": []},
@@ -253,7 +288,7 @@ def _success_events(
             {
                 "type": "response.output_text.delta",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
                 "delta": "Bounded ",
@@ -262,7 +297,7 @@ def _success_events(
             {
                 "type": "response.output_text.delta",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
                 "delta": "answer.",
@@ -271,7 +306,7 @@ def _success_events(
             {
                 "type": "response.output_text.done",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
                 "text": text,
@@ -280,7 +315,7 @@ def _success_events(
             {
                 "type": "response.content_part.done",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
                 "part": deepcopy(part),
@@ -288,7 +323,7 @@ def _success_events(
             {
                 "type": "response.output_item.done",
                 "sequence_number": 0,
-                "output_index": 0,
+                "output_index": message_output_index,
                 "item": deepcopy(message),
             },
             {
@@ -300,7 +335,17 @@ def _success_events(
                     "status": "completed",
                     "error": None,
                     "incomplete_details": None,
-                    "output": [deepcopy(message)],
+                    "reasoning": {
+                        "effort": "none",
+                        "context": "current_turn",
+                        "summary": None,
+                        "mode": "standard",
+                    },
+                    "output": (
+                        [deepcopy(reasoning_item), deepcopy(message)]
+                        if reasoning
+                        else [deepcopy(message)]
+                    ),
                     "usage": (
                         None
                         if usage is None
@@ -308,6 +353,9 @@ def _success_events(
                             "input_tokens": usage[0],
                             "output_tokens": usage[1],
                             "total_tokens": usage[0] + usage[1],
+                            "output_tokens_details": {
+                                "reasoning_tokens": 2 if reasoning else 0,
+                            },
                         }
                     ),
                 },
@@ -381,6 +429,8 @@ def test_success_maps_request_and_stream_without_constructing_resources_early() 
                 {"role": "assistant", "content": "The harness owns policy."},
                 {"role": "user", "content": "Now summarize it."},
             ],
+            "reasoning": {"effort": "none", "context": "current_turn"},
+            "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
             "stream": True,
             "background": False,
             "store": False,
@@ -393,6 +443,99 @@ def test_success_maps_request_and_stream_without_constructing_resources_early() 
     assert "tool_choice" not in responses.calls[0]
     assert stream.close_calls == 1
     assert client.close_calls == 1
+
+
+def test_optional_opaque_reasoning_prefix_is_validated_but_never_published() -> None:
+    async def scenario():
+        stream = _FakeStream(_success_events(reasoning=True))
+        provider, _responses, _client, _created = _provider_with(stream)
+        return await _collect(provider.start(_request()))
+
+    observations = asyncio.run(scenario())
+
+    assert observations == [
+        ProviderTextDelta("Bounded "),
+        ProviderTextDelta("answer."),
+        ProviderTextCompleted("Bounded answer."),
+        ProviderUsageReported(11, 5),
+        ProviderCompleted(),
+    ]
+    assert RAW_SECRET not in repr(observations)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda events: events[2]["item"].update(
+            summary=[{"type": "summary_text", "text": RAW_SECRET}]
+        ),
+        lambda events: events[3]["item"].update(id="other"),
+        lambda events: events[3]["item"].update(status="incomplete"),
+        lambda events: events[3]["item"].update(status=[]),
+        lambda events: events[4].update(output_index=0),
+        lambda events: events[11]["response"]["output"][0].update(id="other"),
+        lambda events: events[11]["response"].update(
+            reasoning={"effort": "medium", "context": "all_turns"}
+        ),
+        lambda events: events[11]["response"].update(reasoning="medium"),
+        lambda events: events[11]["response"].update(reasoning={}),
+        lambda events: events[11]["response"].update(
+            reasoning={"effort": [], "context": "current_turn"}
+        ),
+        lambda events: events[11]["response"].update(
+            reasoning={
+                "effort": "none",
+                "context": "current_turn",
+                "generate_summary": "detailed",
+            }
+        ),
+        lambda events: events[11]["response"]["usage"]["output_tokens_details"].update(
+            reasoning_tokens=6
+        ),
+    ],
+)
+def test_malformed_or_inconsistent_reasoning_prefix_fails_closed(mutate) -> None:
+    async def scenario():
+        events = _success_events(reasoning=True)
+        mutate(events)
+        stream = _FakeStream(events)
+        provider, _responses, _client, _created = _provider_with(stream)
+        return await _collect(provider.start(_request()))
+
+    observations = asyncio.run(scenario())
+
+    assert isinstance(observations[-1], ProviderFailed)
+    assert observations[-1].failure.code == "invalid_response"
+    assert RAW_SECRET not in repr(observations)
+
+
+def test_reasoning_summary_stream_event_is_not_part_of_the_public_text_contract() -> None:
+    async def scenario():
+        events = _success_events(reasoning=True)
+        events[3] = {
+            "type": "response.reasoning_summary_text.delta",
+            "sequence_number": events[3]["sequence_number"],
+            "item_id": "rs_fake_023",
+            "output_index": 0,
+            "summary_index": 0,
+            "delta": RAW_SECRET,
+        }
+        stream = _FakeStream(events)
+        provider, _responses, _client, _created = _provider_with(stream)
+        return await _collect(provider.start(_request()))
+
+    observations = asyncio.run(scenario())
+
+    assert observations == [
+        ProviderFailed(
+            ProviderFailure(
+                code="invalid_response",
+                message="OpenAI returned an invalid response.",
+                retryable=False,
+            )
+        )
+    ]
+    assert RAW_SECRET not in repr(observations)
 
 
 def test_empty_repository_instructions_omit_request_field_and_usage() -> None:
@@ -460,7 +603,7 @@ def test_absent_none_or_empty_logprobs_are_compatible(representation: str) -> No
             ["Bounded ", "answer."],
         ),
         (
-            lambda events: events[9]["response"].update(model="gpt-4.1-mini"),
+            lambda events: events[9]["response"].update(model="gpt-5.6"),
             ["Bounded ", "answer."],
         ),
         (lambda events: events[9]["response"].update(status="failed"), ["Bounded ", "answer."]),

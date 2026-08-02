@@ -19,7 +19,7 @@ from code_assist_harness.provider.openai_config import (
     ProviderConfigurationError,
 )
 
-VALID_MODEL = "gpt-4.1-mini-2025-04-14"
+VALID_MODEL = "gpt-5.6-luna"
 FAKE_API_KEY = "FAKE_CAH_RUNTIME_OPENAI_KEY_023"
 
 

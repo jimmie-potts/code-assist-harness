@@ -4,8 +4,8 @@ export const SUPPORTED_RUNTIME_PROVIDERS = ['mock', 'openai'] as const;
 /** Default provider selected when the user does not supply `--provider`. */
 export const DEFAULT_RUNTIME_PROVIDER = 'mock' as const;
 
-/** The one reviewed OpenAI snapshot supported by CAH-023's text-only stream automaton. */
-export const OPENAI_TEXT_STREAM_MODEL = 'gpt-4.1-mini-2025-04-14' as const;
+/** The one reviewed OpenAI model supported by CAH-023's Luna stream automaton. */
+export const OPENAI_TEXT_STREAM_MODEL = 'gpt-5.6-luna' as const;
 
 /** Exact OpenAI model allowlist kept in parity with the authoritative Python configuration. */
 export const SUPPORTED_OPENAI_TEXT_STREAM_MODELS: ReadonlySet<string> = new Set([
@@ -18,13 +18,13 @@ const DISALLOWED_MODEL_CODE_POINT = /[\p{White_Space}\p{C}]/u;
 /** A provider name that may cross the shell-free TypeScript-to-Python launch boundary. */
 export type RuntimeProvider = (typeof SUPPORTED_RUNTIME_PROVIDERS)[number];
 
-/** The exact OpenAI snapshot whose stream grammar this repository implements. */
+/** The exact OpenAI model whose stream grammar this repository implements. */
 export type SupportedOpenAITextStreamModel = typeof OPENAI_TEXT_STREAM_MODEL;
 
 /**
  * Validated provider selection owned by application configuration, not the NDJSON protocol.
  *
- * Mock selection never carries a model. OpenAI selection always carries the one exact snapshot
+ * Mock selection never carries a model. OpenAI selection always carries the one exact model
  * whose event grammar has been reviewed and implemented by the harness.
  */
 export type ProviderSelection =
@@ -77,7 +77,7 @@ export function resolveProviderSelection(
   }
   if (!isLocallyValidModelId(model) || !isSupportedOpenAITextStreamModel(model)) {
     throw new ProviderConfigurationError(
-      'Unsupported OpenAI model. Use gpt-4.1-mini-2025-04-14.',
+      'Unsupported OpenAI model. Use gpt-5.6-luna.',
     );
   }
   return {provider: 'openai', model};

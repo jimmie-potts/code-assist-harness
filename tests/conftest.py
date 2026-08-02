@@ -23,7 +23,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         default=None,
         metavar="MODEL",
-        help="exact repository-allowlisted model snapshot for a live-provider test",
+        help="exact repository-allowlisted model ID for a live-provider test",
     )
 
 

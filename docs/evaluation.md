@@ -183,13 +183,15 @@ restricted executor.
 
 CAH-023 includes one minimal live OpenAI smoke evaluation that is optional, explicitly selected,
 credential-gated, and excluded from default validation and default CI even when credentials are
-present. It runs only with `--run-live-provider`, `--live-provider-model
-gpt-4.1-mini-2025-04-14`, and `OPENAI_API_KEY`; ambient credentials alone never select it. After
-supplying the credential through the process environment, run the one smoke explicitly:
+present. It runs only with `--run-live-provider`, `--live-provider-model gpt-5.6-luna`, and
+`OPENAI_API_KEY`; ambient credentials alone never select it. After creating the ignored root
+`dev.env` as documented in the README, run the one smoke explicitly through its strict reader:
 
 ```bash
-uv run pytest -q -m live_provider tests/provider/test_openai_live.py \
-  --run-live-provider --live-provider-model gpt-4.1-mini-2025-04-14
+./scripts/with-openai-dev-key \
+  uv run --offline --frozen --no-sync --no-env-file \
+  pytest -q -m live_provider tests/provider/test_openai_live.py \
+  --run-live-provider --live-provider-model gpt-5.6-luna
 ```
 
 This command may incur provider cost and is supplemental rather than completion evidence. Later live

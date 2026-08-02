@@ -35,11 +35,13 @@ not enter the provider-backed path. A storage failure becomes one recoverable TU
 changing the session outcome. Use `--no-transcript` to disable only these local files.
 The default launch still composes `MockSession`, so the protocol-v1 TUI experience remains the
 deterministic three-delta mock. Explicitly selecting `--provider openai --model
-gpt-4.1-mini-2025-04-14` instead composes the first real adapter and runs one harness-owned
+gpt-5.6-luna` instead composes the first real adapter and runs one harness-owned
 `ProviderSession` under the same four immutable hard limits. The adapter owns SDK request/event
 translation, fixed safe failure mapping, and one-operation stream/client cleanup; SDK objects and
 credentials do not enter provider-neutral, protocol, or transcript types. The request is text-only,
-foreground, `background=false`, and `store=false`; provider tool and reasoning output fail closed.
+foreground, `background=false`, and `store=false`, with reasoning effort disabled and generated
+tokens capped. Luna may contribute one opaque empty reasoning envelope before its message; reasoning
+text, summaries, and provider tools still fail closed and never cross the provider port.
 Default tests use SDK fakes with network denied, and the credentialed live smoke remains an explicit
 non-default check. Each provider session owns a fresh limit tracker, and its deadline excludes local
 event and transcript sink latency. Completion, failure, cancellation, deadline expiry, teardown, and
@@ -127,10 +129,11 @@ See [architecture.md](docs/architecture.md) for the complete target structure an
 - npm 9 or newer
 
 An OpenAI API key is not needed for the walking skeleton, default launch, or default tests. The
-adapter consumes `OPENAI_API_KEY` only after OpenAI and the exact model snapshot are explicitly
+adapter consumes `OPENAI_API_KEY` only after OpenAI and the exact model are explicitly
 selected; Python rejects every other ambient `OPENAI_*` setting before SDK import. CAH-011 may inspect
 a recognized credential value solely to seed transcript redaction. Credentials and `.env` files must
-never be committed.
+never be committed. The optional repository-root `dev.env` is ignored, stores one local plaintext
+key, and is read only by the explicit `scripts/with-openai-dev-key` helper.
 
 ## Setup, launch, and checks
 
@@ -181,15 +184,37 @@ supervised shell from the repository root inside Ubuntu WSL:
 ./scripts/run-tui
 ```
 
-That command selects the deterministic mock. To opt into the real bounded turn, provide
-`OPENAI_API_KEY` through the process environment and select the exact reviewed snapshot:
+That command selects the deterministic mock. To keep a local development key outside shell history,
+create the ignored repository-root `dev.env` from an interactive Bash prompt:
 
 ```bash
-./scripts/run-tui --provider openai --model gpt-4.1-mini-2025-04-14
+(
+  umask 077
+  IFS= read -rsp 'OpenAI API key: ' cah_openai_key
+  printf '\n'
+  printf 'OPENAI_API_KEY=%s\n' "$cah_openai_key" > dev.env
+  chmod 600 dev.env
+)
+```
+
+The file may contain blank lines and comments, but exactly one non-empty
+`OPENAI_API_KEY=...` assignment and no other setting. It remains plaintext; mode `0600` limits access
+to its owner but is not encryption. Keep provider/model selection out of the file. Then opt into the
+real bounded turn through the explicit reader and the reviewed Luna model:
+
+```bash
+./scripts/with-openai-dev-key \
+  ./scripts/run-tui --provider openai --model gpt-5.6-luna --no-transcript
 ```
 
 Provider and model are child-process configuration, not NDJSON fields. TypeScript validates the pair
 for early feedback and Python validates it again before importing or constructing the SDK adapter.
+The helper never sources or evaluates `dev.env`; it rejects symlinks, permissions other than `0600`,
+an already exported key, malformed assignments, and unsafe whitespace/control characters in the key
+before preserving the command arguments with `exec`. It runs through Ubuntu's absolute system Python
+in isolated mode so ambient Python import settings cannot alter credential admission. Direct
+`run-tui`, `uv`, and `./scripts/check` commands never read `dev.env` automatically, and the canonical
+gate removes provider credentials from its children.
 
 The directory from which the launcher is invoked is the default workspace. Select a different
 single workspace with an absolute path, or with a path relative to that launch directory:
