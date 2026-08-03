@@ -49,10 +49,12 @@ These read-only tools may run automatically after schema validation and policy c
 as `find`, `grep`, `git status`, or `cat` are still subprocesses and require command approval; the
 model should prefer the native tools for routine inspection.
 
-Each tool input and result is validated with Pydantic v2 at the model boundary. Paths are resolved
-against the explicit workspace, symlink escapes are rejected, ignored or prohibited locations are
-excluded, and file/count/byte limits are enforced before content enters context. Binary files and
-files over configured size limits return structured explanations rather than unbounded data.
+Each model-provided tool input first passes the advertised exact-key gate, then its fields and each
+tool result are validated with Pydantic v2. This order prevents native defaults from filling a key the
+model omitted while preserving those defaults for direct Python callers. Paths are resolved against
+the explicit workspace, symlink escapes are rejected, ignored or prohibited locations are excluded,
+and file/count/byte limits are enforced before content enters context. Binary files and files over
+configured size limits return structured explanations rather than unbounded data.
 
 CAH-024 will supply the earlier, tool-independent path primitive for this flow: an immutable Python
 boundary around the already selected canonical root plus contained, workspace-relative target
@@ -162,7 +164,9 @@ provider, registry, or loop behavior.
 
 The [implementation-ready story](../user-stories/cah-026-define-repository-read-contracts.md) owns
 nested Git-compatible ignore evaluation through PathSpec, a non-overridable credential/VCS denylist,
-shared text rules, and fixed safe failures. It performs no user-requested read operation itself.
+shared text rules, and fixed safe failures. Ignore rules are evaluated independently against both the
+normalized supplied path and its resolved canonical target, with either ignored decision denying
+access. It performs no user-requested read operation itself.
 
 ### Planned CAH-027 through CAH-029 — Add bounded native read operations
 
@@ -174,7 +178,8 @@ The implementation-ready stories separate
 [one bounded text read](../user-stories/cah-028-read-bounded-text-file.md), and
 [literal text search](../user-stories/cah-029-search-repository-text.md). All reuse CAH-026, resolve
 again before access, return deterministic workspace-relative evidence, and stay independent of
-provider/tool registration.
+provider/tool registration. Literal-search queries reject the complete line-boundary repertoire used
+by Python `str.splitlines()`, including its C0, C1, and Unicode separators.
 
 ### Planned CAH-030 — Build and explain budgeted context
 

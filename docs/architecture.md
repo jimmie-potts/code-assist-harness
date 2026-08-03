@@ -192,10 +192,12 @@ teardown wins.
 
 For M2, a plain task enters context selection with scope `.` and empty `focus_paths` and
 `search_queries`; deterministic evaluations may inject explicit values through their composition
-seam. Explicit OpenAI selection also authorizes bounded, policy-admitted repository context and tool
-results to leave the local machine for that session. Path admission is not content-level secret
-scanning, so the configuration and CLI must warn that an allowed source file may still contain
-sensitive text. The mock path remains local.
+seam. Planned CAH-037 explicitly composes the M2 limit profile as four model turns, 120 provider-work
+seconds, 4,096 assistant-output bytes, and three observed tool calls; it does not inherit the current
+one-turn/one-call constructor defaults. Explicit OpenAI selection also authorizes bounded,
+policy-admitted repository context and tool results to leave the local machine for that session. Path
+admission is not content-level secret scanning, so the configuration and CLI must warn that an allowed
+source file may still contain sensitive text. The mock path remains local.
 
 CAH-010 keeps one-session lifecycle meaning separate from process effects and conversation history.
 `task.submitted`, `cancel.requested`, `approval.requested`, and `approval.resolved` are trusted domain
@@ -498,12 +500,16 @@ typed read registry needed by the M2 loop; later E4 work extends that seam for s
 CAH-032 through CAH-036 refine the provider-neutral tool exchange, atomic full-response admission,
 one request/call/result/response round trip, bounded iteration, and strict OpenAI Responses
 translation. A response is fully buffered and validated before final text is published or a tool is
-dispatched. Synchronous native handlers are bounded and non-preemptive, with cancellation/deadline
+dispatched. Decoded model arguments must contain the exact advertised key set before native Pydantic
+validation can apply defaults; direct Python callers keep the unchanged native models and defaults.
+Synchronous native handlers are bounded and non-preemptive, with cancellation/deadline
 checks before and after execution; each provider-facing result is one canonical compact JSON
 success-or-error envelope capped at 65,536 bytes inclusive, with oversize output rejected rather
 than truncated. OpenAI stateless replay under `store=false` preserves bounded canonical full
 reasoning-item envelopes—including required IDs and item fields, not only encrypted content—even with
-`current_turn` reasoning context.
+`current_turn` reasoning context. Every such request sets exactly
+`include=["reasoning.encrypted_content"]`, including the initial turn, so an accepted reasoning item
+contains the opaque payload required for the next stateless request.
 
 This is function calling, not an MCP implementation or a claim of direct registry compatibility. A
 future generalized registry port may snapshot and re-admit remote catalogs only after server trust,

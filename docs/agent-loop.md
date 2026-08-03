@@ -426,9 +426,11 @@ default CI.
 
 This [planned story](../user-stories/cah-032-define-provider-tool-contract.md) adds immutable,
 SDK-free selected context, strict function-tool definitions, calls, results, and ordered history to
-the provider port and strict fake. The full canonical request projection is capped at 512 KiB. It
-performs no dispatch and admits no second turn. An MCP adapter may later translate into these values,
-but MCP transport and remote trust are separate work.
+the provider port and strict fake. Its pure exact-key gate rejects omitted model-facing fields before
+native Pydantic can apply defaults while leaving direct-Python model defaults unchanged. The full
+canonical request projection is capped at 512 KiB. It performs no dispatch and admits no second turn.
+An MCP adapter may later translate into these values, but MCP transport and remote trust are separate
+work.
 
 ### CAH-033 — Stage and validate one tool-aware response
 
@@ -438,8 +440,10 @@ but MCP transport and remote trust are separate work.
 This [planned story](../user-stories/cah-033-stage-and-validate-tool-aware-response.md) stages every
 observation until the whole response is known to be either final text or exactly one tool call.
 Only an accepted final-text branch may publish text, and only an accepted tool-call branch may be
-returned for later dispatch. Premature EOF, provider failure, mixed text/call output, a second call,
-or invalid terminal ordering produces zero publication and zero dispatch. Optional provider usage
+returned for later dispatch. A normalized provider failure may terminate any otherwise valid
+nonterminal prefix: the full prefix is discarded, its bounded failure classification is preserved,
+and publication and dispatch remain zero. Premature EOF, mixed text/call output, a second call, or
+invalid terminal ordering also produces zero publication and zero dispatch. Optional provider usage
 remains candidate evidence until accepted final text completes the session.
 
 ### CAH-034 — Run one read-tool round trip
@@ -449,10 +453,11 @@ remains candidate evidence until accepted final text completes the session.
 
 This [planned story](../user-stories/cah-034-run-one-read-tool-round-trip.md) implements exactly two
 fake-backed model turns around one native read dispatch. It preserves the exact selected context and
-registry-derived catalog, validates lookup and arguments in the harness, dispatches only after
-CAH-033 accepts the complete first response, and replays one canonical correlated result envelope
-into the follow-up request. Synchronous native reads are bounded and non-preemptive; cancellation is
-checked before and after execution, and a late result is discarded when cancellation wins.
+registry-derived catalog, gates exact model-facing keys before native Pydantic validation, dispatches
+only after CAH-033 accepts the complete first response, and replays one canonical correlated result
+envelope into the follow-up request. Synchronous native reads are bounded and non-preemptive;
+cancellation is checked before and after execution, and a late result is discarded when cancellation
+wins.
 
 ### CAH-035 — Run the bounded agent loop
 
@@ -465,6 +470,8 @@ permits one call per turn, keeps all budgets cumulative, and retains exactly one
 observation when that limit wins, matching CAH-022 evidence semantics. It fails closed on mixed,
 multiple, or parallel call shapes. Provider usage is optional session-aggregate evidence and is
 admitted only alongside accepted final assistant text, never as a per-tool-turn lifecycle fact.
+Planned CAH-037's composition root supplies the complete M2 profile explicitly as four turns, 120
+seconds, 4,096 output bytes, and three observed calls instead of inheriting one-turn/one-call defaults.
 
 ### CAH-036 — Map OpenAI Responses tool calls
 
@@ -476,7 +483,9 @@ definitions, scoped instructions, untrusted repository evidence, streamed calls,
 call/result replay behind the existing adapter. With `store=false`, replay includes each bounded
 canonical full reasoning-item envelope from accepted prior turns—even while reasoning context remains
 `current_turn`—so required IDs and item fields are not reduced to encrypted content alone. The core
-harness never interprets those envelopes. The adapter sets `parallel_tool_calls=false`, omits
+harness never interprets those envelopes. To ensure every accepted reasoning item has the payload
+needed for later replay, every request—including turn one—sets exactly
+`include=["reasoning.encrypted_content"]`. The adapter sets `parallel_tool_calls=false`, omits
 `previous_response_id`, and rejects hosted or remote-MCP tools. Explicit OpenAI selection authorizes
 bounded admitted repository-content egress for that session and must warn that allowed files are not
 content-secret-scanned. Default evidence remains SDK-fake and network-free.

@@ -17,7 +17,8 @@
 ## Quick summary
 
 CAH-037 composes M2 and proves explain/plan outcomes with strict fakes. Ordinary runtime starts with
-only root-scoped instructions; evaluation alone may inject explicit focus/search context.
+only root-scoped instructions and explicitly receives the M2 four-turn/three-call limit profile;
+evaluation alone may inject explicit focus/search context.
 
 ## Learning objectives
 
@@ -51,6 +52,8 @@ the model explores explicitly through tools; only eval/test assembly gets the in
 
 - **Composition root:** outer module that wires concrete implementations to domain ports.
 - **Production default:** invariant used by ordinary interactive sessions.
+- **Composition profile:** exact dependency values selected by the runtime instead of inherited
+  constructor defaults.
 - **Evaluation injection:** explicit controlled dependency used only by named cases/tests.
 - **Grounding evidence:** exact admitted source/tool observations supporting an answer.
 - **Mutation:** deliberate test change proving a claimed check can fail.
@@ -62,6 +65,7 @@ Ink TUI               Python runtime composition                 Provider
  task ----------> ContextBuildRequest(".", (), ())
                   + workspace/instructions/context
                   + registry + CAH-035 bounded loop ------> strict fake (default eval)
+                    limits = (turns=4, seconds=120, bytes=4096, calls=3)
                   + CAH-036 OpenAI adapter                 \-> explicit live opt-in
                               |
                     four native read tools
@@ -79,11 +83,12 @@ plan performs no edit.
 ## Practical walkthrough
 
 1. Compose only public CAH-025 through CAH-036 boundaries.
-2. Capture the exact empty-focus/search runtime request.
-3. Build a minimal fixture with instructions, relevant source, and distractors.
-4. Inject an explicit context request only in the named evaluation assembly.
-5. Assert exact model history/tool dispatch before checking narrow answer facts.
-6. Mutate every safety/evidence rule and run twice for identical results.
+2. Construct the exact four-field M2 limit profile at the composition root.
+3. Capture the exact empty-focus/search runtime request.
+4. Build a minimal fixture with instructions, relevant source, and distractors.
+5. Inject an explicit context request only in the named evaluation assembly.
+6. Assert exact model history/tool dispatch before checking narrow answer facts.
+7. Mutate every safety/evidence rule and run twice for identical results.
 
 ## Implementation code samples
 
@@ -95,10 +100,21 @@ context_request = ContextBuildRequest(
     focus_paths=(),
     search_queries=(),
 )
-runtime = compose(context_request_factory=lambda _task: context_request)
+m2_limits = LoopLimits(
+    max_model_turns=4,
+    provider_work_timeout_seconds=120,
+    max_assistant_output_bytes=4096,
+    max_observed_tool_calls=3,
+)
+runtime = compose(
+    context_request_factory=lambda _task: context_request,
+    loop_limits=m2_limits,
+)
 ```
 
-The task does not influence initial source selection.
+The task does not influence initial source selection. The composition root does not rely on the
+existing one-turn/one-call constructor defaults, so a future default change cannot silently change
+the M2 contract.
 
 ### Planned pseudocode: evaluation-only injection
 
@@ -118,6 +134,7 @@ The explicit request is case evidence, not a protocol option or production fallb
 | Scenario | Safe result | Evidence |
 | --- | --- | --- |
 | runtime derives search from task | composition test fails | captured exact default differs |
+| composition uses bare loop defaults | composition test fails | exact `(4, 120, 4096, 3)` profile differs |
 | distractor read | case fails | exact dispatch mismatch |
 | forbidden source/claim | case fails | mutation rule triggers |
 | invalid eval request | reject before provider | zero starts |
@@ -162,11 +179,13 @@ classes; adopt model-graded or live scoring only after labeled calibration can q
 1. Explain why exact dispatch evidence is stronger than one answer substring.
 2. Add a keyword-sharing distractor and predict the expected calls.
 3. Prove evaluation injection cannot change a later ordinary session.
-4. Teach back what M2 proves and what MCP, editing, and secret scanning still require.
+4. Explain why explicit composition is safer than relying on the current `LoopLimits()` defaults.
+5. Teach back what M2 proves and what MCP, editing, and secret scanning still require.
 
 ## Key takeaways
 
 - Composition tests protect architectural ownership at the vertical seam.
+- The composition root supplies the exact M2 limits; provider choice and constructor defaults do not.
 - Ordinary context defaults are explicit and do not hide task-derived retrieval.
 - Deterministic tool/source evidence is authoritative; optional live output is observational.
 

@@ -24,6 +24,7 @@ search complexity.
 After completing this unit, you should be able to:
 
 - define literal, case-sensitive, non-overlapping matching;
+- define “one line” using Python's complete `str.splitlines()` separator repertoire;
 - bound search by recursive depth, files, source bytes, matches, and excerpt bytes;
 - explain direct-file failure versus directory-search omission; and
 - preserve canonical provenance and deterministic result order.
@@ -41,12 +42,19 @@ columns count Unicode scalars, while budgets count UTF-8 bytes. A common misconc
 limiting matches bounds the scan. Candidate-file and aggregate-byte limits bound work before a match
 is found.
 
+Another common misconception is that only `\n` and `\r` split lines. Python also recognizes vertical
+tab, form feed, three information separators, NEL, and Unicode line/paragraph separators. Testing
+`len(query.splitlines()) == 1` is insufficient because a trailing separator still yields one element;
+the request boundary rejects every recognized separator directly.
+
 ## Key concepts
 
 - **Canonical order:** path bytes, then 1-based line and column.
 - **Safe excerpt:** at most 512 UTF-8 bytes, always containing the complete match.
 - **Directory omission:** unsafe candidates become aggregate counts, not leaked labels.
 - **Explicit stop reason:** match, file, byte, or listing bounds explain truncation.
+- **Closed one-line grammar:** no LF, VT, FF, CR/CRLF, FS, GS, RS, NEL, Unicode line separator, or
+  Unicode paragraph separator is admitted in a query.
 
 ## Architecture and design
 
@@ -72,8 +80,8 @@ reproducible work/output limits, not token estimates.
 
 ## Practical walkthrough
 
-1. Apply CAH-026 scalar-text admission, then validate one non-empty, one-line, at-most-256-byte
-   query and `max_depth` in the closed range 1-8.
+1. Apply CAH-026 scalar-text admission, then validate one non-empty, at-most-256-byte query with none
+   of Python `str.splitlines()`'s recognized separators, and `max_depth` in the closed range 1-8.
 2. Make exactly one CAH-027 recursive request with default 4 or the exact admitted depth, and
    re-admit each canonical candidate before read.
 3. Apply CAH-028 text/size rules and search non-overlapping occurrences.
@@ -101,6 +109,8 @@ Candidates inherit policy, matching has no regex interpretation, excerpt constru
 ## Failure scenarios to study
 
 - Regex metacharacters are matched literally rather than executed.
+- LF, VT, FF, CR/CRLF, FS/GS/RS, NEL, and Unicode line/paragraph separators fail even at the end of a
+  query; nearby non-separator controls prove the check is not an overbroad control-character ban.
 - An invalid-text direct file fails; the same file in directory search increments a safe count.
 - The 501st candidate or first file beyond 2 MiB is not partially read.
 - A long multibyte line is ellipsized without splitting the match or a UTF-8 sequence.
@@ -142,15 +152,18 @@ known-file evaluations show a measurable miss rate that cannot be fixed by bette
 ## Practical exercises
 
 1. Compare literal results for `a.*b`, `A`, and `a`.
-2. Calculate line/column versus UTF-8 byte positions for a multibyte string.
-3. Snapshot the CAH-027 request for omitted depth and explicit depths 1 and 8; prove 0 and 9 execute
+2. Build a table of every Python `str.splitlines()` separator and explain why a trailing-separator
+   test must inspect the input rather than only the number of split results.
+3. Calculate line/column versus UTF-8 byte positions for a multibyte string.
+4. Snapshot the CAH-027 request for omitted depth and explicit depths 1 and 8; prove 0 and 9 execute
    no listing.
-4. Test each candidate and output limit below, at, and above.
-5. Teach back: which budgets limit work before any result reaches an LLM?
+5. Test each candidate and output limit below, at, and above.
+6. Teach back: which budgets limit work before any result reaches an LLM?
 
 ## Key takeaways
 
 - The harness owns literal search semantics and budgets.
+- Query admission uses a complete, explicit one-line grammar rather than an LF/CR shortcut.
 - Policy reuse, fresh admission, canonical order, and explicit truncation are the invariants.
 - Richer search improves recall but adds query, index, and operational complexity.
 
@@ -159,6 +172,8 @@ known-file evaluations show a measurable miss rate that cannot be fixed by bette
 - **Literal search:** Exact character matching without regex interpretation.
 - **Non-overlapping:** Scanning resumes after the complete previous match.
 - **Excerpt:** Bounded matching-line context returned with provenance.
+- **Line boundary:** Any separator that Python `str.splitlines()` recognizes, including Unicode and
+  selected C0/C1 controls.
 
 ## Further reading
 

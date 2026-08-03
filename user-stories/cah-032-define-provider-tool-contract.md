@@ -34,6 +34,9 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
 - Add one pure harness bridge that maps CAH-031 registry descriptors and native Pydantic input models
   into the portable provider definitions; neither the registry nor provider-domain package imports
   the other.
+- Add one pure model-facing argument-key gate that accepts an already decoded JSON object and checks
+  its exact key set against the portable definition before native Pydantic validation can apply a
+  default. Keep the native request models and their direct-Python defaults unchanged.
 - Add exact canonicalization plus strict Unicode-scalar/UTF-8 validation and bounded,
   content-suppressed representations for identifiers, descriptions, schemas, arguments, and result
   envelopes.
@@ -74,6 +77,13 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
   shape, make every property model-required, canonicalize, and return all definitions atomically in
   registry order. `ProviderToolDefinition` has no `from_descriptor` method, the registry does not
   import provider models, and no hand-maintained second tool catalog exists.
+- The separate pure `require_provider_tool_argument_keys(definition, arguments)` gate accepts only
+  an already JSON-decoded object and compares its keys exactly with the definition's canonical
+  `required` names. Missing keys—including fields for which the native Pydantic model has a
+  default—and additional keys fail with a bounded content-safe validation error before
+  `model_validate(...)` is called. The gate neither parses JSON nor performs native type validation,
+  coercion, lookup, or dispatch. It does not modify the CAH-031 request models: trusted direct Python
+  callers may still construct and validate those native models with their existing defaults.
 
 ### Calls, result envelopes, and history
 
@@ -108,8 +118,9 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
 - Available definitions are an immutable ordered tuple with unique names. Empty definitions retain
   the exact CAH-023 text-only request semantics.
 - Native request defaults remain available to direct Python callers, but the bridge removes
-  `default` annotations and makes every field model-required. This avoids an adapter silently
-  applying provider-specific default semantics.
+  `default` annotations and makes every field model-required. The raw-key gate enforces that
+  distinction before native Pydantic validation, avoiding either an adapter or the native model
+  silently filling a value the model omitted.
 - `ProviderToolCallRequested` is still only an observation. Neither its construction nor the fake
   parses arguments, performs lookup, executes a tool, or authorizes another turn.
 - Fake request mismatch diagnostics remain bounded and content-safe: they may identify a structural
@@ -129,7 +140,8 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
   strict UTF-8 decode, and exact equality. Lone surrogates and literal NUL are rejected; valid
   Unicode scalar values remain unchanged and are never normalized. Identifier grammars apply after
   this check. The raw argument string may contain the literal characters of an escaped JSON value
-  such as `\\u0000`, but not an actual NUL; CAH-033 owns argument parsing and native-field admission.
+  such as `\\u0000`, but not an actual NUL; CAH-034 owns JSON decoding, the CAH-032 key gate, and
+  subsequent native-field admission.
 - Bounds below count the strict UTF-8 bytes of the complete value named. Rejection is atomic and
   never truncates a string, schema, result, history, or request projection.
 
@@ -182,7 +194,10 @@ bytes.
    legacy instruction-only requests remain valid, and mixed legacy/new context is rejected.
 8. Every owned model-facing string proves strict Unicode-scalar/UTF-8 round-trip admission and fixed
    byte boundaries without normalization or content leakage.
-9. No dispatch, extra model turn, OpenAI mapping, MCP transport, protocol, or TUI behavior is added.
+9. An already decoded model-facing argument object must contain exactly every canonical required key
+   before native Pydantic validation runs; omitted defaulted fields and extras fail while direct
+   Python callers retain the native request models' defaults.
+10. No dispatch, extra model turn, OpenAI mapping, MCP transport, protocol, or TUI behavior is added.
 
 ## Acceptance-to-test matrix
 
@@ -192,9 +207,9 @@ bytes.
 | 4, 8 | Call tests exercise the ID grammar's first/last/invalid characters and lengths 1/256/257; string tests accept unchanged multibyte scalars and reject high/low lone surrogates plus literal NUL before fake/provider work. Result snapshots prove byte-for-byte CAH-031 success reuse and the exact error envelope, then reject status/key mismatch, extras, floats, malformed/noncanonical JSON, and 65,537-byte output without leaks. |
 | 2 | Table tests cover valid text-only and call/result histories plus orphan, duplicate, unresolved, and out-of-order failures. |
 | 5 | Strict-fake tests accept one exact tool request and reject changed order, definition, call, and result fields with content-safe mismatch text. |
-| 6 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. |
+| 6, 9 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. Argument-gate tests use a native model with a default, prove an omitted defaulted key and an extra key fail before a spy `model_validate` call, prove the exact key set reaches native validation unchanged, and prove direct native construction still applies the default. |
 | 7 | Context-projection tests assert exact order/provenance/content, report omission, inherited bounds, legacy compatibility, and mixed-representation rejection. |
-| 9 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
+| 10 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
 
 ## Validation
 
@@ -203,6 +218,8 @@ bytes.
 - Snapshot canonical schema JSON for all four native definitions and both result-envelope statuses.
   Cover strict scalar round-trip, every call-ID grammar boundary, complete envelope bytes at
   65,536/65,537, and insertion-order-independent canonicalization.
+- Run deterministic argument-key tests that prove missing and additional model-facing keys fail
+  before native Pydantic validation/default application while direct native callers retain defaults.
 - Re-run existing text-only adapter/session tests unchanged or with narrow construction updates.
 - Run the canonical network-free repository gate.
 
@@ -225,8 +242,8 @@ changes are permitted.
 
 ## Definition of done
 
-- Exact constructors, schema table/canonicalization, call-ID grammar, result envelopes, and fake
-  behavior have happy and meaningful failure tests.
+- Exact constructors, schema table/canonicalization, pre-Pydantic argument-key gate, call-ID grammar,
+  result envelopes, and fake behavior have happy and meaningful failure tests.
 - Existing text-only provider behavior remains compatible and the provider port remains SDK-free.
 - Production-code churn does not exceed 600 lines; any broader schema or orchestration concern is
   split out.

@@ -54,9 +54,10 @@ TUI behavior, or parallel execution.
   call fails first. The `model_turn_limit_exceeded` check before every `Provider.start()` remains
   defense in depth and is tested directly with a seeded admission ledger rather than an impossible
   five-turn response script.
-- Each accepted call follows CAH-034's exact lookup/parse/validate/dispatch/render order and compact
-  JSON success/error envelopes. Synchronous tools remain bounded and non-preemptive; cancellation
-  and deadline checks occur immediately before and after dispatch, and a late result is discarded.
+- Each accepted call follows CAH-034's exact lookup, JSON-object decode, model-facing key gate,
+  native Pydantic validation, dispatch, result validation, and compact-envelope rendering order.
+  Synchronous tools remain bounded and non-preemptive; cancellation and deadline checks occur
+  immediately before and after dispatch, and a late result is discarded.
 - One immutable logical history contains initial input/context, every accepted opaque continuation,
   call, and matching result. Before each provider start, CAH-032 validates the full projection under
   512 KiB. No item is silently truncated, summarized, deduplicated, reset, or evicted.

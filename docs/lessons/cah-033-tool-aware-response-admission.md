@@ -17,7 +17,9 @@
 ## Quick summary
 
 CAH-033 adds a private staging boundary around one provider turn. The harness accepts either final
-text or one call only after completion, usage, and optional opaque-continuation checks all pass.
+text or one call only after completion, usage, and optional opaque-continuation checks all pass. A
+normalized provider failure may end any otherwise valid partial prefix; the prefix is discarded and
+only the bounded failure classification survives.
 
 ## Learning objectives
 
@@ -25,6 +27,7 @@ After this unit, you should be able to:
 
 - distinguish streaming transport from application-level commitment;
 - write a closed grammar for final-text and tool-call responses;
+- distinguish a valid failure cut point from an invalid prefix that cannot be laundered by failure;
 - explain why a proposed call is still untrusted data;
 - preserve opaque continuation without interpreting or leaking it; and
 - test response admission without a network or wall-clock race.
@@ -53,6 +56,8 @@ must still reconcile text, item order, cardinality, usage, and bounds itself.
 - **Atomic outcome:** one immutable accepted result returned all at once.
 - **Opaque continuation:** bounded provider state preserved byte-for-byte but never interpreted.
 - **Commit point:** the later moment orchestration may publish text or act on a call.
+- **Failure cut point:** any still-nonterminal valid prefix after which normalized failure may end the
+  turn without committing the prefix.
 
 ## Architecture and design
 
@@ -64,7 +69,7 @@ Ink TUI                 Python harness                         Provider
                later orchestration        [CAH-033 private stage]
                      ^                    grammar + usage + bounds
                      |                              |
-             accepted final OR call <---------------+
+       accepted final OR call OR bounded failure <---+
 
 Native read tools: not reached in this unit
 Evidence boundary: no staged text/call/opaque/usage enters transcript or diagnostics
@@ -77,8 +82,19 @@ opaque? -> text delta+ -> matching text completed -> usage? -> response complete
 opaque? -> one tool call                         -> usage? -> response completed
 ```
 
-The optional opaque value is first, at most 65,536 UTF-8 bytes, and included in later request-size
-accounting. Anything else fails as `provider_invalid_response`.
+Normalized provider failure follows this separate rule:
+
+```text
+valid-nonterminal-prefix -> response.failed
+```
+
+The prefix may be empty or may end after opaque continuation, one or more valid text deltas,
+reconciled text completion, the call, or either legal post-content usage position. Each branch may
+also carry its legal first-position opaque continuation. The collector discards the entire prefix
+and returns only the existing bounded failure code, safe message, and retryability. A malformed
+prefix followed by failure remains
+`provider_invalid_response`; failure cannot make earlier invalid grammar valid. The optional opaque
+value is first, at most 65,536 UTF-8 bytes, and included in later request-size accounting.
 
 ## Practical walkthrough
 
@@ -86,8 +102,10 @@ accounting. Anything else fails as `provider_invalid_response`.
 2. Collect observations into private bounded state.
 3. Select one branch when text or a call appears; never switch branches.
 4. Reconcile completion and at most one usage value.
-5. Close the operation and return one immutable accepted outcome.
-6. On any failure or cancellation, discard the whole stage and reap provider work.
+5. Close the operation and return one immutable terminal outcome.
+6. On normalized provider failure, discard the whole stage and preserve only its bounded
+   classification.
+7. On invalid grammar or cancellation, discard the whole stage and reap provider work.
 
 ## Implementation code samples
 
@@ -100,6 +118,8 @@ match staged:
         return staged
     case AcceptedToolCall(call=call, usage=usage, continuation=opaque):
         return staged
+    case ProviderFailure(code=code, message=message, retryable=retryable):
+        return staged  # no staged prefix is attached
 ```
 
 This code returns data; it does not write protocol events or call the registry.
@@ -123,6 +143,8 @@ The separation makes a test spy able to prove zero external action before collec
 | 65,537-byte opaque item | bound failure | safe representation only |
 | cancellation before completion | discard and reap | one terminal winner |
 | provider closes early | invalid response | no partial answer |
+| provider fails after staged text/call | preserve bounded failure only | no staged sentinel or side effect |
+| invalid prefix then provider failure | fixed invalid response | failure cannot launder grammar |
 
 ## Production expansion
 
@@ -164,11 +186,14 @@ semantics; never weaken call admission for latency.
 2. Insert a second usage item and identify the commit that must not occur.
 3. Explain why a safe `repr` matters even when opaque data is never logged intentionally.
 4. Teach back the difference between receiving a call and authorizing execution.
+5. List every valid prefix after which `ProviderFailed` may terminate the turn, then explain why an
+   invalid prefix followed by the same event remains invalid.
 
 ## Key takeaways
 
 - Provider output remains untrusted until the whole turn is admitted.
 - Atomic staging protects both the TUI and tools from late grammar failures.
+- Normalized provider failure may end any valid partial prefix, but carries none of that staged data.
 - The harness can preserve opaque state without understanding or recording it.
 
 ## Glossary

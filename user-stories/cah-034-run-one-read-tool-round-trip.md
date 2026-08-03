@@ -40,9 +40,11 @@ another tool capability, or new transcript schema.
   catalog. Bridge failure performs zero provider and tool work. Both provider requests retain the
   same immutable context tuple and tool definitions; inclusion-report evidence is never sent.
 - CAH-033 atomically returns the first accepted call. Only then does orchestration charge the one
-  observed tool call and run, in order: exact registry lookup, JSON-object decoding, native Pydantic
-  input validation, synchronous dispatch, native result validation, and bounded rendering. A failed
-  stage runs no later stage.
+  observed tool call and run, in order: exact registry lookup, JSON-object decoding, CAH-032's exact
+  model-facing required-key gate, native Pydantic input validation, synchronous dispatch, native
+  result validation, and bounded rendering. The key gate runs before Pydantic can apply a native
+  default; a failed stage runs no later stage. Direct Python calls remain free to use the unchanged
+  native request models and defaults outside this model-facing path.
 - M2 native tools are intentionally synchronous, bounded, and non-preemptive. The harness checks
   cancellation and the captured absolute deadline immediately before dispatch and immediately after
   it returns. Cancellation cannot interrupt Python code already executing; a result that returns
@@ -114,7 +116,7 @@ another tool capability, or new transcript schema.
 | Acceptance | Required evidence |
 | --- | --- |
 | 1, 3-4 | One strict-fake/native-fixture integration asserts two exact requests, one dispatch, full replay, ordered final events, one terminal, and zero third starts. |
-| 2 | Parameterized malformed/non-object JSON, unknown tool, invalid input/result, every CAH-026 access error, oversized rendering, and programmer defect asserts the exact envelope or safe session failure plus stage counters. |
+| 2 | Parameterized malformed/non-object JSON, omitted defaulted keys, additional keys, unknown tool, invalid input/result, every CAH-026 access error, oversized rendering, and programmer defect asserts the exact envelope or safe session failure plus stage counters. A spy proves the raw-key gate rejects before native Pydantic validation/default application. |
 | 5 | Logical checkpoints select cancellation/deadline immediately before dispatch and while a bounded synchronous fake runs; post-return checks discard distinctive late-result sentinels. |
 | 6 | Two-turn tables cover no usage, usage on either/both turns, exact checked sums, aggregate overflow, rejected turn two, cancellation, and one transcript-v3 aggregate write. |
 | 7 | Seeded boundary tests exhaust model starts, deadline, assistant UTF-8 output, tool calls, and 512-KiB request projection without reset or late work. |

@@ -26,6 +26,8 @@ protocol message, UI surface, or write capability.
 - Compose workspace boundary, instruction discovery, default context request, read registry,
   staged-response admission, bounded loop, existing evidence, and selected fake/OpenAI provider in
   the Python runtime root.
+- Supply the exact M2 loop-limit profile at that composition root rather than inheriting the existing
+  one-turn/one-call `LoopLimits` defaults.
 - Lock the ordinary runtime to one explicit default CAH-030 request rather than inferring files or
   searches from task text.
 - Permit deterministic evaluation composition to inject an explicit context request through a test/
@@ -54,8 +56,13 @@ protocol message, UI surface, or write capability.
   inject exact fake scripts. OpenAI remains an explicit selection with CAH-036's bounded repository-
   content egress consent and no-content-secret-scanning warning.
 - One accepted task creates one immutable workspace boundary, discovers ordered instructions, builds
-  one context package, and allocates fresh loop accounting before provider work. Available tools are
-  exactly `list_files`, `stat_path`, `read_file`, and `search_text`, derived from the registry.
+  one context package, and allocates fresh loop accounting before provider work. The composition root
+  explicitly constructs `LoopLimits(max_model_turns=4, provider_work_timeout_seconds=120,
+  max_assistant_output_bytes=4096, max_observed_tool_calls=3)` for every M2 session. These are CAH-035's
+  four-turn/three-call ceilings with CAH-022's existing timeout/output profile made explicit; it never
+  relies on `LoopLimits()` defaults, reuses a tracker, or lets provider selection alter the values.
+  Available tools are exactly `list_files`, `stat_path`, `read_file`, and `search_text`, derived from
+  the registry.
 - Explain and plan are ordinary task text, not new commands or loop modes. A plan is advice only.
   Only an accepted non-empty final answer reaches existing `assistant.delta`,
   `assistant.completed`, and `session.completed` events.
@@ -91,7 +98,7 @@ protocol message, UI surface, or write capability.
 ## Acceptance criteria
 
 1. One composition path joins CAH-025 through CAH-036 through public boundaries without reverse
-   imports or duplicated policy.
+   imports or duplicated policy and supplies the exact four-field M2 loop-limit profile.
 2. Ordinary runtime always uses exactly `scope="."`, empty focus paths, and empty search queries;
    no task/provider/environment inference changes initial context.
 3. Eval/test assembly alone can inject an explicit validated context request, and exact injection is
@@ -113,7 +120,7 @@ protocol message, UI surface, or write capability.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1, 5 | Composition tests inject each boundary and assert one workspace, exact descriptors, fresh budgets, ownership/import rules, and absence of side-effect transports. |
+| 1, 5 | Composition tests inject each boundary and assert one workspace, exact descriptors, and a fresh tracker configured with 4 turns, 120 seconds, 4,096 output bytes, and 3 observed calls for fake and OpenAI sessions. They also prove ownership/import rules, absence of side-effect transports, and that composition neither calls bare `LoopLimits()` nor inherits its one-turn/one-call defaults. |
 | 2 | Runtime/launcher tests capture the exact default `ContextBuildRequest` for varied task text, nested working paths, environment sentinels, mock/OpenAI selection, and repeated sessions. |
 | 3 | Eval assembly tests inject focus/search requests, assert exact structured projection, reject invalid requests, and then re-run ordinary composition to prove defaults unchanged. |
 | 4 | Provider-selection and socket-guard tests prove mock default, explicit OpenAI gating, bounded request fields, and warning behavior without live credentials. |
@@ -162,8 +169,9 @@ presentation.
 
 ## Planned evidence
 
-- Composition tests proving exact default/injected context requests, dependencies, provider
-  selection, and side-effect absence.
+- Composition tests proving exact default/injected context requests, dependencies, explicit M2
+  `(4 turns, 120 seconds, 4096 output bytes, 3 observed calls)` limits, provider selection, and
+  side-effect absence.
 - Synthetic fixture, deterministic runner, explain/plan cases, and mutations with concise reports.
 - Existing protocol/transcript evidence proving final text remains the only visible tool-assisted
   outcome.

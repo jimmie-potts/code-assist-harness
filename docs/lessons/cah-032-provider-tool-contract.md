@@ -29,6 +29,7 @@ After this unit, you should be able to:
 - separate a tool definition, a requested call, and a returned result;
 - project selected context without sending its local inclusion report;
 - explain why arguments remain unparsed at the provider boundary;
+- explain why model-facing required keys must be checked before native defaults can apply;
 - validate the exact call-ID grammar and strict Unicode-scalar/UTF-8 boundaries;
 - distinguish CAH-031's canonical success envelope from the canonical error envelope;
 - validate ordered call/result history independently of an SDK; and
@@ -55,9 +56,12 @@ CAH-033 admits the complete provider response. A
 second misconception is that any valid JSON Schema is portable. The reviewed M2 subset is flat and
 requires every property plus `additionalProperties: false`, matching strict function-tool rules.
 Python callers may still use native request defaults; the model-facing schema requires explicit
-values so an adapter never invents default behavior. The bridge that performs this conversion is a
-separate harness function—not a `ProviderToolDefinition.from_descriptor` method—so neither the
-registry nor provider-domain class imports and reshapes the other boundary.
+values. A schema declaration alone is insufficient: after CAH-034 decodes a model call, a pure
+CAH-032 key gate compares the raw object keys with the canonical `required` list *before* Pydantic
+can fill a missing default. The native request model itself stays unchanged, so trusted direct
+Python callers retain its normal defaults. The bridge that performs schema conversion is a separate
+harness function—not a `ProviderToolDefinition.from_descriptor` method—so neither the registry nor
+provider-domain class imports and reshapes the other boundary.
 
 ## Key concepts
 
@@ -69,6 +73,7 @@ registry nor provider-domain class imports and reshapes the other boundary.
   `{"result":...}`, error exactly `{"error":{"code":...,"message":...}}`.
 - **History grammar:** rules preventing orphan, duplicate, or unresolved call/result items.
 - **Context projection:** the exact admitted CAH-030 items, without its local omission report.
+- **Raw-key gate:** exact model-facing key-set admission before native validation or defaults.
 
 ## Architecture and design
 
@@ -86,6 +91,10 @@ task/events      context -> [CAH-032 neutral contract]   OpenAI function calling
 
 Future MCP: catalog snapshot + re-admission -> generalized registry port -> neutral envelopes
             (not direct plug compatibility; transport/auth/timeouts/cancellation remain future)
+
+Later CAH-034 dispatch:
+raw JSON -> decode object -> [CAH-032 exact key gate] -> native Pydantic -> read tool
+                              missing/defaulted keys stop here
 ```
 
 Definitions use a closed schema table: the root has exactly `type`, `properties`, `required`, and
@@ -103,8 +112,10 @@ unresolved calls. New context preserves CAH-030 order/content while omitting its
 3. Project one CAH-030 package without its inclusion report.
 4. Call the separate pure bridge to filter Pydantic `title`/`default`, reject every other unsupported
    keyword, require all fields, and canonicalize all definitions atomically.
-5. Make the strict fake compare context, definitions, and history exactly.
-6. Prove every byte/item bound and that mismatch messages reveal structure, never content.
+5. Add the separate pure raw-key gate that CAH-034 will run after JSON-object decoding and before
+   native Pydantic validation.
+6. Make the strict fake compare context, definitions, and history exactly.
+7. Prove every byte/item bound and that mismatch messages reveal structure, never content.
 
 ## Implementation code samples
 
@@ -138,6 +149,17 @@ and `additionalProperties` is false. Canonicalization orders properties/required
 then uses `ensure_ascii=False`, compact separators, sorted keys, and `allow_nan=False`. References,
 nested values, arrays, unions/combinators, formats, defaults, floats, and unknown keywords fail.
 
+### Planned pseudocode: required keys before native defaults
+
+```python
+decoded = decode_json_object(call.arguments_json)  # CAH-034 owns decoding
+require_provider_tool_argument_keys(definition, decoded)  # CAH-032 pure gate
+native_request = descriptor.input_model.model_validate(decoded)
+```
+
+If `decoded` omits a field that has a native default, line two still rejects it and line three never
+runs. A trusted direct Python caller may use the unchanged native model and receive that default.
+
 ### Planned pseudocode: orphan-result failure
 
 ```python
@@ -157,6 +179,7 @@ The constructor rejects impossible history before an adapter or model sees it.
 | legacy and new context both supplied | request constructor | reject duplicate priority models | compatibility test |
 | request projection above 512 KiB | request constructor | reject without truncation | byte-bound test |
 | raw malformed arguments | later dispatcher, not CAH-032 | preserve bytes without execution | constructor test |
+| omitted defaulted or additional model key | CAH-032 raw-key gate | reject before Pydantic/defaults | spy-validator key-set tests |
 | oversized result | result constructor | fixed bounded failure | byte-bound test |
 | status/envelope mismatch | result constructor | reject before history | exact success/error snapshots |
 | lone surrogate or invalid call ID | string/identifier admission | reject before fake/provider work | scalar and grammar boundary tests |
@@ -207,11 +230,14 @@ features or MCP only when a real reviewed capability requires them and compatibi
    needs without owning the loop.
 5. Explain why the inclusion report stays local even though admitted context goes to the model.
 6. Explain why status plus `{"error":...}` is valid but status plus `{"result":...}` is not.
+7. Teach back why keeping a native Python default does not make that field optional for the model.
 
 ## Key takeaways
 
 - The harness contract, not an SDK, defines tool meaning inside the loop.
 - Calls and results pair exactly; raw arguments are not validated inputs.
+- Model-facing required keys are admitted before native Pydantic defaults; local callers keep their
+  native defaults.
 - OpenAI maps this neutral seam directly; MCP needs a future generalized registry port with explicit
   re-admission and remote-operation ownership.
 

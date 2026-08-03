@@ -257,13 +257,15 @@ perform filesystem access or eliminate time-of-check-to-time-of-use races.
 > so that a prior path snapshot cannot silently authorize changed content.
 
 [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) owns the shared admission
-policy. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
+policy. It applies Git-compatible ignore rules independently to the normalized supplied path and the
+resolved canonical target; either ignored view denies, so a symlink alias cannot bypass policy on
+either name. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
 [CAH-028](../user-stories/cah-028-read-bounded-text-file.md), and
 [CAH-029](../user-stories/cah-029-search-repository-text.md) reuse it immediately before access and
 return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
 remain M3 work.
 
-### Planned CAH-031 through CAH-035 — Keep tool authority in the harness
+### Planned CAH-031 through CAH-037 — Keep tool authority in the harness
 
 > As a user, I want model tool requests admitted through one typed registry and explicit bounded loop
 > so that neither the provider nor an MCP transport can execute or continue work directly.
@@ -271,9 +273,12 @@ remain M3 work.
 CAH-031 limits registration to four read capabilities. CAH-032 defines strict context/tool exchange
 values without dispatch. CAH-033 admits a complete response before either publication or dispatch,
 CAH-034 proves one validation-and-result round trip, and CAH-035 generalizes it only to four model
-turns and three sequential calls with cumulative limits. A future MCP client must enter through a
-generalized registry and separate remote-trust design; the local M2 registry is not a direct MCP
-compatibility claim.
+turns and three sequential calls with cumulative limits. CAH-036 requests
+`reasoning.encrypted_content` on every stateless OpenAI turn so replay is available, but keeps that
+opaque payload out of policy and evidence. CAH-037 explicitly composes the four-turn, 120-second,
+4,096-byte, three-call M2 profile instead of inheriting defaults. A future MCP client must enter
+through a generalized registry and separate remote-trust design; the local M2 registry is not a
+direct MCP compatibility claim.
 
 ### Implemented in CAH-011 — Persist redacted lifecycle evidence
 

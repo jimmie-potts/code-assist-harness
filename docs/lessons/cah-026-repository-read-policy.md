@@ -16,8 +16,9 @@
 ## Quick summary
 
 CAH-026 creates the policy gate every native repository read must cross. It combines CAH-024
-containment, a non-overridable VCS/credential denylist, and nested Git-style ignore rules while
-keeping the decision inside the Python harness.
+containment, a non-overridable VCS/credential denylist, and nested Git-style ignore rules evaluated
+for both the supplied lexical path and its resolved canonical target while keeping the decision
+inside the Python harness.
 
 ## Learning objectives
 
@@ -26,7 +27,7 @@ After completing this unit, you should be able to:
 - explain admission order and why lexical plus canonical checks are both required;
 - explain why JSON parsing alone does not guarantee Unicode-scalar text and where the harness rejects
   lone surrogates;
-- apply nested `.gitignore` precedence with `GitIgnoreSpec`;
+- apply nested `.gitignore` precedence independently to lexical and canonical path views;
 - distinguish a hard deny from a repository ignore; and
 - design fixed failures that do not become an existence or secret oracle.
 
@@ -46,6 +47,11 @@ The path `src/link/config` may look harmless but resolve to `.git/config`; check
 name misses the canonical target. Checking only after resolution can reveal whether a denied name
 exists. CAH-026 checks the hard denylist both before and after resolution.
 
+Ignore policy has the same two-name problem. A root rule may ignore `generated-link/` while that
+symlink resolves to an otherwise admitted `src/generated/`, or a harmless alias may point into a
+canonically ignored subtree. CAH-026 evaluates root-to-nearest rules separately against both names.
+Either ignored result wins; a `!` negation in one view cannot grant access denied by the other.
+
 A common misconception is that approval makes any read safe. Here, ignored and hard-denied decisions
 have no override field. Future approval cannot broaden this boundary.
 
@@ -56,9 +62,11 @@ does not normalize spelling, because normalization could change which repository
 
 ## Key concepts
 
-- **Admission pipeline:** validate, lexical deny, canonicalize, canonical deny, ignore policy,
-  operation limits, then repeat immediately before I/O.
+- **Admission pipeline:** validate, lexical hard deny and ignore, canonicalize only if admitted,
+  canonical hard deny and ignore, apply operation limits, then repeat immediately before I/O.
 - **GitIgnoreSpec:** maintained Git-compatible matching for root and nested `.gitignore` files.
+- **Dual-view ignore:** preserve the normalized supplied label and the resolved target label as
+  independent ignore-policy inputs; one view cannot re-include the other.
 - **Hard denylist:** conservative VCS and credential names that ignore negation cannot re-include.
 - **Safe error:** one fixed code/message without path, pattern, rule, content, or raw OS detail.
 - **Deterministic budget:** bytes and items, not provider tokens.
@@ -72,9 +80,15 @@ Ink TUI ---- NDJSON ----> Python harness <---- provider may request tools later
                               |
                      future tool dispatcher
                               |
-                   [CAH-026 read-policy gate]
-                    /          |             \
-          CAH-024 boundary  hard denylist  nested GitIgnoreSpec
+                   supplied lexical label
+                              |
+              hard deny + lexical GitIgnoreSpec --deny--> fixed safe error
+                              |
+                    CAH-024 resolve target
+                              |
+             hard deny + canonical GitIgnoreSpec --deny--> fixed safe error
+                              |
+                   [CAH-026 admitted target]
                               |
              CAH-027 list / CAH-028 read / CAH-029 search (later)
                               |
@@ -91,10 +105,13 @@ snapshot, not durable authorization.
 1. Define immutable decisions, shared limits, the scalar-text admission helper, and fixed errors.
 2. Admit path/query strings as unchanged Unicode scalar text, then apply the exact credential/VCS
    denylist to supplied path components.
-3. Resolve with CAH-024 and repeat the denylist on canonical components.
-4. Load at most 16 applicable strict-UTF-8 `.gitignore` files within byte limits.
-5. Evaluate root-to-nearest `GitIgnoreSpec` rules, then re-run admission before use.
-6. Test negation, nested scope, aliases, staleness, and every limit boundary.
+3. Preserve the normalized supplied label, load its applicable lexical-chain policies, and deny
+   before target resolution when its root-to-nearest `GitIgnoreSpec` result is ignored.
+4. Resolve an admitted lexical path with CAH-024 and repeat the hard denylist on canonical components.
+5. Load canonical-chain policies not already charged to the bounded union, evaluate the canonical
+   label independently, and deny if that final view is ignored.
+6. Re-run admission before use, then test negation, nested scope, aliases, staleness, and every limit
+   boundary.
 
 ## Implementation code samples
 
@@ -104,22 +121,31 @@ No implementation exists yet. This is planned pseudocode:
 validate_unicode_scalar_utf8(request.path)
 validate_relative(request.path)
 deny_if_sensitive(request.path.components)
+lexical = normalized_relative_label(request.path)
+lexical_policies = bounded_policies_for(lexical.ancestors)
+deny_if_ignored(lexical_policies.check(lexical))
 resolved = boundary.resolve_existing(request.path)
 deny_if_sensitive(resolved.relative_path.components)
-decision = gitignore_policy_for(resolved).check()
-return admit(decision)
+canonical_policies = extend_bounded_union(resolved.ancestors)
+deny_if_ignored(canonical_policies.check(resolved.relative_path))
+return admit(resolved)
 ```
 
-The string check runs before every filesystem or policy call. The two deny checks then close
-different alias/oracle gaps. Resolution supplies the canonical label. Ignore matching comes later
-because it is repository preference, not permission to re-include a hard deny. A caller repeats
-this sequence immediately before access.
+The string check runs before every filesystem or policy call. The two hard-deny checks then close
+different alias/oracle gaps. Resolution supplies the canonical label while the lexical label remains
+available only for admission. Lexical ignore matching happens before target resolution so an ignored
+alias cannot become an existence probe. Canonical matching then catches safe-looking aliases whose
+targets are ignored. Each view resolves its own precedence, and reaching access requires both to
+admit. A caller repeats this sequence immediately before access.
 
 ## Failure scenarios to study
 
 - **Negated credential:** `.gitignore` says `!.env`; the hard deny still returns generic unavailable.
 - **Nested precedence:** a lower `.gitignore` negates a normal root pattern; the path is admitted only
   when parent traversal is available.
+- **Alias disagreement:** the lexical alias is ignored but its canonical target is admitted, or the
+  reverse; either disagreement still returns `repository_path_ignored`, a lexical denial performs no
+  target resolution, and a negation on the admitted side cannot override it.
 - **Policy bomb:** a 65,537-byte or invalid-UTF-8 `.gitignore` produces
   `repository_policy_invalid` without decoder text.
 - **Symlink alias:** a safe-looking name resolves to `.ssh`; canonical denial blocks it.
@@ -163,15 +189,18 @@ provenance; preserve local fail-closed enforcement if the central service is una
 ## Practical exercises
 
 1. Trace admission for `link/config` when the link targets `.git/config`.
-2. Create root and nested ignore rules whose last match changes the result.
-3. Classify each failure as validation, containment, hard deny, ignore, type, or content limit.
-4. Teach back: why can neither model arguments nor approval override this read policy?
-5. Explain why strict UTF-8 round-trip validation rejects surrogates but deliberately does not
+2. Create a symlink whose lexical and canonical labels receive opposite ignore decisions; explain
+   why access is denied in both orientations.
+3. Create root and nested ignore rules whose last match changes one view's result.
+4. Classify each failure as validation, containment, hard deny, ignore, type, or content limit.
+5. Teach back: why can neither model arguments nor approval override this read policy?
+6. Explain why strict UTF-8 round-trip validation rejects surrogates but deliberately does not
    normalize two canonically equivalent path spellings.
 
 ## Key takeaways
 
 - The Python harness owns final repository-read admission.
+- Lexical and canonical ignore views are independent, and either ignored result denies access.
 - Hard denial precedes and dominates Git-style ignore policy.
 - Central policy improves governance but introduces availability and operational cost.
 
@@ -180,6 +209,7 @@ provenance; preserve local fail-closed enforcement if the central service is una
 - **Admission:** The complete decision that permits one bounded capability use.
 - **Hard denylist:** Built-in paths that no lower-trust input can re-include.
 - **Ignore negation:** A `!` rule that reverses a normal ignore match within Git semantics.
+- **Lexical path:** The normalized supplied workspace-relative name before symlinks are resolved.
 - **Existence oracle:** A difference in errors that reveals whether protected data exists.
 
 ## Further reading

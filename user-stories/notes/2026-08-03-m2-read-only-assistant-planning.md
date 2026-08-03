@@ -92,18 +92,25 @@ is likely to cross the ceiling.
   sequentially; mixed text/tool terminal grammars and multiple or parallel calls fail closed.
 - A tool-aware turn is an atomic transaction. The harness buffers its complete provider-neutral
   response, validates the closed grammar and terminal observation, and only then admits final text
-  for publication or a tool call for dispatch. Premature EOF, provider failure, mixed output, and a
-  second call therefore produce zero published text and zero dispatches.
+  for publication or a tool call for dispatch. A normalized provider failure may terminate any
+  otherwise valid nonterminal prefix: its entire stage is discarded, only its bounded classification
+  survives, and publication and dispatch remain zero. Premature EOF, mixed output, and a second call
+  also produce zero published text and zero dispatches.
 - The initial M2 profile admits at most four model turns and three within-budget tool calls. A fourth
   call is retained only as the single rejecting maximum-plus-one observation required by CAH-022.
   This supports orientation, search/list, read, and a final answer while keeping the loop easy to
-  inspect.
+  inspect. CAH-037's composition root supplies all four values explicitly—four turns, 120
+  provider-work seconds, 4,096 assistant-output bytes, and three observed calls—rather than inheriting
+  `LoopLimits()` defaults.
 - Provider work deadline and assistant-output accounting remain cumulative across the session. Context
   admission uses deterministic UTF-8 bytes and item counts; provider token usage remains evidence.
 - Optional provider usage is session-aggregate evidence. It is retained only when the session admits
   final assistant text; tool-only turns do not publish per-turn usage records.
 - Tool definitions, calls, and results are immutable provider-neutral values with explicit call-ID
   correlation. Provider adapters translate them but do not dispatch tools or decide policy.
+- Decoded model arguments must contain exactly the advertised required keys before native Pydantic
+  validation can apply defaults. Native request models remain unchanged so trusted direct Python
+  callers retain their defaults.
 - Registry handlers remain synchronous and bounded. Cancellation and deadline checks run before and
   after a handler; an in-flight handler is non-preemptive, its eventual result is discarded when
   cancellation wins, and later work must add a cooperative interface before claiming mid-call reap.
@@ -116,12 +123,14 @@ is likely to cross the ceiling.
   `additionalProperties=false`; the complete canonical provider-neutral request is capped at 512
   KiB before every provider start.
 - OpenAI continuation uses stateless full replay with `store=false`; it does not depend on
-  `previous_response_id`. The adapter preserves each complete reasoning item as a bounded canonical
-  opaque replay envelope—including its required ID and item fields, not only encrypted content—and
-  reconstructs the required input fields on later turns even while reasoning context remains
-  `current_turn`. The one optional output `content=null` form maps to an omitted non-nullable input
-  key; an empty list remains empty. Core code never interprets that provider continuation state.
-  `parallel_tool_calls=false` keeps the adapter aligned with the one-call grammar.
+  `previous_response_id`. Every request, starting with turn one, sets exactly
+  `include=["reasoning.encrypted_content"]` so an accepted reasoning item contains the opaque replay
+  payload. The adapter preserves each complete reasoning item as a bounded canonical opaque replay
+  envelope—including its required ID and item fields, not only encrypted content—and reconstructs the
+  required input fields on later turns even while reasoning context remains `current_turn`. The one
+  optional output `content=null` form maps to an omitted non-nullable input key; an empty list remains
+  empty. Core code never interprets that provider continuation state. `parallel_tool_calls=false`
+  keeps the adapter aligned with the one-call grammar.
 
 ### Repository context and reads
 
@@ -129,9 +138,14 @@ is likely to cross the ceiling.
   deepest target scope and remain untrusted guidance that cannot weaken harness policy.
 - Repository enumeration honors nested `.gitignore` semantics through the small `pathspec`
   `GitIgnoreSpec` dependency plus a non-overridable harness denylist for VCS internals and local
-  credential-bearing files. M2 has no ignored-path override.
-- `search_text` is literal, case-sensitive UTF-8 search with deterministic path and line order. Regex,
-  ranking, embeddings, and subprocess search are deferred.
+  credential-bearing files. Ignore rules are evaluated independently against the normalized supplied
+  path and its resolved canonical target; either ignored view wins, and a negation in one view cannot
+  re-include a path ignored in the other. The bounded union of applicable policy files charges a
+  canonically identical policy input once. M2 has no ignored-path override.
+- `search_text` is literal, case-sensitive UTF-8 search with deterministic path and line order. Its
+  one-line query grammar rejects every separator recognized by Python `str.splitlines()`, including
+  VT, FF, FS/GS/RS, NEL, and Unicode line/paragraph separators in addition to CR/LF. Regex, ranking,
+  embeddings, and subprocess search are deferred.
 - Every accepted path is resolved again immediately before access. Results use canonical
   workspace-relative labels and fixed failures rather than host paths or raw OS errors.
 - Context items are atomic. Selection either includes a complete bounded item or records why it was

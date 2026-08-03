@@ -260,9 +260,12 @@ The [implementation-ready story](../user-stories/cah-037-prove-read-only-assista
 `evals/` only with a small purpose-built runner, one synthetic workspace, deterministic strict-fake
 explain/plan cases, and adversarial mutations. It checks structured retrieval/tool evidence before
 small required or forbidden answer facts. Plain runtime composition defaults context scope to `.`
-with empty focus and search inputs; fixture cases may inject explicit values through their test seam.
-Optional live output remains observational and requires the same explicit OpenAI selection and
-repository-content egress warning as the application path.
+with empty focus and search inputs and supplies the exact M2 limits: four model turns, 120
+provider-work seconds, 4,096 output bytes, and three observed tool calls. Fixture cases may inject
+explicit context values through their test seam but may not alter that ordinary composition profile.
+Tests assert a fresh exact profile for mock and OpenAI paths so bare `LoopLimits()` defaults cannot
+silently narrow the loop. Optional live output remains observational and requires the same explicit
+OpenAI selection and repository-content egress warning as the application path.
 
 ### Future story — Generalize the scenario format and runner
 

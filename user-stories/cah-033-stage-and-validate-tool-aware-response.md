@@ -24,9 +24,11 @@ start another model turn, publish protocol events, or persist transcript evidenc
 ## Scope
 
 - Replace optimistic text publication with a provider-neutral staged turn collector.
-- Add immutable accepted final-text, one-tool-call, and normalized-failure outcomes.
+- Add immutable accepted final-text and one-tool-call outcomes, and return the existing immutable
+  normalized `ProviderFailure` value for a provider-declared failure.
 - Admit one optional bounded opaque provider continuation and at most one usage value.
-- Validate the entire observation grammar through `ProviderCompleted` before exposing an outcome.
+- Validate the entire observation grammar through its legal `ProviderCompleted` or `ProviderFailed`
+  terminal before exposing an outcome.
 - Keep cancellation, the absolute provider-work deadline, and provider resource cleanup under the
   existing session owner while making publication a later orchestration action.
 - Extend the strict fake with exact successful and adversarial tool-aware turn scripts.
@@ -37,8 +39,19 @@ start another model turn, publish protocol events, or persist transcript evidenc
   grammar is one of:
   `opaque? -> text.delta+ -> text.completed -> usage? -> response.completed` or
   `opaque? -> tool.call_requested -> usage? -> response.completed`.
-  A normalized `response.failed` is the only provider-declared failure grammar and must be the sole
-  observation. End-of-stream before its required terminal observation is invalid.
+  A normalized `response.failed` may be the first observation or may replace the remaining success
+  suffix after any otherwise valid nonterminal prefix of either grammar. This preserves CAH-021's
+  provider-neutral behavior and CAH-023's adapter behavior for failures after partial output.
+  `response.failed` cannot launder an already-invalid prefix and is invalid after
+  `response.completed`. End-of-stream before a required terminal observation is invalid.
+- The legal failure cut points are exactly: before any staged observation; after the optional opaque
+  continuation; after any valid text delta; after reconciled `text.completed`; after post-text
+  usage; after the one tool call; or after post-call usage. Each non-empty cut point may also include
+  its legal first-position opaque continuation. No other prefix is admitted.
+- On `response.failed`, the collector discards the complete staged prefix—including text, call,
+  opaque continuation, and usage—and returns only the existing bounded `ProviderFailure` value. Its
+  exact harness-owned `code`, safe `message`, and `retryable` classification are preserved; staged
+  data and raw provider values are absent from the outcome, diagnostics, transcript, and protocol.
 - `text.completed` must equal the byte-for-byte concatenation of the non-empty, terminal-safe text
   deltas. The accepted final text is non-empty. A tool-call turn contains no text observation and
   exactly one bounded `ProviderToolCall`; mixed text/call, duplicate calls, post-terminal values, and
@@ -51,14 +64,15 @@ start another model turn, publish protocol events, or persist transcript evidenc
   transcripts, logs, and failure messages, and it counts toward CAH-032's 512-KiB canonical request
   projection when replayed later.
 - At most one validated `ProviderUsageReported` may appear, after completed text or the call and
-  before `ProviderCompleted`. Usage is non-authoritative evidence carried by the accepted outcome;
-  the collector neither reports nor persists it. A duplicate, early, late, or out-of-range value
-  invalidates the entire response.
+  before the legal `ProviderCompleted` or `ProviderFailed` terminal. Usage is non-authoritative
+  evidence carried only by an accepted success outcome; the collector neither reports nor persists
+  it. A duplicate, early, late, or out-of-range value invalidates the entire response.
 - All assistant chunks and the candidate call remain private staging data through
-  `ProviderCompleted`, iterator close, grammar reconciliation, and usage admission. The collector
-  returns one immutable `AcceptedFinalText` or `AcceptedToolCall`; it never yields a partly accepted
-  result. No assistant event is emitted and no registry lookup, argument parsing, policy decision,
-  or tool dispatch occurs inside collection.
+  the legal terminal, iterator close, grammar reconciliation, and usage admission. The collector
+  returns one immutable `AcceptedFinalText`, `AcceptedToolCall`, or normalized provider-failure
+  outcome; it never yields a partly accepted result. A failure outcome contains no staged usage or
+  continuation. No assistant event is emitted and no registry lookup, argument parsing, policy
+  decision, or tool dispatch occurs inside collection.
 - The existing per-turn UTF-8 output ceiling is checked while staging without publishing bytes.
   CAH-022's session output budget is reserved atomically by later orchestration only after an
   `AcceptedFinalText` exists. Rejected text consumes no visible output and cannot survive in runtime
@@ -88,11 +102,14 @@ start another model turn, publish protocol events, or persist transcript evidenc
 2. Neither staged text nor a staged call causes protocol publication, dispatch, usage persistence,
    or another provider turn in this unit.
 3. Exact final-text and exactly-one-call grammars accept optional first-position opaque continuation
-   and optional post-content usage while rejecting all other orderings and cardinalities.
+   and optional post-content usage; normalized provider failure may terminate every otherwise valid
+   nonterminal prefix of either grammar.
 4. Text completion reconciles exactly; mixed, duplicate, unsupported, premature EOF, post-terminal,
-   invalid opaque, and invalid usage observations select `provider_invalid_response` without leaks.
-5. Cancellation, deadline, provider failure, and cleanup races discard staged content, reap provider
-   work, and preserve one existing terminal winner.
+   invalid opaque, invalid usage, and provider failure after an already-invalid prefix select
+   `provider_invalid_response` without leaks.
+5. Provider failure discards the full valid staged prefix while preserving its exact bounded code,
+   safe message, and retryability; cancellation, deadline, iterator-close, and cleanup races reap
+   provider work and preserve one existing terminal winner.
 6. The opaque continuation is provider-neutral, byte-bounded, replayable without interpretation,
    counted in request size, and structurally excluded from protocol, transcript, and diagnostics.
 7. Existing text-only behavior is preserved semantically, except that accepted chunks are published
@@ -103,9 +120,9 @@ start another model turn, publish protocol events, or persist transcript evidenc
 | Acceptance | Required evidence |
 | --- | --- |
 | 1-2 | Strict-fake success scripts assert the atomic returned value and zero writer, registry, usage-observer, transcript, and second-start calls. |
-| 3 | Table tests cover both exact grammars with/without opaque continuation and usage, including every legal observation position. |
-| 4 | Single-mutation scripts cover empty/mismatched text, mixed branches, duplicate call/usage/opaque, invalid order, early EOF, post-terminal data, controls, Unicode-byte bounds, and unknown event classes. |
-| 5 | Logical barriers race cancellation, deadline, provider failure, iterator close, and cleanup failure before and after each staged observation; no staged sentinel escapes. |
+| 3 | Table tests cover both exact success grammars with/without opaque continuation and usage, then replace each remaining success suffix with `ProviderFailed` after the empty prefix, opaque-only prefix, one and multiple deltas, reconciled text completion, the call, and each post-content usage position. |
+| 4 | Single-mutation scripts cover empty/mismatched text, mixed branches, duplicate call/usage/opaque, invalid order, early EOF, post-terminal data, controls, Unicode-byte bounds, unknown event classes, and an already-invalid prefix followed by `ProviderFailed`. |
+| 5 | Failure tables preserve every bounded provider code, safe message, and retryability while distinctive text/call/opaque/usage sentinels are absent from the outcome and all side-effect spies. Logical barriers race failure, cancellation, deadline, iterator close, and cleanup failure after each staged observation. |
 | 6 | Boundary tests exercise 65,535/65,536/65,537 bytes for the complete opaque replay payload, safe `repr`, canonical request-size accounting, and repository policy searches denying the value in protocol/transcript/log paths. |
 | 7 | Existing final-text fake scenarios assert the same final outcome and failure codes while a spy proves no optimistic publication occurs. |
 
@@ -115,6 +132,9 @@ start another model turn, publish protocol events, or persist transcript evidenc
   use timing sleeps or live provider calls.
 - Assert exact atomic outcomes, observation consumption, cleanup, terminal selection, and absence of
   writer/registry/transcript side effects.
+- Assert `ProviderFailed` at every legal prefix cut point preserves only the normalized bounded
+  failure classification, while a failure after invalid grammar cannot override the fixed invalid
+  response outcome.
 - Run focused provider-model, staged-collector, provider-session, cancellation, and limit tests,
   followed by the canonical non-live repository gate.
 
@@ -133,9 +153,12 @@ untrusted provider output and harness action. Do not create or revise a presenta
 
 ## Definition of done
 
-- Both accepted grammars and every meaningful ordering/cardinality failure have deterministic tests.
+- Both accepted success grammars, every legal normalized-failure cut point, and every meaningful
+  ordering/cardinality failure have deterministic tests.
 - No staged value is externally observable before complete response admission, and cancellation or
   failure leaves no partial answer or actionable call.
+- Provider-declared failure preserves the existing bounded `ProviderFailure` classification without
+  retaining staged text, call, opaque continuation, or usage.
 - Opaque continuation and usage bounds, request-size accounting, content-safe representations, and
   evidence exclusions have direct regression coverage.
 - **Delivered production-code churn** records the measured result and is no more than 600 lines; any
@@ -148,6 +171,8 @@ untrusted provider output and harness action. Do not create or revise a presenta
 
 - Atomic final-text and tool-call collector outcomes from exact strict-fake scripts.
 - A mutation matrix proving no partial publication or dispatch for rejected provider streams.
+- A normalized-failure cut-point table proving bounded classification survives while the entire
+  staged prefix disappears.
 - Opaque-continuation boundary, replay-size, safe-representation, cancellation, and cleanup tests.
 
 ## Deferred work

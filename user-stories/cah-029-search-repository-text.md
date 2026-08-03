@@ -40,9 +40,14 @@ provider response handling, context selection, or agent-loop continuation.
   contains `query`, `path` (default `.`), `max_depth` (default 4, admitted range 1-8), and
   `max_matches` (default 100, admitted range 1-200). Booleans used as integers are rejected.
 - `query` is admitted through CAH-026's post-JSON Unicode-scalar/strict-UTF-8 round-trip rule, then
-  must be one non-empty line whose UTF-8 encoding is at most 256 bytes. Lone surrogates, NUL,
-  carriage return, and newline are rejected with `repository_input_limit` before listing, policy,
-  or filesystem work; no Unicode normalization is applied.
+  must be one non-empty line whose UTF-8 encoding is at most 256 bytes. “One line” rejects the
+  complete boundary repertoire recognized by Python `str.splitlines()`: LF (`U+000A`), vertical tab
+  (`U+000B`), form feed (`U+000C`), CR (`U+000D`, including CRLF), file/group/record separators
+  (`U+001C` through `U+001E`), next line (`U+0085`), line separator (`U+2028`), and paragraph
+  separator (`U+2029`). The implementation checks for separators directly rather than accepting a
+  trailing boundary because `splitlines()` returns only one element. Lone surrogates, NUL, and every
+  listed separator are rejected with `repository_input_limit` before listing, policy, or filesystem
+  work; no Unicode normalization is applied.
 - Matching is literal and case-sensitive. It does not interpret regex, glob, Unicode normalization,
   locale, or escape syntax. Occurrences are non-overlapping; after a match, scanning resumes after
   the complete matched query.
@@ -111,23 +116,26 @@ host path, denied label, ignore rule, raw byte, or OS text.
 
 ## Acceptance criteria
 
-1. A valid literal query returns every encountered non-overlapping match in exact canonical
+1. Query admission accepts one non-empty separator-free Unicode-scalar string of at most 256 UTF-8
+   bytes and rejects NUL plus every Python `str.splitlines()` boundary before repository access.
+2. A valid literal query returns every encountered non-overlapping match in exact canonical
    path/line/column order until a reviewed bound is reached.
-2. Each excerpt is at most 512 UTF-8 bytes, contains the full query, uses the exact ellipsis algorithm,
+3. Each excerpt is at most 512 UTF-8 bytes, contains the full query, uses the exact ellipsis algorithm,
    and never splits a Unicode encoding.
-3. Recursive-depth, candidate-file, aggregate-byte, per-file, query, and returned-match bounds
+4. Recursive-depth, candidate-file, aggregate-byte, per-file, query, and returned-match bounds
    produce deterministic failures or explicit truncation and aggregate skip counts.
-4. Directory search omits ignored, denied, unavailable, non-text, oversized, and unsupported files
+5. Directory search omits ignored, denied, unavailable, non-text, oversized, and unsupported files
    without labels; direct-file search returns the shared fixed safe error.
-5. Requests and results are immutable, typed, documented, provider-neutral, and suppress queries and
+6. Requests and results are immutable, typed, documented, provider-neutral, and suppress queries and
    excerpts from default representations.
-6. Focused tests use only temporary local files and no subprocess, provider, model, or network.
+7. Focused tests use only temporary local files and no subprocess, provider, model, or network.
 
 ## Acceptance-to-test matrix
 
 | Contract or risk | Planned test | Layer | Expected evidence |
 | --- | --- | --- | --- |
 | Literal semantics | Search metacharacters, mixed case, and overlapping-looking input | Unit | Exact case-sensitive, non-regex, non-overlapping positions |
+| Complete one-line grammar | Parameterize LF, VT, FF, CR, CRLF, FS, GS, RS, NEL, line separator, and paragraph separator in leading, middle, and trailing positions; probe nearby tab, escape, and unit-separator controls plus ordinary multibyte text | Request boundary | Every splitlines-recognized separator fails with `repository_input_limit` and zero downstream calls; representative non-separators remain eligible subject to the other input rules |
 | Deterministic order | Create matches in reverse path order and repeated lines | Unit | Canonical path/line/column ordered tuple on repeated runs |
 | Excerpt boundary | Place a multibyte match within lines at 511/512/513+ bytes and near each edge | Unit | Exact full or ellipsized excerpt, <=512 bytes, no split character |
 | Query/match limits | Test query 255/256/257 bytes and matches 99/100/101 plus 199/200/201 | Unit | Success/truncation at configured bounds and input failure above hard max |
@@ -141,6 +149,10 @@ host path, denied label, ignore rule, raw byte, or OS text.
 - Add focused literal-search tests using temporary workspaces and the real list/read/policy seams.
 - Assert positions using Unicode scalar counts, exact excerpts by UTF-8 byte length, immutable values,
   deterministic order, summary counters, and fixed error hygiene.
+- Parameterize the complete `str.splitlines()` boundary repertoire in leading, middle, and trailing
+  positions. Include Unicode NEL/line/paragraph separators and C0 boundaries around VT/FF and
+  FS/GS/RS, with tab, escape, and unit separator as non-boundary sentinels; assert rejection occurs
+  before any list, policy, or filesystem call.
 - Assert the exact `ListFilesRequest` snapshot for default depth 4 and boundaries 1 and 8, one list
   call per directory search, and zero list/filesystem calls for depths 0 and 9 or a lone-surrogate
   query.
@@ -170,8 +182,8 @@ search with subprocess, regex, indexed, and semantic search. Do not add or revis
 ## Definition of done
 
 1. Every acceptance criterion maps to deterministic happy, boundary, and adversarial tests.
-2. Query, depth, candidate-file, aggregate-byte, per-file, match, and excerpt limits pass
-   below/at/above evidence.
+2. Query scalar, NUL, complete line-separator grammar, byte, depth, candidate-file, aggregate-byte,
+   per-file, match, and excerpt boundaries pass deterministic evidence before downstream access.
 3. Literal positions, canonical ordering, safe excerpts, policy omission, direct fixed errors, and
    check-before-read behavior are proved without leaks.
 4. Public request and result contracts are immutable, typed, documented, and reject extra fields.

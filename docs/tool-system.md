@@ -15,7 +15,7 @@ Every registered tool must document and encode:
 | --- | --- |
 | Name | Stable model-facing identifier |
 | Purpose | Narrow behavior and when the model should use it |
-| Input schema | Pydantic v2 model accepted at the model boundary |
+| Input schema | Strict portable model schema plus native Pydantic v2 request model |
 | Output schema | Structured success and failure result model |
 | Capability | `read`, `write`, `command`, `network`, or `privileged` |
 | Approval | Whether and at what granularity approval is required |
@@ -32,21 +32,26 @@ and TUI help. Documentation is part of the definition rather than a separate bes
 
 ## Registration and dispatch
 
-A registry maps a unique name to its definition and executor. Dispatch follows a fixed order:
+A registry maps a unique name to its definition and executor. Model-provided dispatch follows a
+fixed order:
 
 1. Reject an unknown tool name.
-2. Parse and validate arguments without performing work.
-3. Classify the requested capability.
-4. Evaluate workspace and command policy.
-5. Create an approval request when the action requires one.
-6. Bind approval to the exact normalized action.
-7. Revalidate mutable preconditions immediately before execution.
-8. Execute with cancellation, time, and output bounds.
-9. Validate and emit the structured result and audit events.
+2. Decode exactly one JSON object without performing work.
+3. Require its exact advertised key set before a native model can apply defaults.
+4. Validate native field types and constraints with Pydantic.
+5. Classify the requested capability.
+6. Evaluate workspace and command policy.
+7. Create an approval request when the action requires one.
+8. Bind approval to the exact normalized action.
+9. Revalidate mutable preconditions immediately before execution.
+10. Execute with cancellation, time, and output bounds.
+11. Validate and emit the structured result and audit events.
 
 Unsupported arguments are errors rather than ignored hints. Provider-supplied JSON never reaches an
 executor as an unvalidated dictionary. An invalid request yields a structured result the loop can
-return to the model; it does not crash the session.
+return to the model; it does not crash the session. Trusted direct Python callers may still use the
+unchanged native request models and their defaults; that does not make an advertised model-facing
+field optional.
 
 ## Read tools
 
@@ -147,24 +152,29 @@ and dynamic extension remain M3 or later.
 
 The [implementation-ready story](../user-stories/cah-032-define-provider-tool-contract.md) defines
 the strict portable schema subset, exact call/result history, context projection, request bounds,
-registry-to-definition bridge, and strict-fake behavior. It does not parse or dispatch a call.
+registry-to-definition bridge, pre-Pydantic exact-key gate, and strict-fake behavior. It does not
+parse or dispatch a call.
 
 ### Planned CAH-033 — Admit one complete tool-aware response
 
 The [response-admission story](../user-stories/cah-033-stage-and-validate-tool-aware-response.md)
 buffers a provider turn and validates its complete closed grammar before exposing final text or one
-tool-call request. Provider failure, premature EOF, mixed output, and multiple calls cause neither
-text publication nor tool dispatch.
+tool-call request. A normalized provider failure can end any valid nonterminal prefix while
+discarding its stage and preserving only its bounded classification. Premature EOF, mixed output,
+and multiple calls cause neither text publication nor tool dispatch.
 
 ### Planned CAH-034 and CAH-035 — Prove one exchange, then iterate
 
 The [one-round-trip story](../user-stories/cah-034-run-one-read-tool-round-trip.md) makes the entire
 request/call/validate/dispatch/result/response flow visible using one canonical compact JSON result
-envelope capped at 65,536 bytes inclusive; oversize output fails instead of being truncated. The
+envelope capped at 65,536 bytes inclusive. Model-facing keys are admitted before Pydantic defaults;
+oversize output fails instead of being truncated. The
 [bounded-loop story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces
 that teaching branch with a sequential four-turn, three-call state machine. Synchronous native tools
 are bounded and non-preemptive: cancellation and deadline checks bracket execution, and a result is
-discarded if cancellation wins while the handler runs.
+discarded if cancellation wins while the handler runs. CAH-037's planned composition root supplies
+that four-turn/three-call profile explicitly while retaining the 120-second and 4,096-byte CAH-022
+values; it does not inherit bare `LoopLimits()` defaults.
 
 ### Planned CAH-036 — Map OpenAI Responses function calls
 
@@ -172,7 +182,9 @@ The [implementation-ready story](../user-stories/cah-036-map-openai-tool-calls.m
 definitions, full stateless history, calls, results, and selected context through the strict OpenAI
 adapter. Full replay under `store=false` reconstructs every required field from each accepted
 canonical reasoning-item envelope—even with `current_turn` reasoning context—and applies the one
-reviewed null-content-to-omitted-input mapping. It disables parallel calls,
+reviewed null-content-to-omitted-input mapping. Every request sets exactly
+`include=["reasoning.encrypted_content"]`, including turn one, so the API returns the opaque payload
+needed for any later replay. It disables parallel calls,
 rejects hosted/MCP tool types, and leaves dispatch and continuation decisions in the harness. Explicit
 OpenAI selection authorizes
 bounded admitted repository-content egress for that session; it is not content-level secret

@@ -25,6 +25,8 @@ native capability, implement MCP, or create protocol/transcript schemas.
 
 - Map CAH-032 strict local definitions, context, history, calls, and results to exact Responses API
   request items on every turn.
+- Request the replay payload on every stateless turn with the exact Responses include value
+  `reasoning.encrypted_content`.
 - Reconcile streamed Responses events into CAH-033's atomic final-text or one-call grammar.
 - Preserve every optional completed reasoning output item as a bounded canonical full replay envelope
   behind the opaque neutral continuation, even with `reasoning.context="current_turn"`.
@@ -40,9 +42,12 @@ native capability, implement MCP, or create protocol/transcript schemas.
 - Every tool is an OpenAI local `function` definition derived through CAH-032's bridge with
   `strict=true`. Definitions retain harness order. No custom, hosted, web/file search, computer use,
   code interpreter, shell, image, or remote MCP tool is admitted.
-- Every model turn sends a complete ordered stateless replay. Requests set `store=false` and
-  `parallel_tool_calls=false`, omit `previous_response_id`, and never retain a response ID for
-  continuation. Prior neutral calls map to `function_call` input items and matching results to
+- Every model turn sends a complete ordered stateless replay. Requests set `store=false`,
+  `parallel_tool_calls=false`, and exactly `include=["reasoning.encrypted_content"]`, omit
+  `previous_response_id`, and never retain a response ID for continuation. The include is present on
+  turns one through four, including the initial turn, so any accepted reasoning output item contains
+  the encrypted replay payload required by a later stateless request. No other include value is sent.
+  Prior neutral calls map to `function_call` input items and matching results to
   `function_call_output` items with the exact bounded call ID.
 - `ProviderToolResult.output_json` maps byte-for-byte to `function_call_output.output`. Tool semantic
   success or error lives exclusively inside CAH-034's compact JSON payload. An SDK lifecycle
@@ -111,8 +116,9 @@ native capability, implement MCP, or create protocol/transcript schemas.
 
 ## Acceptance criteria
 
-1. Exact local definitions map to strict function tools; every tool-aware request sets `store=false`
-   and `parallel_tool_calls=false` and omits `previous_response_id`.
+1. Exact local definitions map to strict function tools; every tool-aware request sets `store=false`,
+   `parallel_tool_calls=false`, and exactly `include=["reasoning.encrypted_content"]`, and omits
+   `previous_response_id`.
 2. Every turn sends complete ordered stateless history, including every required field from prior
    canonical reasoning-item envelopes, the exact null-to-omitted content mapping, and matched
    function-call/function-output items.
@@ -135,7 +141,7 @@ native capability, implement MCP, or create protocol/transcript schemas.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1-2 | Exact request snapshots cover turns one through four, definitions/options, calls/results, all stored reasoning fields, both null-to-omitted and empty-list content replay forms, and explicit absence of response continuation/storage fields. |
+| 1-2 | Exact request snapshots cover turns one through four, definitions/options, calls/results, all stored reasoning fields, both null-to-omitted and empty-list content replay forms, the exact one-element `include=["reasoning.encrypted_content"]` on every turn, and explicit absence of response continuation/storage fields. An invocation spy checks every provider start; request-object mutations remove, misspell, or add an include value and fail exact mapping evidence. |
 | 3 | SDK-fake success cases cover both exact item sequences with/without reasoning and usage, asserting one atomic neutral outcome only after completed response reconciliation; boundary snapshots cover 65,535/65,536/65,537-byte full canonical replay envelopes. |
 | 4 | Success/error function-output snapshots prove identical fixed transport status and byte-exact compact JSON; mutations cannot alter loop decisions. |
 | 5 | Single-field tables mutate response/item IDs, indices, types, order, names, statuses, deltas/done, completed snapshots, usage, duplicates, mixed/parallel shapes, early EOF, and post-terminal events; no value escapes. |
@@ -148,8 +154,9 @@ native capability, implement MCP, or create protocol/transcript schemas.
 
 - Use deterministic SDK-shaped event builders and one-field mutation tables. Never stringify raw SDK
   values, encrypted reasoning, arguments, results, or repository content in assertions/diagnostics.
-- Assert exact outbound request objects, atomic normalized outcomes, operation cleanup, no late
-  observations, safe failure codes, and egress-selection behavior.
+- Assert exact outbound request objects—including the one-element encrypted-content include on every
+  turn—atomic normalized outcomes, operation cleanup, no late observations, safe failure codes, and
+  egress-selection behavior.
 - Run focused OpenAI adapter/provider-session/configuration tests, unchanged real process-boundary
   tests, and the canonical network-free gate. Run live smoke only when deliberately requested.
 
@@ -186,7 +193,8 @@ and the future MCP seam. Do not add or revise a presentation.
 ## Planned evidence
 
 - Exact request snapshots for local definitions, context framing, full call/result/reasoning replay,
-  `store=false`, `parallel_tool_calls=false`, and no previous response ID.
+  `store=false`, `parallel_tool_calls=false`, `include=["reasoning.encrypted_content"]` on turns one
+  through four, and no previous response ID.
 - Exhaustive SDK event success/mutation, cleanup, cancellation, and late-observation tests.
 - Configuration and policy evidence for explicit bounded egress, absent secret-scanning warning,
   unsupported hosted/MCP denial, and SDK isolation.

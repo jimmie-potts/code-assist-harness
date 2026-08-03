@@ -194,7 +194,9 @@ Bounded provider continuation state that the harness preserves byte-for-byte but
 as instructions, assistant text, or policy. Planned CAH-036 stores each accepted OpenAI reasoning
 item as one canonical full replay envelope—including its required ID and item fields, not only the
 encrypted content—and reconstructs it on later stateless `store=false` requests even while the
-configured reasoning context remains `current_turn`. SDK objects still stop at the adapter boundary.
+configured reasoning context remains `current_turn`. Every request uses the exact Responses include
+value `reasoning.encrypted_content` so even the first accepted reasoning item carries that replay
+payload. SDK objects still stop at the adapter boundary.
 
 ## NDJSON
 
@@ -298,7 +300,8 @@ writes ordered events, and coordinates shutdown. It hosts the harness core but i
 terminal interface. `run_runtime` supports provider composition and accepts the immutable limits
 configuration plus injectable monotonic clock pair. `main()` defaults to `MockSession`; explicit
 OpenAI/model selection validates configuration before lazily composing the concrete adapter and
-supplying default limits.
+supplying default limits. Planned CAH-037 instead supplies its explicit M2 profile: four model turns,
+120 provider-work seconds, 4,096 assistant-output bytes, and three observed tool calls.
 
 ## Sequence number
 

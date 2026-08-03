@@ -64,7 +64,7 @@ Ink TUI                Python harness                              Provider
                        | full input + call + result + opaque
                  CAH-034 two-turn owner
                        |
-          lookup -> parse -> validate -> dispatch -> render JSON
+          lookup -> decode -> key gate -> Pydantic -> dispatch -> render JSON
                        |                          |
                  CAH-031 registry          native read tool
 
@@ -77,7 +77,7 @@ result; a programmer defect fails the session. No third turn exists in this teac
 ## Practical walkthrough
 
 1. Build the exact four-tool catalog before provider work.
-2. Admit the first response; charge its one call before lookup/parsing.
+2. Admit the first response; charge its one call before lookup/decoding.
 3. Validate and run one bounded synchronous native tool.
 4. Render exact compact success/error JSON and build the matching result.
 5. Replay context, definitions, optional opaque state, call, and result into turn two.
@@ -89,15 +89,18 @@ result; a programmer defect fails the session. No third turn exists in this teac
 
 ```python
 descriptor = registry.lookup(call.name)
-arguments = descriptor.input_model.model_validate_json_object(call.arguments_json)
+decoded = decode_json_object(call.arguments_json)
+require_provider_tool_argument_keys(definition, decoded)
+arguments = descriptor.input_model.model_validate(decoded)
 check_cancel_and_deadline()
 native_result = registry.dispatch(descriptor, arguments)
 check_cancel_and_deadline()
 result = render_compact_envelope(native_result)
 ```
 
-Every failed line prevents the following line. A late native result is discarded after the second
-check.
+The CAH-032 key gate rejects omitted model-facing fields—even when the unchanged native model has a
+default—and additional fields before Pydantic runs. Every failed line prevents the following line.
+A late native result is discarded after the second check.
 
 ### Planned pseudocode: one follow-up
 
@@ -114,6 +117,7 @@ The code is intentionally not a `while` loop.
 | Scenario | Safe result | Evidence |
 | --- | --- | --- |
 | malformed/non-object JSON | exact `invalid_read_tool_input` envelope | zero native calls |
+| omitted defaulted model key | exact `invalid_read_tool_input` envelope | zero Pydantic/dispatch calls |
 | unknown name | exact `unknown_read_tool` envelope | fixed message only |
 | missing file | exact repository error envelope | no OS/path leak |
 | cancellation during sync tool | late return discarded | no turn two start |
