@@ -135,7 +135,9 @@ gate passes with the hardened evidence path.
 - Review handoff: ready-for-review [pull request
   #26](https://github.com/jimmie-potts/code-assist-harness/pull/26), targeting
   `codex/implement-cah-023`
-- Thread-aware audit at handoff: zero review threads, therefore zero unresolved actionable threads
+- Final thread-aware audit: one automated review thread identified two stale `in-progress`
+  references; both are corrected, the thread is replied to and resolved after validation, and zero
+  unresolved actionable threads remain
 
 CAH-025 is **Done**, and its lesson is **Verified against implementation**. No retained presentation
 file is added or revised.

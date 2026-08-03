@@ -12,7 +12,7 @@
 
 > [!IMPORTANT]
 > This lesson preserves CAH-002 completion-time evidence for the TypeScript shell, automated tests,
-> and terminal lifecycle. Later units connected Python, protocol, and sessions, and the in-progress
+> and terminal lifecycle. Later units connected Python, protocol, and sessions, and the completed
 > [CAH-025 lesson](cah-025-magical-mission-ink-presentation.md) owns the current Magical Mission
 > presentation. Those later changes do not retroactively expand CAH-002's scope.
 

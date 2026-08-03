@@ -273,7 +273,9 @@ without invoking submission or cancellation callbacks; semantic tests cover `NO_
 `TERM=dumb`. `git diff --check` passes. The implementation is published from branch
 `agent/magical-mission-tui` at implementation commit `8398d2c` in ready-for-review
 [pull request #26](https://github.com/jimmie-potts/code-assist-harness/pull/26), targeting
-`codex/implement-cah-023`. A thread-aware GitHub audit reported zero review threads at handoff.
+`codex/implement-cah-023`. A later automated review identified two stale `in-progress` references;
+both are corrected, its thread is resolved after validation, and the final thread-aware audit reports
+zero unresolved actionable threads.
 
 ## Production expansion
 

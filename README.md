@@ -248,7 +248,7 @@ npm or the TypeScript loader runs. The runtime supervisor separately resolves `u
 `PATH`, follows symlinks, rejects paths under `/mnt` and names ending in `.exe`, and validates the
 prepared project environment before spawn. The TUI then sends a validated `runtime.initialize`
 command, waits for the correctly correlated `runtime.ready` event, and displays the canonical
-workspace and runtime state. The in-progress Magical Mission presentation uses a Star Command header,
+workspace and runtime state. The completed Magical Mission presentation uses a Star Command header,
 Mission Log, state-derived familiar, truthful command-input headings, an alert deck immediately below
 the header, and the same authoritative status text. It renders side-by-side panels at 96 columns
 when at least 24 rows are available, stacks them at wider low-height sizes and from 56 through 95
