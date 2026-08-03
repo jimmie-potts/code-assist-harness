@@ -33,8 +33,8 @@ TUI behavior, or parallel execution.
   replay, checked usage aggregation, cooperative checkpoint seam, cancellation handling, and
   existing transcript-v3 evidence.
 - Keep all CAH-022 limits and CAH-032 complete-request bytes cumulative.
-- Accumulate applicable instruction items atomically across as many as three successful
-  path-targeted reads without letting returned list/search paths select context.
+- Accumulate applicable instruction items atomically across as many as three successful reads,
+  covering the requested path and every model-visible returned-path owner before each result replay.
 - Prove legal progress, every reachable stop, and defense-in-depth guards with deterministic fakes
   and seeded ledger states.
 
@@ -43,8 +43,9 @@ TUI behavior, or parallel execution.
 - The Python harness owns the state machine:
   `admit_model -> publish_final` or
   `admit_model -> admit_call -> validate -> cooperate_before_dispatch -> dispatch
-  -> cooperate_after_dispatch -> discover_scope -> cooperate_after_discovery -> enrich_context
-  -> cooperate_after_merge -> stage_result/history/request -> cooperate_before_provider_start
+  -> cooperate_after_dispatch -> for_each_instruction_scope(discover -> cooperate_after_discovery
+  -> enrich_context -> cooperate_after_merge) -> stage_result/history/request
+  -> cooperate_before_provider_start
   -> admit_model -> commit/start`. A known tool error still crosses `cooperate_after_dispatch`, then
   skips discovery/enrichment and stages its safe result against the current context.
   Provider adapters translate one operation; registry tools execute one validated input. Neither
@@ -63,22 +64,26 @@ TUI behavior, or parallel execution.
   call fails first. The `model_turn_limit_exceeded` check before every `Provider.start()` remains
   defense in depth and is tested directly with a seeded admission ledger rather than an impossible
   five-turn response script.
-- Each accepted call follows CAH-034's exact lookup, JSON-object decode, model-facing key gate,
-  native Pydantic validation, dispatch, result validation, and compact-envelope rendering order.
+- Each accepted call follows CAH-034's exact lookup, duplicate-aware JSON-object decode,
+  model-facing key gate, native Pydantic validation, dispatch, result validation,
+  instruction-scope extraction, and compact-envelope rendering order. Duplicate decoded member
+  names fail as `invalid_read_tool_input` before dictionary collapse or any later stage; later loop
+  iterations reuse this decoder and never implement a second argument path.
   Synchronous tools remain bounded and non-preemptive. CAH-035 reuses—not wraps or
   reimplements—CAH-034's `cooperate_then_guard(checkpoint)` before and after dispatch. Each call
   unconditionally yields with `await asyncio.sleep(0)` outside locks, invokes an optional injected
   deterministic test observer/gate, then applies the existing cancellation/deadline guard with its
   established precedence. A late result remains a local candidate and is discarded.
-- After each successful native dispatch and its post-dispatch guard, CAH-031 supplies the validated
-  request `path` as `target_scope`; CAH-025 discovers that canonical ancestor chain and CAH-030
-  atomically merges its instruction items. Cancellation/deadline guards run after discovery, after
-  merge before result/context append, and before the next provider start by reusing the same
-  cooperative seam at `after_discovery`, `after_merge`, and `before_provider_start`. These bounded
-  synchronous values are discarded when a checkpoint loses. Up to three successful calls may
-  therefore accumulate instruction items. Only the requested target scope is admitted: paths
-  returned by broad listing/search output never drive discovery. Known tool errors keep the current
-  context candidate unchanged and still cross `before_provider_start` before continuation.
+- After each successful native dispatch and its post-dispatch guard, CAH-031 supplies ordered local
+  `instruction_scopes`: the validated request path first, then every exact-deduplicated owner of a
+  model-visible returned path. For each scope, CAH-025 discovers the canonical ancestor chain and
+  CAH-030 folds its instruction items into a local candidate. Cancellation/deadline guards run after
+  every discovery, after every merge before result/context append, and before the next provider
+  start by reusing the same cooperative seam at `after_discovery`, `after_merge`, and
+  `before_provider_start`. These bounded synchronous values are discarded when a checkpoint loses.
+  Up to three successful calls may therefore accumulate instruction items from direct, list, stat,
+  read, and search evidence. Known tool errors carry no scopes, keep the current context candidate
+  unchanged, and still cross `before_provider_start` before continuation.
 - A repeated candidate-owner `applies_to` binding is idempotent only when source, content, and
   original byte count are identical. A changed owner snapshot fails closed instead of replacing the
   prior item, while the same source under another owner remains a distinct charged binding. New
@@ -139,10 +144,10 @@ TUI behavior, or parallel execution.
    reach existing assistant/session events.
 4. A fourth legal call fails first as `tool_call_limit_exceeded`; the fifth-turn admission guard is
    proven separately from seeded state as `model_turn_limit_exceeded` with zero provider starts.
-5. Successful requested target scopes accumulate applicable instructions atomically across up to
-   three calls; exact owner snapshots are idempotent, changed owner snapshots fail closed, nested/sibling
-   scopes retain their own applicability, and known tool errors or returned result paths do not
-   change context.
+5. Every successful call's requested and result-derived instruction scopes accumulate applicable
+   instructions atomically across up to three calls; exact owner snapshots are idempotent, changed
+   owner snapshots fail closed, nested/sibling scopes retain their own applicability, and known tool
+   errors do not change context.
 6. Checked usage from all accepted turns produces exactly one existing transcript-v3 aggregate only
    on successful final text; every unsuccessful path persists no partial usage.
 7. Bounded tool errors may continue, while invalid response grammar, internal invariants, and limit
@@ -161,9 +166,9 @@ TUI behavior, or parallel execution.
 | Acceptance | Required evidence |
 | --- | --- |
 | 1, 3 | Table-driven strict-fake cases complete with final text on turns one through four and assert exact states, immutable context snapshots and positional continuation/call/result history, publication order, and one terminal. |
-| 2, 5 | Scripts exercise zero through three successful calls and instrument maximum provider/tool concurrency as one. Exact requests prove root-only start, nested and sibling instruction accumulation, unchanged definitions, repeat/alias idempotence, distinct sibling `applies_to`, and no scope inference from returned list/search paths. |
+| 2, 5 | Scripts exercise zero through three successful calls and instrument maximum provider/tool concurrency as one. Exact requests prove root-only start, direct plus broad-result nested/sibling instruction accumulation before replay, unchanged definitions, first-occurrence scope ordering, repeat/alias idempotence, and distinct sibling `applies_to`. A later-turn duplicate-argument call proves CAH-034's decoder is reused and dispatch stays zero. |
 | 4 | One fresh-session script returns a fourth admitted call and proves tool-limit precedence/no dispatch; a separate seeded model-turn ledger proves zero-start fifth-turn defense in depth. |
-| 5, 9 | Changed-duplicate, nested/sibling discovery, merge validation, and CAH-030 item/byte-budget failures leave the preceding snapshot intact, publish/persist no pending result/context, and start no next turn. Seeded boundaries exhaust deadline, UTF-8 output, calls, turns, and 524,287/524,288/524,289-byte complete requests; every request rechecks context and request bounds. |
+| 5, 9 | Changed-duplicate, later-scope discovery, nested/sibling merge validation, and CAH-030 item/byte-budget failures leave the preceding snapshot intact, publish/persist no pending result/context, replay no successful output, and start no next turn. Seeded boundaries exhaust native 500-entry/200-match scope sets, deadline, UTF-8 output, calls, turns, and 524,287/524,288/524,289-byte complete requests; every request rechecks context and request bounds. |
 | 6 | Usage tables cover any subset of four turns, checked exact sums, overflow, missing usage, rejected final turn, cancellation, and exactly one aggregate persistence call. |
 | 7 | Known tool errors continue once; grammar mutations, registry invariant faults, request overflow, and programmer defects assert exact safe terminal and no raw sentinel. |
 | 8 | Named `asyncio.Event` gates race cancellation/teardown against provider await, post-admission, `before_dispatch`, `after_dispatch`, `after_discovery`, `after_merge`, `before_provider_start`, final publication, and cleanup. Injected clocks prove exact existing deadline/cancellation tie precedence without elapsed sleeps. Distinctive late tool/bundle/package/history/request values never enter history, context, evidence, or another request, including known errors. CAH-034's separate no-hook queued-cancel test mutation-proves the unconditional yield rather than relying on an awaited Event hook. Semantic policy assertions prove CAH-035 calls that same outside-lock yield/test-hook/guard seam rather than duplicating it. |
@@ -195,8 +200,8 @@ presentation.
   subagents, delegated loops, or provider-managed continuation.
 - OpenAI SDK mapping, MCP clients/servers, remote/hosted tools, protocol/TUI tool events, new
   transcript records, or hidden-reasoning interpretation.
-- Writes, subprocesses, network tools, approvals, dynamic policy, context summarization, returned-path
-  context inference, or unlimited/adaptive turns.
+- Writes, subprocesses, network tools, approvals, dynamic policy, context summarization, semantic
+  inference beyond explicit result paths, or unlimited/adaptive turns.
 
 ## Definition of done
 
@@ -211,8 +216,8 @@ presentation.
 
 ## Planned evidence
 
-- Exact state traces for completion on each turn and zero through three calls, with atomic nested/
-  sibling instruction accumulation and idempotent repeated/alias scopes.
+- Exact state traces for completion on each turn and zero through three calls, with atomic direct and
+  broad-result nested/sibling instruction accumulation and idempotent repeated/alias scopes.
 - Fresh fourth-call precedence and seeded fifth-turn defense-in-depth tests.
 - Changed-duplicate/discovery/merge/budget atomicity plus cumulative context, request, deadline,
   output, usage, cancellation, and terminal-race suites.

@@ -257,9 +257,15 @@ perform filesystem access or eliminate time-of-check-to-time-of-use races.
 > so that a prior path snapshot cannot silently authorize changed content.
 
 [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) owns the shared admission
-policy and exposes pure lexical-path admission plus its exact hard-deny table. CAH-025 reuses those
-pre-I/O decisions for supplied and canonical scope plus each resolved instruction source, while its
-control-plane `AGENTS.md` candidates remain exempt only from `.gitignore`. It preserves the canonical
+policy and exposes pure lexical-path admission plus its exact hard-deny table. Every present
+`.gitignore` candidate preserves its owner directory for rule scope, but its source resolves through
+`WorkspaceBoundary`, passes canonical hard denial, and is re-resolved and rechecked immediately
+before a bounded cache-miss read. Escaping, hard-denied, dangling, inaccessible, retargeted, or
+non-regular sources fail as `repository_policy_invalid` without reading requested content and are
+not opened, cached, or charged. An admitted internal symlink remains owner-relative and a shared
+canonical source is read and charged once. CAH-025 reuses the same pre-I/O decisions for supplied and
+canonical scope plus each resolved instruction source, while its control-plane `AGENTS.md` candidates
+remain exempt only from `.gitignore`. It preserves the canonical
 candidate owner as `applies_to` even when a leaf symlink resolves to another source directory. The
 full read policy applies Git-compatible ignore rules independently to the normalized supplied path
 and resolved canonical target; each view requires every parent directory to remain traversable
@@ -275,12 +281,14 @@ remain M3 work.
 > As a user, I want model tool requests admitted through one typed registry and explicit bounded loop
 > so that neither the provider nor an MCP transport can execute or continue work directly.
 
-CAH-031 limits registration to four read capabilities and attaches harness-owned target-scope
-metadata to successful reads. CAH-032 defines strict context/tool exchange
+CAH-031 limits registration to four read capabilities and attaches ordered, content-suppressed
+instruction-scope metadata for the request and every model-visible result owner to successful reads.
+CAH-032 defines strict context/tool exchange
 values, including a bounded positional opaque-continuation item type, without dispatch. CAH-033
 admits a complete response before either publication or dispatch,
-CAH-034 discovers and atomically admits applicable instructions for the successful target before its
-follow-up, and CAH-035 generalizes that monotonic context rule only to four model
+CAH-034 rejects duplicate JSON member names recursively before ordinary decoding can collapse them,
+then discovers and atomically admits applicable instructions for every successful result scope before
+any replay. CAH-035 generalizes that monotonic context rule only to four model
 turns and three sequential calls with cumulative limits. CAH-036 requests
 `reasoning.encrypted_content` on every stateless OpenAI turn so replay is available, but keeps that
 opaque payload out of policy and evidence. CAH-037 explicitly composes the four-turn, 120-second,

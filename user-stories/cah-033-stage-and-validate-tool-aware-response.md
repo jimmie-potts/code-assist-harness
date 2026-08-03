@@ -56,6 +56,11 @@ start another model turn, publish protocol events, or persist transcript evidenc
   deltas. The accepted final text is non-empty. A tool-call turn contains no text observation and
   exactly one bounded `ProviderToolCall`; mixed text/call, duplicate calls, post-terminal values, and
   unsupported observations select the fixed `provider_invalid_response` failure.
+- The accepted call preserves CAH-032's bounded `arguments_json` byte-for-byte and does not parse it.
+  Repeated JSON member names inside that one argument string are distinct from duplicate call
+  observations: they do not invalidate CAH-033's response grammar and no first/last value is selected
+  here. CAH-034 is the sole owner of pair-preserving decode and maps such input to
+  `invalid_read_tool_input` before its exact-key gate, Pydantic validation, or dispatch.
 - One optional `ProviderOpaqueContinuation` may appear only first. It contains one SDK-free,
   CAH-032-validated `payload` string whose strict UTF-8 encoding is at most 65,536 bytes. The provider
   adapter owns the payload's replay format; the core preserves the complete payload byte-for-byte and
@@ -101,8 +106,9 @@ start another model turn, publish protocol events, or persist transcript evidenc
 2. Neither staged text nor a staged call causes protocol publication, dispatch, usage persistence,
    or another provider turn in this unit.
 3. Exact final-text and exactly-one-call grammars accept optional first-position opaque continuation
-   and optional post-content usage; normalized provider failure may terminate every otherwise valid
-   nonterminal prefix of either grammar.
+   and optional post-content usage; an accepted call preserves its bounded raw arguments without
+   parsing, including duplicate-member syntax; normalized provider failure may terminate every
+   otherwise valid nonterminal prefix of either grammar.
 4. Text completion reconciles exactly; mixed, duplicate, unsupported, premature EOF, post-terminal,
    invalid opaque, invalid usage, and provider failure after an already-invalid prefix select
    `provider_invalid_response` without leaks.
@@ -118,7 +124,7 @@ start another model turn, publish protocol events, or persist transcript evidenc
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1-2 | Strict-fake success scripts assert the atomic returned value and zero writer, registry, usage-observer, transcript, and second-start calls. |
+| 1-2 | Strict-fake success scripts assert the atomic returned value and zero writer, argument-parser, registry, usage-observer, transcript, and second-start calls. One accepted call carries same-value and conflicting duplicate `path` members byte-for-byte, proving CAH-033 neither rejects them as provider grammar nor chooses a winner. |
 | 3 | Table tests cover both exact success grammars with/without opaque continuation and usage, then replace each remaining success suffix with `ProviderFailed` after the empty prefix, opaque-only prefix, one and multiple deltas, reconciled text completion, the call, and each post-content usage position. |
 | 4 | Single-mutation scripts cover empty/mismatched text, mixed branches, duplicate call/usage/opaque, invalid order, early EOF, post-terminal data, controls, Unicode-byte bounds, unknown event classes, and an already-invalid prefix followed by `ProviderFailed`. |
 | 5 | Failure tables preserve every bounded provider code, safe message, and retryability while distinctive text/call/opaque/usage sentinels are absent from the outcome and all side-effect spies. Logical barriers race failure, cancellation, deadline, iterator close, and cleanup failure after each staged observation. |
@@ -145,7 +151,8 @@ untrusted provider output and harness action. Do not create or revise a presenta
 
 ## Exclusions
 
-- Tool lookup, JSON parsing, native dispatch, result construction, a second model turn, or a loop.
+- Tool lookup, JSON parsing or duplicate-member detection, native dispatch, result construction, a
+  second model turn, or a loop. CAH-034 owns duplicate-aware decoding after atomic call admission.
 - OpenAI SDK event mapping, MCP clients/servers, remote or hosted tools, and provider continuation IDs.
 - Protocol/TUI changes, transcript migration, usage persistence, repository writes, subprocesses,
   approvals, retries, parallelism, or content-level secret scanning.
@@ -169,6 +176,8 @@ untrusted provider output and harness action. Do not create or revise a presenta
 ## Planned evidence
 
 - Atomic final-text and tool-call collector outcomes from exact strict-fake scripts.
+- Byte-exact admitted calls containing duplicate JSON argument members, with zero parser or dispatch
+  work in this unit.
 - A mutation matrix proving no partial publication or dispatch for rejected provider streams.
 - A normalized-failure cut-point table proving bounded classification survives while the entire
   staged prefix disappears.

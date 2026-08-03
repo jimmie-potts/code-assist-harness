@@ -84,7 +84,7 @@ plans an immutable Python workspace boundary while leaving repository discovery 
 now-refined CAH-026, CAH-025, then CAH-027 through CAH-030 units. CAH-026 intentionally precedes
 CAH-025 so instruction discovery reuses pure lexical/hard-deny admission without importing
 ordinary-read limits, errors, or `.gitignore` behavior. CAH-031 through CAH-037 complete the planned M2 registry,
-target-scoped instruction propagation, LLM/tool exchange, atomic provider-response admission,
+requested/result-path instruction propagation, LLM/tool exchange, atomic provider-response admission,
 explicit agent loop, OpenAI mapping, and evaluation sequence.
 
 ## Epic backlog
@@ -172,8 +172,9 @@ policy.
 - Define an executor interface suitable for a later container implementation.
 
 CAH-031 is the implementation-ready M2 registry kernel. It owns typed registration, dispatch, and
-harness-only target-scope extraction for the already-defined native read handlers. CAH-034/035 use
-that metadata to add applicable instructions before another provider turn. M3 retains write and
+harness-only ordered instruction-scope extraction for requested and model-visible result paths from
+the already-defined native read handlers. CAH-034/035 use that metadata to add every applicable
+instruction before result replay or another provider turn. M3 retains write and
 command capabilities, layered policy, approvals, subprocess execution, network behavior, and
 executor isolation.
 

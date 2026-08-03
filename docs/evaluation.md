@@ -270,13 +270,19 @@ OpenAI selection and repository-content egress warning as the application path.
 The deterministic fixture also proves context evolution: the exact first request contains only root
 instructions, and a successful `read_file` target under `pkg/` causes the binding with
 `source="shared/rules.md"` and `applies_to="pkg"` to appear in the next request. An exact owner snapshot
-repeats idempotently. A separate injected case
-unions the instruction chains for the supplied root scope and every canonical-distinct focus path
-before focus content, then proves each literal query uses only the exact supplied-scope
-`SearchTextRequest` projection with depth four and 100 matches. An internal instruction link records
+repeats idempotently. Broad list/search results expose multiple nested and sibling owners; every
+binding must appear before the result is replayed, and one failing later owner rejects the whole local
+transaction. A separate injected case unions the instruction chains for the supplied root scope,
+every canonical-distinct focus path, and every first-occurrence search-match owner before its content,
+then proves each literal query uses only the exact supplied-scope `SearchTextRequest` projection with
+depth four and 100 matches. An internal instruction link records
 its resolved source separately from candidate-owner applicability; a hard-denied target is never
-read. Named event gates before dispatch, after synchronous dispatch, after discovery, after merge,
-and before provider start prove zero native execution at the first gate and that later result,
+read. CAH-034's focused tables cover same-value, conflicting, reversed, nested, and escape-equivalent
+duplicate-member cases. The composed CAH-037 fixture uses conflicting and escape-equivalent names to
+prove rejection before the exact-key gate or Pydantic with zero dispatch, plus one charged observation
+and unchanged-context call/error replay; its unknown-tool control still wins before decoding. Named
+event gates before dispatch, after synchronous dispatch, after every discovery, after every merge, and before provider
+start prove zero native execution at the first gate and that later result,
 instruction, context, history, and request candidates remain uncommitted when cancellation wins.
 Instruction-discovery or merge failures, changed owner snapshots, and
 context/request overflow produce zero next provider starts; known bounded tool errors may continue

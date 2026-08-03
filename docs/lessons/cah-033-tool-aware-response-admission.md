@@ -49,6 +49,10 @@ receive fragments -> stage privately -> validate terminal snapshot -> expose one
 A common misconception is that `response.completed` validates everything before it. The harness
 must still reconcile text, item order, cardinality, usage, and bounds itself.
 
+Another misconception is that accepting one complete call makes its JSON arguments valid. CAH-033
+preserves that bounded string without parsing it. Even two `path` members remain raw bytes here;
+CAH-034 later uses pair-preserving decode so a normal dictionary cannot silently choose the last one.
+
 ## Key concepts
 
 - **Staging:** temporary private storage that has no external side effect.
@@ -58,6 +62,8 @@ must still reconcile text, item order, cardinality, usage, and bounds itself.
 - **Commit point:** the later moment orchestration may publish text or act on a call.
 - **Failure cut point:** any still-nonterminal valid prefix after which normalized failure may end the
   turn without committing the prefix.
+- **Raw call arguments:** bounded provider text preserved exactly for later CAH-034 admission, not a
+  dictionary or typed tool request.
 
 ## Architecture and design
 
@@ -103,10 +109,11 @@ that same position before its call when later replayed.
 2. Collect observations into private bounded state.
 3. Select one branch when text or a call appears; never switch branches.
 4. Reconcile completion and at most one usage value.
-5. Close the operation and return one immutable terminal outcome.
-6. On normalized provider failure, discard the whole stage and preserve only its bounded
+5. Preserve an accepted call's argument string byte-for-byte without parsing or duplicate detection.
+6. Close the operation and return one immutable terminal outcome.
+7. On normalized provider failure, discard the whole stage and preserve only its bounded
    classification.
-7. On invalid grammar or cancellation, discard the whole stage and reap provider work.
+8. On invalid grammar or cancellation, discard the whole stage and reap provider work.
 
 ## Implementation code samples
 
@@ -140,6 +147,7 @@ The separation makes a test spy able to prove zero external action before collec
 | --- | --- | --- |
 | text then call | fixed invalid-response failure | zero writer/registry calls |
 | call before late duplicate usage | whole turn rejected | no actionable call escapes |
+| one call contains duplicate `path` members | accepted raw call for later CAH-034 rejection | zero argument-parser/registry calls |
 | completed text differs from deltas | whole turn rejected | staged sentinel absent |
 | 65,537-byte opaque item | bound failure | safe representation only |
 | cancellation before completion | discard and reap | one terminal winner |
@@ -189,11 +197,14 @@ semantics; never weaken call admission for latency.
 4. Teach back the difference between receiving a call and authorizing execution.
 5. List every valid prefix after which `ProviderFailed` may terminate the turn, then explain why an
    invalid prefix followed by the same event remains invalid.
+6. Explain why duplicate call observations violate this grammar while duplicate members inside one
+   raw argument string are deferred to CAH-034.
 
 ## Key takeaways
 
 - Provider output remains untrusted until the whole turn is admitted.
 - Atomic staging protects both the TUI and tools from late grammar failures.
+- Atomic call admission preserves raw arguments; it does not parse them or erase duplicate members.
 - Normalized provider failure may end any valid partial prefix, but carries none of that staged data.
 - The harness can preserve opaque state without understanding or recording it.
 

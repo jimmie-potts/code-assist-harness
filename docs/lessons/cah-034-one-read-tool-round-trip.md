@@ -6,8 +6,8 @@
 - **Implementation status:** Planned; the harness still rejects tool requests
 - **Story:** [CAH-034](../../user-stories/cah-034-run-one-read-tool-round-trip.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** One observe-validate-dispatch-enrich-result-follow-up sequence, scoped
-  instructions, exact safe envelopes, non-preemptive tool cancellation boundaries, and one
+- **Review focus:** One observe-validate-dispatch-enrich-result-follow-up sequence, duplicate-safe
+  argument decoding, complete scoped instructions, non-preemptive cancellation boundaries, and one
   aggregate usage record
 - **Visual companion:** None; the Markdown diagram is authoritative
 - **Related architecture:** [Agent loop](../agent-loop.md), [Tool system](../tool-system.md), and
@@ -17,16 +17,19 @@
 
 ## Quick summary
 
-CAH-034 takes one atomically admitted call, validates and executes one native read tool, atomically
-refreshes instructions for its successful requested path, feeds one bounded result and the resulting
-context into one follow-up model turn, and publishes only the admitted final answer.
+CAH-034 takes one atomically admitted call, decodes its preserved raw arguments without losing
+duplicate names, and executes one native read tool. Before replay, it atomically covers the requested
+path and every model-visible result owner with applicable instructions, then publishes only an
+admitted follow-up answer.
 
 ## Learning objectives
 
 After this unit, you should be able to:
 
 - trace ownership across model, registry, native tool, and follow-up request;
-- explain why a successful requested path can add instructions while returned paths cannot;
+- explain why CAH-034 alone decodes raw tool arguments and why dictionary construction must wait;
+- derive ordered instruction scopes from a successful validated result without exposing that
+  metadata to the provider;
 - distinguish a tool's semantic error from a provider transport status;
 - explain why cancellation around bounded synchronous work requires an event-loop yield before its
   state guard;
@@ -53,16 +56,26 @@ yield -> guard -> bounded sync tool -> yield -> guard -> admit or discard candid
 A common misconception is that returning an error result means the provider request failed. Tool
 success/error is model-facing JSON; the provider transport completed normally in both cases.
 
-Repository instructions are scoped control-plane input. The first turn sees root instructions. Once
-a successful call validates a narrower requested path, the harness—not the model result—discovers the
-applicable ancestor chain and replaces the context snapshot atomically.
+CAH-032, CAH-033, and CAH-036/provider adapters preserve bounded argument JSON as raw text. A normal
+JSON decoder would silently collapse `{"path":"a","path":"b"}` into one value. CAH-034 therefore
+keeps object pairs, rejects any repeated decoded name at any depth, and only then constructs
+dictionaries. Exact code points are compared after escape decoding, so `"path"` and `"pa\u0074h"`
+conflict; case folding and Unicode normalization are deliberately absent.
+
+Repository instructions are scoped control-plane input. A validated successful result carries local,
+content-suppressed `instruction_scopes`: the requested path first, then exact-deduplicated owners for
+every model-visible returned path. The harness discovers and folds all of them before replaying the
+result. These scopes are trusted only because CAH-031 derives them from validated native values, not
+because the model named a path.
 
 ## Key concepts
 
 - **Dispatch:** invoke the registered implementation after validation.
 - **Safe envelope:** fixed compact JSON containing validated result or fixed error.
 - **Full replay:** resend original history plus `continuation? -> call -> result` in exact order.
-- **Target scope:** the validated request `path` from one successful native read.
+- **Instruction scopes:** ordered local paths whose complete instruction bundles must precede replay.
+- **Duplicate-aware decode:** preserve object pairs and reject repeated decoded names recursively
+  before constructing a dictionary.
 - **Atomic enrichment:** replace the whole immutable context snapshot or keep the prior one.
 - **Late result:** work that returns after cancellation/deadline selected another outcome.
 - **Aggregate usage:** checked sum persisted once after successful final text.
@@ -76,12 +89,15 @@ Ink TUI                Python harness                              Provider
                        | enriched context + [opaque? -> call -> result]
                  CAH-034 two-turn owner
                        |
- lookup -> decode -> key gate -> Pydantic -> yield/guard -> dispatch -> yield/guard
-                       |                                         |
-                 CAH-031 registry                         local candidate
-                                                               v
+ lookup name -> pair-preserving recursive decode -> key gate -> Pydantic
+      |                                (CAH-034 only)             |
+ CAH-031 registry                              yield/guard -> dispatch -> yield/guard
+                                                                  |
+                                                   validated success + local scopes
+                                                                  v
+                                      for each ordered instruction_scope:
                          CAH-025 discover -> yield/guard -> CAH-030 merge -> yield/guard
-                                                               |
+                                                                  |
                                       build local history/context/request candidate
                                                                |
                                               yield/guard -> model admission -> commit/start
@@ -89,20 +105,25 @@ Ink TUI                Python harness                              Provider
 Evidence: existing transcript-v3 session usage aggregate only; no per-call/content record
 ```
 
-The first call is already atomic from CAH-033. Unknown or invalid input becomes an exact error JSON
-result and keeps the initial context; a programmer defect or discovery/merge failure fails the
-session. No third turn exists in this teaching slice.
+The first call is already atomic from CAH-033. Registry lookup precedes argument decoding, so an
+unknown name deterministically wins even when its JSON also contains duplicates. A known duplicate
+becomes the exact `invalid_read_tool_input` result: the observation remains charged, but key gating,
+Pydantic validation, dispatch, discovery, and context growth remain zero. If final checkpoint and
+admission pass, its exact call/error pair must replay in one follow-up against unchanged context. A
+programmer defect or any scope discovery/merge failure fails the session. No third turn exists in
+this teaching slice.
 
 ## Practical walkthrough
 
 1. Build the exact four-tool catalog before provider work.
-2. Admit the first response; charge its one call before lookup/decoding.
-3. Validate and run one bounded synchronous native tool.
+2. Admit the first response and charge its one call. Look up the exact registry name before CAH-034
+   pair-decodes raw arguments and rejects recursive duplicates before dictionary construction.
+3. Run the exact-key gate, Pydantic validation, and one bounded synchronous native tool in order.
 4. Render exact compact success/error JSON and run the cooperative post-dispatch checkpoint: yield
    to the event loop, then apply the cancellation/deadline guard.
-5. On success, take CAH-031's validated request `path`, discover its instruction chain through
-   CAH-025, check cancellation/deadline, atomically merge it through CAH-030, and check again. On a
-   known tool error, keep the initial context.
+5. On success, take CAH-031's local `instruction_scopes`. For each scope in order, discover its
+   instruction chain through CAH-025, checkpoint, fold it through CAH-030 into the local context
+   candidate, and checkpoint again. On a known tool error, keep the initial context.
 6. Build the selected context, optional opaque state, call, result, history, and bounded follow-up
    request as local candidates. Yield and guard at `before_provider_start`, admit the model start,
    then commit and replay turn two with unchanged definitions.
@@ -134,30 +155,40 @@ clocks separately lock the existing winner when cancellation and deadline coinci
 
 ```python
 descriptor = registry.lookup(call.name)
-decoded = decode_json_object(call.arguments_json)
+decoded = decode_unique_json_object_pairs(
+    call.arguments_json,
+    compare_names="exact_decoded_codepoints",
+)
 require_provider_tool_argument_keys(definition, decoded)
 arguments = descriptor.input_model.model_validate(decoded)
 await cooperate_then_guard("before_dispatch")
 dispatch_candidate = registry.dispatch(descriptor, arguments)
 await cooperate_then_guard("after_dispatch")
+context_candidate = context
 if dispatch_candidate.succeeded:
-    discovered_candidate = instructions.discover(dispatch_candidate.target_scope)
-    await cooperate_then_guard("after_discovery")
-    context_candidate = context_builder.merge_atomically(context, discovered_candidate)
-    await cooperate_then_guard("after_merge")
-else:
-    context_candidate = context
+    for scope in dispatch_candidate.instruction_scopes:
+        discovered_candidate = instructions.discover(scope)
+        await cooperate_then_guard("after_discovery")
+        context_candidate = context_builder.merge_atomically(
+            context_candidate,
+            discovered_candidate,
+        )
+        await cooperate_then_guard("after_merge")
 result_candidate = ProviderToolResult(output_json=dispatch_candidate.output_json)
 ```
 
-The CAH-032 key gate rejects omitted model-facing fields—even when the unchanged native model has a
-default—and additional fields before Pydantic runs. Every failed line prevents the following line.
-A late native result is discarded after the second checkpoint. Discovery and merge each have their
-own post-return checkpoint because they are also bounded synchronous operations. Every checkpoint
-unconditionally `await asyncio.sleep(0)` outside locks, optionally invokes an injected deterministic
-test gate, then applies the existing guard. That order lets a queued cancel command update state
-before it is read. The candidate context and pending result remain local, so cancellation yields no
-observable change.
+The decoder uses pair-preserving hooks recursively and fails before dictionary collapse. It compares
+decoded names exactly, without normalization or case folding. CAH-032's later key gate rejects
+omitted model-facing fields—even when the unchanged native model has a default—and additional fields
+before Pydantic runs. Every failed line prevents the following line.
+
+A late native result is discarded after the post-dispatch checkpoint. Every validated success path
+is represented in the local scope tuple: `list_files` covers each returned directory itself and each
+returned file's parent, `search_text` covers match-file parents, `stat_path` covers a canonical
+directory itself or a canonical file's parent, and `read_file` covers the canonical file parent.
+Discovery and merge have a checkpoint for every scope. All scope candidates, the result, and the
+complete context remain local; one failure or exhausted budget discards the entire transaction
+instead of replaying partially covered content.
 
 ### Planned pseudocode: one follow-up
 
@@ -184,6 +215,7 @@ separate request field.
 | Scenario | Safe result | Evidence |
 | --- | --- | --- |
 | malformed/non-object JSON | exact `invalid_read_tool_input` envelope | zero native calls |
+| repeated decoded name at any depth | exact `invalid_read_tool_input` envelope | charged call; unchanged-context call/error replay; zero key gate/dispatch/context growth |
 | omitted defaulted model key | exact `invalid_read_tool_input` envelope | zero Pydantic/dispatch calls |
 | production yield removed | queued cancellation is not latched | no-hook guard spy fails before dispatch |
 | unknown name | exact `unknown_read_tool` envelope | fixed message only |
@@ -191,7 +223,7 @@ separate request field.
 | cancellation during sync tool | `after_dispatch` yields before guarding | no turn two start |
 | cancellation during discovery/merge | following checkpoint yields before guarding | no result/context commit |
 | instruction discovery/merge fails | safe session failure | no result/context publication or turn two |
-| broad list/search returns nested paths | no inferred scope | only the requested path may enrich |
+| broad list/search returns nested paths | cover every ordered result owner before replay | one failed scope discards result and all candidate context |
 | turn two calls again | `tool_call_limit_exceeded` | zero third starts |
 | usage sum overflows | session failure | no aggregate persisted |
 
@@ -236,15 +268,18 @@ late-result handling, replay, and aggregate evidence pass adversarial tests.
    removed; explain why an awaited Event gate alone cannot prove this.
 4. Design a fake synchronous tool and named `asyncio.Event` gate that proves its result is discarded
    after a queued cancel command without using elapsed sleeps.
-5. Explain why `list_files` returning `pkg/file.py` cannot load `pkg/AGENTS.md` until a successful
-   path-targeting call requests that path.
-6. Teach back why usage is persisted only after accepted final text.
+5. Trace `{"path":"a","pa\u0074h":"b"}` and name each later stage that must remain at zero.
+6. Derive the ordered scopes for a list result containing a directory, two files in that directory,
+   and a file in a sibling directory; explain why one failed scope prevents replay.
+7. Teach back why usage is persisted only after accepted final text.
 
 ## Key takeaways
 
 - The model proposes; the harness validates, dispatches, and decides continuation.
-- Successful requested paths refresh applicable instructions atomically before continuation;
-  model-returned paths have no such authority.
+- Earlier boundaries preserve raw arguments; CAH-034 alone rejects duplicate decoded names before
+  dictionary construction, while unknown-tool lookup still wins first.
+- Every requested and result-derived owner scope receives applicable instructions atomically before
+  a successful result can be replayed.
 - Safe JSON errors let the model explain bounded failures without exposing internals.
 - Cancellation around synchronous tools is cooperative: each named boundary must yield before it
   reads cancellation/deadline state.
@@ -258,6 +293,8 @@ late-result handling, replay, and aggregate evidence pass adversarial tests.
   then the established cancellation/deadline guard.
 - **Replay:** reconstructed ordered input sent in a stateless follow-up.
 - **Context snapshot:** one immutable, fully validated context package used by a provider request.
+- **Content-suppressed metadata:** local structural paths used for policy without copying tool content
+  into protocol, transcript, or provider-facing schemas.
 
 ## Further reading
 

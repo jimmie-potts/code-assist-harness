@@ -118,12 +118,32 @@ read handlers are synchronous and bounded rather than preemptively cancellable: 
 and deadlines before and after execution, discard a late result when cancellation wins, and do not
 claim an in-flight synchronous handler was reaped.
 
+Keep provider tool arguments as bounded raw JSON until the harness-owned dispatch path. Decode with
+pair-preserving duplicate detection before constructing a dictionary: any repeated decoded member
+name at any object depth is `invalid_read_tool_input` before the exact-key gate, Pydantic validation,
+or tool I/O. Compare names by exact code point after JSON escape decoding, without case folding or
+Unicode normalization; an unknown tool lookup still wins before argument decoding.
+
+Before replaying any successful tool result to a provider, derive ordered local instruction scopes
+from the requested path and every model-visible returned path. Discover and fold every applicable
+instruction bundle through CAH-025/030, crossing the cooperative guard after each discovery and
+merge. Keep the result and every intermediate context candidate local until the complete scope set,
+context budgets, final checkpoint, and model admission pass. Any failure discards the transaction;
+known tool errors carry no instruction scopes and retain the prior context.
+
 ## Tool and Safety Conventions
 
 Implement safe repository reads as native Python tools, not subprocess wrappers. Validate tool
 input before policy evaluation. Proposed edits are structured exact-replacement, create, or delete
 operations; validate them, generate a unified diff, receive one approval for the exact batch,
 re-check file hashes, and only then apply them.
+
+Treat every present `.gitignore` as untrusted policy input. Resolve its source through the workspace
+boundary, hard-deny-check the canonical source, and re-resolve and recheck immediately before its
+bounded read. Missing candidates are normal; escaping, hard-denied, dangling, non-regular, stale, or
+unreadable candidates fail with the fixed ignore-policy error without reading or charging content.
+An admitted internal symlink keeps the candidate owner as rule scope while its canonical source owns
+cache identity and byte accounting.
 
 Represent subprocesses as argument arrays and never use `shell=True`. Built-in policy supplies the
 initial candidates, user configuration may broaden or narrow them, and workspace configuration may

@@ -147,13 +147,20 @@ is likely to cross the ceiling.
 ### Repository context and reads
 
 - M2 discovers only exact `AGENTS.md` files. CAH-026 first supplies pure lexical-path and hard-deny
-  helpers used by ordinary reads and instruction discovery; CAH-025 exempts instruction files from
-  `.gitignore`, never from lexical or hard-deny admission, and does not inherit ordinary-read limits
+  helpers used by ordinary reads and instruction discovery. Every present `.gitignore` keeps its
+  candidate-owner directory for rule scope while its canonical source resolves through
+  `WorkspaceBoundary`, passes canonical hard denial, and is re-resolved and rechecked immediately
+  before a bounded cache-miss read. Pre-read-rejected policy sources fail as
+  `repository_policy_invalid`, cause no requested-content read, and are not opened, cached, or
+  charged. Invalid UTF-8 or NUL is read only into a bounded uncommitted candidate and is never
+  exposed, cached, or charged; safe internal symlinks remain owner-relative. CAH-025 exempts
+  instruction files from `.gitignore`, never from lexical or
+  hard-deny admission, and does not inherit ordinary-read limits
   or errors. Each binding preserves the resolved canonical instruction
   source separately from the canonical candidate-owner directory to which it applies. The same
   source reached through two owners therefore remains two separately charged bindings. Applicable
-  bindings are ordered from workspace root to the deepest target scope and remain untrusted guidance
-  that cannot weaken harness policy.
+  bindings are ordered from workspace root to the deepest instruction scope and remain untrusted
+  guidance that cannot weaken harness policy.
 - Repository enumeration honors nested `.gitignore` semantics through the small `pathspec`
   `GitIgnoreSpec` dependency plus a non-overridable harness denylist for VCS internals and local
   credential-bearing files. Ignore rules are evaluated independently against the normalized supplied
@@ -178,18 +185,25 @@ is likely to cross the ceiling.
   not choose initial context-selection inputs. A non-empty request discovers the instruction bundle
   for `scope` first and for every validated, canonical-distinct explicit focus path in input order,
   completing that required union before focus content. Each search query projects exactly to
-  `SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`; focus paths,
-  search results, and matched files never become inferred search or instruction roots.
-- Each successful native read returns the validated requested `path` as harness-only target-scope
-  metadata. Before another provider start, CAH-034/035 use CAH-025 and CAH-030 to add previously unseen
+  `SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`; a focus or result
+  path never becomes a search root. Every first-occurrence search-match owner does trigger instruction
+  discovery and joins the required union before its excerpt can enter context.
+- Each successful native read returns ordered, content-suppressed `instruction_scopes`: the validated
+  requested `path` first, then the exact-deduplicated owner of every model-visible result path. Before
+  replay or another provider start, CAH-034/035 use CAH-025 and CAH-030 to add all previously unseen
   applicable instructions atomically without evicting prior items. A newly appearing ancestor enters
   before existing descendants while every prior pair retains its relative order. A repeat for the
   same `applies_to` owner is idempotent only when source, content, and original bytes agree; the same
   source under a different owner is a distinct binding. Changed duplicates, discovery failures, and
-  item/byte overflow stop before replay.
-  Known tool failures keep context unchanged. M2 does not fan out instructions for paths merely
-  returned by a broad listing or search, so its grounded evaluation performs a specific
-  path-targeting read before final text.
+  item/byte overflow stop before replay. A broad list or search result is all-or-nothing: one denied,
+  invalid, changed, or over-budget owner discards the complete result/context transaction. Known tool
+  failures carry no scopes and keep context unchanged.
+- CAH-032, CAH-033, and CAH-036 preserve the provider's bounded raw argument string without parsing.
+  After CAH-033 admits the complete call response, CAH-034 runs unknown-tool lookup and then owns the
+  sole pair-preserving recursive JSON-object decode. Repeated decoded member names fail as
+  `invalid_read_tool_input` before dictionary construction, the CAH-032 exact-key gate, Pydantic, or
+  dispatch; equality is exact after escape decoding with no normalization or case folding. CAH-035
+  reuses that path on every iteration.
 
 ### Evidence and interface boundaries
 

@@ -20,7 +20,8 @@
 
 CAH-030 owns deterministic selection and reporting for one provider-neutral repository context
 package plus the pure, atomic merge of one newly discovered instruction bundle into that package. It
-does not decide when to discover another scope, construct a provider request, count provider tokens,
+owns instruction discovery for evidence selected by that initial build, but does not decide when a
+later tool result requires another scope, construct a provider request, count provider tokens,
 register tools, handle LLM responses, dispatch tool calls, run multiple agent steps, or persist raw
 repository content.
 
@@ -30,9 +31,10 @@ repository content.
   and CAH-027 through CAH-029.
 - Accept one instruction scope, up to eight explicit focus files, and up to four optional literal
   search queries.
-- Build the required instruction union for the request scope and every distinct explicit focus path,
-  then include bounded focus-file slices and bounded search excerpts in one exact priority order
-  under reviewed binding, item, and UTF-8 content-byte budgets.
+- Build the required instruction union for the request scope, every distinct explicit focus path, and
+  every first-occurrence canonical owner directory of a search match. Then include bounded focus-file
+  slices and bounded search excerpts in one exact priority order under reviewed binding, item, and
+  UTF-8 content-byte budgets.
 - Add one pure operation that atomically enriches an existing package with one already-discovered
   CAH-025 instruction bundle without evicting or rewriting prior context.
 - Record canonical provenance, inclusion reason, included bytes, source truncation, and aggregate
@@ -59,28 +61,41 @@ repository content.
   text file; a failed source fails the whole build rather than quietly omitting an explicit focus.
 - Canonical-deduplicate admitted focus results by their CAH-028 `path`, preserving input order. Build
   the initial instruction union by folding the bundle for `request.scope` first and then one CAH-025
-  bundle for every distinct canonical focus path in that order. Every bundle is required. Each fold
-  uses the same topology-correct, no-eviction merge core defined below, and the complete union is
-  committed before any focus-file item is appended.
+  bundle for every distinct canonical focus path in that order. Each fold uses the same
+  topology-correct, no-eviction merge core defined below.
 - For each supplied query, construct and validate exactly
   `SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)` before any search
   filesystem I/O. Pass the supplied `request.scope` unchanged; only after every projection validates,
-  exact-deduplicate queries in input order. Focus paths, admitted focus results, and search-result
-  paths never become search roots, and a search match never triggers per-match instruction discovery.
+  exact-deduplicate queries in input order. Run only those searches, in that order. Focus paths,
+  admitted focus results, and search-result paths never become search roots.
+- CAH-029 supplies each query's matches in canonical path/line/column order. Traverse matches in
+  exact-deduplicated query order and that returned order, derive each canonical match file's canonical
+  parent directory, and retain the first occurrence of each exact owner label. In that deterministic
+  owner order, call CAH-025 `discover_for_path(owner)` once and fold every returned bundle through the
+  same idempotent topology merge. CAH-025 remains authoritative for canonicalization, so a path alias
+  cannot create another logical binding. The complete scope-plus-focus-plus-search-owner instruction
+  union is committed before any focus item or search excerpt is appended.
+- Every discovered search-owner bundle is required even if budget selection later omits all excerpts
+  from that owner. Discovery failure, a conflicting owner snapshot, or overflow of the existing
+  required-context budgets fails the whole build with no package; no search excerpt becomes visible
+  before its owner's applicable instruction chain is present.
 - Each validated query satisfies CAH-029's one-line, 256-byte contract. Search candidates are
   optional: normal no-match, skipped-file, and truncation outcomes are represented in report
   aggregates and do not fail otherwise valid required context.
-- Candidate construction performs no unrequested scan. It discovers instructions only for the
-  supplied scope and distinct explicit focus paths, reads only explicit focus files, and runs only
-  requested literal searches from the supplied scope.
+- Candidate construction performs no unrequested content scan. It discovers instructions only for
+  the supplied scope, distinct explicit focus paths, and canonical owner directories actually
+  returned by a requested search; reads only explicit focus files; and runs only requested literal
+  searches from the supplied scope. Search-owner discovery never launches another search.
 
 ### Selection order and immutable output
 
-- Required instruction bindings from the complete scope-plus-focus union are ordered by the
-  topology-correct merge core: an ancestor precedes a strict descendant while unrelated siblings
-  retain first-admission order. Required focus-file items follow in input order after canonical
-  deduplication. Optional search excerpts follow in exact-deduplicated query order and then each
-  search result's canonical path/line/column order.
+- Required instruction bindings from the complete scope-plus-focus-plus-search-owner union are
+  ordered by the topology-correct merge core: an ancestor precedes a strict descendant while
+  unrelated siblings retain first-admission order. Scope is admitted first, canonical-distinct focus
+  paths follow in request order, and exact-deduplicated search owners follow in query/match order.
+  Required focus-file items then follow in input order after canonical deduplication. Optional search
+  excerpts follow in exact-deduplicated query order and then each search result's canonical
+  path/line/column order.
 - A context item has `kind` (`instruction`, `focus_file`, or `search_excerpt`), canonical `path`,
   content, `content_bytes`, `truncated`, and kind-specific provenance: instruction precedence and
   canonical `applies_to` directory, focus line range, or search query rank plus line/column. An
@@ -124,17 +139,17 @@ repository content.
   deterministic first-admission order is only serialization order and grants neither sibling wider
   authority.
 - The resulting package may contain at most 16 distinct instruction bindings, 24 total items, and
-  96 KiB of content. These are combined limits across the initial scope-plus-focus instruction union,
-  required focus items, and optional search items, and the same limits govern later enrichment. Newly
-  discovered instructions are required context: if the complete merged value crosses any bound,
-  enrichment fails atomically with `required_context_exceeds_budget`. It never drops an old or new
-  instruction to make room.
+  96 KiB of content. These are combined limits across the initial
+  scope-plus-focus-plus-search-owner instruction union, required focus items, and optional search
+  items, and the same limits govern later enrichment. Newly discovered instructions are required
+  context: if the complete merged value crosses any bound, enrichment fails atomically with
+  `required_context_exceeds_budget`. It never drops an old or new instruction to make room.
 
 ### Initial reviewed budgets
 
 | Limit | Initial value | Boundary behavior |
 | --- | ---: | --- |
-| Distinct instruction bindings | 16 | Initial scope/focus union or enrichment with a seventeenth owner binding fails atomically, even when two owners share one source. |
+| Distinct instruction bindings | 16 | Initial scope/focus/search-owner union or enrichment with a seventeenth owner binding fails atomically, even when two owners share one source. |
 | Explicit focus files | 8 | A ninth fails request validation. |
 | Literal search queries | 4 | A fifth fails request validation. |
 | Context items | 24 | Required items must all fit; optional items beyond the limit are counted and omitted. |
@@ -145,9 +160,9 @@ repository content.
 
 - Required instructions are all-or-nothing because silently dropping a narrower instruction can
   change meaning. If the initial or enriched instruction set exceeds 16 bindings, or the complete
-  instruction union and all required focus items cannot fit the combined 24-item and 96-KiB package,
-  the operation fails with `required_context_exceeds_budget`; it does not partially include required
-  content.
+  instruction union, including bundles derived from optional search candidates, and all required
+  focus items cannot fit the combined 24-item and 96-KiB package, the operation fails with
+  `required_context_exceeds_budget`; it does not partially include required content.
 - Optional search items use deterministic first-fit selection: consider them in defined order,
   include an item when both budgets permit it, otherwise increment the relevant aggregate and
   continue so a later smaller item may fit.
@@ -184,50 +199,56 @@ CAH-025 and CAH-026 fixed safe errors remain authoritative for source failures.
 - **Counted paths:** `src/code_assist_harness/` additions plus deletions.
 - **Excluded from count:** tests, docs, fixtures, lockfiles, and generated artifacts.
 - **Split rule:** stop and refine another story before review if provider-message construction, token
-  counting, adaptive ranking, instruction-discovery triggering, tool dispatch, transcript
+  counting, adaptive ranking, post-build instruction-discovery triggering, tool dispatch, transcript
   persistence, or loop control enters this unit, or if production churn is likely to exceed roughly
   600 changed lines. Do not pad a smaller coherent implementation.
 
 ## Acceptance criteria
 
 1. One request validates the exact CAH-028 focus and CAH-029 search projections, builds the required
-   instruction union for `request.scope` followed by every distinct focus path, and produces immutable
-   items in the exact reviewed priority order.
+   instruction union for `request.scope`, every distinct focus path, and every first-occurrence
+   canonical search-match owner, and produces immutable items in the exact reviewed priority order.
 2. Required instructions and focus files are all-or-nothing; optional search excerpts use
    deterministic first-fit selection under combined 16-instruction-binding, 24-item, and 96-KiB
    limits.
 3. Focus paths are canonical-deduplicated only after every exact read projection validates; search
    queries are exact-deduplicated only after every exact search projection validates, always search
    from the unchanged supplied scope, and never cause per-focus or per-match search-root fanout.
-4. Instruction items and report records copy CAH-025 target `source` into `path` and copy
+4. Canonical search-match owners are exact-deduplicated on first occurrence in query/match order and
+   each triggers one CAH-025 discovery. Their required bundles join the instruction union before any
+   focus item or corresponding optional excerpt is visible; aliases are idempotent and any discovery,
+   conflict, or required-budget failure returns no package.
+5. Instruction items and report records copy CAH-025 target `source` into `path` and copy
    candidate-owner `applies_to`. The same source under different owners remains distinct and charged;
    one owner is idempotent only for an exact source/content/original-byte snapshot.
-5. Other canonical duplicate sources are included once at their highest-priority reason, and every
+6. Other canonical duplicate sources are included once at their highest-priority reason, and every
    included item records exact UTF-8 content bytes and source truncation.
-6. The inclusion report identifies included bindings/sources and aggregate omission reasons without
+7. The inclusion report identifies included bindings/sources and aggregate omission reasons without
    exposing denied labels, excluded content, raw errors, or search query text.
-7. Input counts, per-kind limits, aggregate binding/item/content budgets, and inherited strict text
+8. Input counts, per-kind limits, aggregate binding/item/content budgets, and inherited strict text
    policy are tested exactly and do not use provider token estimates.
-8. One validated CAH-025 bundle enriches an existing package atomically: exact owner snapshots are
+9. One validated CAH-025 bundle enriches an existing package atomically: exact owner snapshots are
    idempotent, conflicting duplicates fail, and unseen instructions enter topology-correct positions
    without evicting or reordering prior items.
-9. Initial union and enrichment preserve path-local ancestor precedence, assign no precedence between
+10. Initial union and enrichment preserve path-local ancestor precedence, assign no precedence between
    sibling scopes, and enforce 16 instruction bindings plus 24-item/96-KiB bounds all-or-nothing.
-10. Public contracts are typed, documented, provider-neutral, and tested locally with no provider,
+11. Public contracts are typed, documented, provider-neutral, and tested locally with no provider,
    subprocess, network, protocol, transcript, TUI, or agent-loop behavior.
 
 ## Acceptance-to-test matrix
 
 | Contract or risk | Planned test | Layer | Expected evidence |
 | --- | --- | --- | --- |
-| Initial instruction union | Use `scope="."` with ordered focus paths `pkg/a.py`, `other/b.py`, and an alias of `pkg/a.py`; place nested instructions above both distinct focuses | Unit integration | Scope bundle folds first, then one bundle per canonical-distinct focus in input order; the complete topology-ordered union precedes every focus item |
+| Initial instruction union | Use `scope="."` with ordered focus paths `pkg/a.py`, `other/b.py`, and an alias of `pkg/a.py`; return matches under nested sibling owners | Unit integration | Scope folds first, then canonical-distinct focuses, then first-occurrence match owners in query/match order; the complete topology-ordered union precedes every focus and search item |
 | Exact focus projection | Spy on request construction for a regular focus, a symlink alias of it, an absolute path, and an empty path | Schema/boundary integration | Every `ReadFileRequest(path=focus_path, start_line=1, max_lines=400, max_bytes=32768)` validates before any CAH-025/028/029 I/O; no pre-validation dedup hides an error |
 | Exact search projection | Use two equal valid queries and one query containing LF with non-default focus results present | Schema/boundary integration | Every `SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)` validates before any CAH-025/028/029 I/O; exact dedup follows validation and all admitted calls retain the unchanged supplied scope |
-| No search-root fanout | Put matches beneath focus and non-focus directories while spying on CAH-025/029 calls | Boundary integration | Search roots are only `request.scope`; focus and result paths cause neither extra searches nor per-match instruction discovery |
+| Fixed search roots, covered results | Put matches beneath focus and non-focus directories while spying on CAH-025/029 calls | Boundary integration | Every search root is exactly `request.scope`; each first-occurrence canonical match parent gets one CAH-025 discovery but causes no additional search |
+| Search-owner order and aliases | Return repeated matches, distinct files with one parent, sibling parents, and symlink aliases across two queries | Boundary integration | Exact owner labels deduplicate at first occurrence in query then canonical match order; CAH-025 canonicalization plus idempotent merge prevents duplicate logical bindings |
 | Priority and provenance | Combine scope/focus instruction bindings, ordered focus files, and two searches | Unit integration | Exact item kinds, canonical labels, copied `source`/`applies_to`, and order |
 | Canonical deduplication | Reach one non-instruction file through aliases and multiple reasons | Boundary integration | One highest-priority item and exact duplicate aggregate |
 | Binding identity and ownership | Point `pkg/AGENTS.md` and `other/AGENTS.md` at `shared/rules.md`, then repeat and retarget only `pkg` | Unit/boundary integration | Two distinct charged bindings report `source="shared/rules.md"` with owner-specific `applies_to`; exact owner replay is idempotent and owner snapshot mismatch fails atomically |
-| Required all-or-nothing | Build required sources immediately below, at, and above 24 items/96 KiB | Unit | Full package at limits; fixed failure and no partial value above |
+| Search-owner coverage is required | Make an optional match's owner discovery fail, conflict, or introduce the 17th binding, then repeat at all limits | Unit/boundary integration | No focus or excerpt is visible on failure; exact-limit union succeeds and every included excerpt follows its applicable instruction chain |
+| Required all-or-nothing | Build required sources immediately below, at, and above 24 items/96 KiB | Unit | Full package at limits; fixed failure and no partial value above, including when optional excerpts would otherwise be omitted |
 | Monotonic enrichment | Merge nested and sibling bundles into a package containing focus/search items | Unit | Unseen instructions enter topology-correct instruction-block positions; every prior item retains relative order and none is evicted |
 | Duplicate instruction identity | Re-merge one exact owner, then change only its source, content, or original byte count | Unit | Exact owner snapshot is byte-for-byte idempotent; each mismatch fails `context_build_failed` with no partial package |
 | Combined bounds | Build/merge the 16th/17th binding, including two owners of one source, and values at 24 items and 98,304/98,305 bytes | Unit | Success exactly at every combined bound; `required_context_exceeds_budget` above, with no eviction |
@@ -242,10 +263,10 @@ CAH-025 and CAH-026 fixed safe errors remain authoritative for source failures.
 - Add focused context-builder tests using real CAH-024 through CAH-029 services over deterministic
   fixture workspaces; fake only a narrow race seam when needed.
 - Assert the exact derived focus/search request snapshots and call order, the unchanged search scope,
-  scope-plus-focus instruction union, absence of search/focus fanout, copied `source`/`applies_to`,
-  deduplication, exact byte arithmetic, first-fit behavior, topology-correct atomic enrichment
-  including a late ancestor, all-or-nothing required sources, safe representations, and full failure
-  strings.
+  scope-plus-focus-plus-search-owner instruction union, absence of search-root fanout, deterministic
+  first-occurrence owner discovery, alias idempotence, copied `source`/`applies_to`, deduplication,
+  exact byte arithmetic, first-fit behavior, topology-correct atomic enrichment including a late
+  ancestor, all-or-nothing required sources, safe representations, and full failure strings.
 - Test instruction-binding/focus/query/item/content boundaries below, at, and above without a
   tokenizer, model, network, subprocess, or timing assertion.
 - Keep provider requests, protocol, transcript, tool registry, agent loop, and TUI unchanged; use the
@@ -276,10 +297,11 @@ claims. Do not add or revise a presentation.
 
 1. Every acceptance criterion maps to deterministic happy, boundary, and adversarial tests.
 2. Instruction-binding/focus/query/item/content and per-kind limits pass below/at/above evidence.
-3. Exact derived request projection, scope-plus-focus instruction union, search-scope containment,
-   owner-scoped provenance, canonical deduplication, topology-correct atomic enrichment including a
-   late ancestor, all-or-nothing required sources, optional first-fit selection, byte arithmetic, and
-   safe reporting are proved without leaks.
+3. Exact derived request projection, scope-plus-focus-plus-search-owner instruction union,
+   search-scope containment without search-root fanout, deterministic owner discovery, owner-scoped
+   provenance, canonical deduplication, topology-correct atomic enrichment including a late ancestor,
+   all-or-nothing required sources, optional first-fit selection, byte arithmetic, and safe reporting
+   are proved without leaks.
 4. Public request, item, report, and package contracts are immutable, typed, documented, and reject
    unsupported fields.
 5. Focused tests and the canonical offline `./scripts/check` pass with no model, subprocess, or
@@ -296,8 +318,8 @@ claims. Do not add or revise a presentation.
 ## Planned evidence
 
 - A provider-neutral context-builder module and fixture-workspace tests prove exact scope/focus/search
-  projections, initial instruction-union selection, monotonic scoped-instruction enrichment, and
-  reporting.
+  projections, search-match owner coverage, initial instruction-union selection, monotonic
+  scoped-instruction enrichment, and reporting.
 - Integration evidence uses the real instruction, listing, read, and search contracts and compares
   repeated packages for deterministic equality.
 - The lesson locates context construction between native repository evidence and the later explicit
@@ -308,7 +330,7 @@ claims. Do not add or revise a presentation.
 
 - The next core learning unit maps a validated context package into provider-neutral request content
   without importing SDK types into the harness domain.
-- E4 identifies the typed target scope of a successful read; later loop units decide when to discover
-  one CAH-025 bundle and invoke this pure merge between model turns.
+- E4 identifies the ordered instruction scopes of a successful read; later loop units decide when to
+  discover and fold those CAH-025 bundles between model turns.
 - A later evaluation unit measures known-file retrieval and context usefulness before adding ranking,
   embeddings, summarization, or provider-specific token fitting.

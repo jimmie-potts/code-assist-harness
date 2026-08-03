@@ -34,8 +34,13 @@ The context builder will assemble provider-neutral items from:
 Instruction discovery follows filesystem scope. A nested instruction file can refine rules for its
 subtree, but must not silently weaken harness safety policy. CAH-026's pure lexical admission and
 hard-deny classifier apply before instruction scope/source access even though exact `AGENTS.md`
-control-plane candidates are exempt from `.gitignore`. A binding records the resolved canonical source separately from the canonical
-candidate-owner directory to which it applies, so a symlink cannot move the instruction's scope.
+control-plane candidates are exempt from `.gitignore`. A binding records the resolved canonical
+source separately from the canonical candidate-owner directory to which it applies, so a symlink
+cannot move the instruction's scope. Ignore policy has the same two-identity rule: a present
+`.gitignore` keeps its candidate owner for rule applicability, while its resolved source must remain
+inside the workspace, avoid canonical hard denial, and pass the same check immediately before its
+bounded read. An escaping, hard-denied, dangling, non-regular, retargeted, or unreadable policy source
+fails closed and is neither cached nor charged.
 Repository content is untrusted data: text in a source file cannot authorize a command, broaden the
 command allowlist, or bypass an approval.
 
@@ -52,9 +57,11 @@ These read-only tools may run automatically after schema validation and policy c
 as `find`, `grep`, `git status`, or `cat` are still subprocesses and require command approval; the
 model should prefer the native tools for routine inspection.
 
-Each model-provided tool input first passes the advertised exact-key gate, then its fields and each
-tool result are validated with Pydantic v2. This order prevents native defaults from filling a key the
-model omitted while preserving those defaults for direct Python callers. Paths are resolved against
+Each admitted model tool call first passes exact-name lookup, then CAH-034 decodes exactly one JSON
+object while preserving member pairs and rejecting a repeated decoded name at any nesting depth.
+Only then does the advertised exact-key gate run, followed by Pydantic v2 field validation. This order
+prevents both silent duplicate collapse and native defaults from filling a key the model omitted while
+preserving those defaults for direct Python callers. Paths are resolved against
 the explicit workspace, symlink escapes are rejected, ignored or prohibited locations are excluded,
 and file/count/byte limits are enforced before content enters context. Binary files and files over
 configured size limits return structured explanations rather than unbounded data.
@@ -67,14 +74,17 @@ responsible for rechecking the target when they perform filesystem access.
 For an ordinary runtime task, the **initial** context request defaults to repository scope `.` with
 empty `focus_paths` and `search_queries`. Those empty values are explicit rather than task- or
 model-inferred. After a native read succeeds, the registry's harness-owned metadata identifies the
-validated requested target scope; the loop discovers its applicable instructions and atomically adds
-previously unseen sources before another provider start. Deterministic evaluation may inject
+validated requested path first and then the owner directory of every model-visible returned path.
+The loop discovers all of those ordered instruction scopes and atomically adds previously unseen
+bindings before result replay or another provider start. Deterministic evaluation may inject
 non-empty initial values through a test-only composition seam without granting the model context
 policy authority. For such a request, instruction discovery covers `scope` first and every
 validated, canonical-distinct focus path in input order before focus content is selected. Each query
 searches only the supplied scope through
-`SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`; focus paths,
-matches, and result paths do not become inferred search or instruction roots.
+`SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`. Focus paths,
+matches, and result paths never become inferred search roots. Every first-occurrence search-match
+file owner does become an instruction-discovery scope and joins the required instruction union before
+its excerpt can enter context.
 
 ## Provenance and attribution
 
@@ -124,8 +134,8 @@ of every file. A typical read-only task can iterate:
 ```text
 task + instructions
   -> list or search relevant paths
-  -> target a bounded path
-  -> add newly applicable scoped instructions
+  -> identify requested and returned-path owner scopes
+  -> add every newly applicable scoped instruction
   -> read bounded source and tests
   -> form a grounded explanation or plan
 ```
@@ -171,8 +181,10 @@ shared text rules, and fixed safe failures. Ignore rules are evaluated independe
 normalized supplied path and its resolved canonical target. Each view admits every directory prefix
 before loading deeper policy or evaluating the leaf, and either view's ignored ancestor or target
 denies access. Its pure lexical-path and `is_hard_denied_path` helpers perform no I/O and are reused
-by CAH-025 so instruction discovery cannot drift to weaker pre-I/O admission. CAH-025 does not
-inherit ordinary-read limits or errors. This unit performs no user-requested read operation itself.
+by CAH-025 so instruction discovery cannot drift to weaker pre-I/O admission. Every present ignore
+policy source separately passes workspace resolution, canonical hard denial, and an immediate
+pre-read recheck; its candidate owner still controls rule scope. CAH-025 does not inherit
+ordinary-read limits or errors. This unit performs no user-requested read operation itself.
 
 ### Planned CAH-025 — Discover scoped repository instructions
 
@@ -206,10 +218,11 @@ by Python `str.splitlines()`, including its C0, C1, and Unicode separators.
 > the model input.
 
 The [implementation-ready story](../user-stories/cah-030-build-budgeted-context.md) selects required
-instruction bindings for scope plus every explicit focus path, then focus files, before optional
-search excerpts under fixed item/UTF-8-byte budgets. It copies each binding's candidate-owner
-`applies_to` rather than deriving scope from its source, and uses the exact supplied-scope search
-projection above. It also owns pure atomic enrichment with an already-discovered instruction bundle:
+instruction bindings for scope, every explicit focus path, and each first-occurrence search-match
+owner before admitting focus files or search excerpts under fixed item/UTF-8-byte budgets. It copies
+each binding's candidate-owner `applies_to` rather than deriving scope from its source, and uses the
+exact supplied-scope search projection above; returned paths expand instruction coverage but never
+search roots. It also owns pure atomic enrichment with an already-discovered instruction bundle:
 prior items retain their relative order, and a late ancestor is inserted before existing descendants
 without evicting anything. Its inclusion report distinguishes source and applicability while
 preserving admitted provenance and aggregate omission reasons without exposing denied labels.
@@ -221,7 +234,8 @@ preserving admitted provenance and aggregate omission reasons without exposing d
 
 The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) composes the
 strict fake, fixture workspaces, context, registry, and bounded loop. It checks exact retrieval and
-small grounded answer facts, including root-only initial context followed by nested instructions
-after a successful path-targeting read, plus injected focus-path context that proves the nested
-instruction union and exact supplied-scope search projection. Broad result-derived scope expansion,
-semantic ranking, and live-model quality remain later work.
+small grounded answer facts, including root-only initial context followed by complete instruction
+coverage for direct and broad-result path owners before replay, plus injected focus/search context
+that proves the complete instruction union and exact supplied-scope search projection. Duplicate
+argument rejection is also required M2 evidence; semantic ranking and live-model quality remain
+future-quality and optional-live concerns respectively.

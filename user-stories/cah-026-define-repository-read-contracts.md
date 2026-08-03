@@ -48,6 +48,9 @@ or dispatch model-callable tools.
   to leaf. Load only `.gitignore` files whose owning directory is still traversable, interpret rules
   relative to that directory, and evaluate each view independently; an ignored ancestor or target in
   either view denies the target.
+- Treat each present `.gitignore` as untrusted policy input: retain its candidate-owner directory for
+  rule scope, but resolve its source through `WorkspaceBoundary`, apply canonical hard denial, and
+  recheck that admitted source immediately before reading its bounded bytes.
 - Keep all behavior native Python, local, deterministic, and side-effect free apart from bounded
   reads of policy files: no subprocess, shell, network, provider, protocol, transcript, or TUI
   change.
@@ -85,6 +88,14 @@ or dispatch model-callable tools.
   Thus `private/` followed by `!private/keep.py` still denies `private/keep.py`, while
   `private/*` followed by `!private/keep.py` may admit it because `private/` itself stays traversable.
   Only after every proper ancestor admits does the final target match decide that view.
+- A policy binding has two identities. Its candidate-owner directory determines where parsed rules
+  apply; its resolved canonical source determines containment, hard denial, cache identity, and
+  policy-file budgets. Every present `.gitignore` candidate resolves through
+  `WorkspaceBoundary.resolve_existing` before content I/O, and `is_hard_denied_path` evaluates the
+  resolved source components before type, size, or text admission. A safe internal symlink is
+  allowed, but its rules remain relative to the candidate owner rather than moving to the source
+  directory. Policy sources do not recursively pass through GitIgnoreSpec because doing so would
+  make ignore-policy loading self-referential.
 - Ignore admission has two independent views. The lexical view matches the normalized supplied
   workspace-relative path against root-to-nearest policy files on its supplied ancestor chain,
   without replacing that label with a symlink target. The canonical view matches the
@@ -92,21 +103,30 @@ or dispatch model-callable tools.
   ancestor chain. Each view verifies ancestor traversability and computes normal Git precedence only
   within that view. The target is admitted only when neither view has an ignored ancestor or final
   target; negation in one view cannot cancel an ignored decision in the other. Lexical ancestor
-  denial occurs before target resolution; canonical ancestor denial occurs after resolution but
-  before content I/O.
+  denial occurs before requested target resolution; canonical ancestor denial occurs after requested
+  target resolution but before requested content I/O.
 - Policy-file count and byte limits apply to the union of the two applicable ancestor chains.
-  Policy inputs that resolve to the same canonical regular file are loaded and charged once, even
-  though their rules may be evaluated against both labels. A shared read/parse cache does not reuse a
-  view-relative match result: each view attaches the cached rules at that view's owning-directory
-  scope and performs its own ancestor walk. The root policy therefore does not consume the budget
-  twice merely because every request has two views. A lexical denial short-circuits before resolving
-  the requested target or loading its canonical-chain policy files.
+  Policy candidates that resolve to the same admitted canonical source label are loaded and charged
+  once, even though their rules may be evaluated against both labels or at multiple candidate-owner
+  scopes. A shared read/parse cache does not reuse a view-relative match result: each view attaches the
+  cached rules at that view's owning-directory scope and performs its own ancestor walk. Escaping,
+  hard-denied, or otherwise unadmitted policy sources never enter the cache or consume count or byte
+  budget. The root policy therefore does not consume the budget twice merely because every request
+  has two views. A lexical denial short-circuits before resolving the requested target or loading its
+  canonical-chain policy files.
 - The final ignored decision is non-overridable. No public input, provider argument, configuration,
   or future approval may request `include_ignored`. A hard-denied path can never be re-included by a
   negation rule.
-- A missing `.gitignore` is normal. A present policy file must be a regular file, no larger than 64
-  KiB (65,536 bytes), contain no NUL, and decode with strict UTF-8. At most 16 applicable policy files
-  and 256 KiB (262,144 bytes) of aggregate policy text may be loaded for one decision.
+- Probe each exact `.gitignore` entry without following its leaf, so only an actually absent directory
+  entry is normal and a symlink entry remains present even when dangling. Once an entry is observed, a dangling,
+  inaccessible, escaping, hard-denied, non-regular, or retargeted source is
+  `repository_policy_invalid`; it is not silently treated as absent. Immediately before a cache-miss
+  content read, the policy repeats boundary resolution and canonical hard denial, requires the same
+  canonical source label observed for that candidate, and rechecks regular-file type and size. The
+  admitted source must be no larger than 64 KiB (65,536 bytes), contain no NUL, and decode with strict
+  UTF-8. At most 16 distinct admitted canonical policy sources and 256 KiB (262,144 bytes) of
+  aggregate policy text may be loaded for one decision. The seventeenth distinct source fails before
+  its content is opened.
 - Policy snapshots are bounded decisions, not persistent authorization. Callers re-evaluate before
   access; descriptor-relative hardening remains deferred.
 
@@ -175,7 +195,7 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 | `repository_source_too_large` | `Repository file exceeds the byte limit.` | an eligible source exceeds 256 KiB |
 | `repository_input_limit` | `Repository request exceeds the input limit.` | a request exceeds an operation's fixed input bound |
 | `repository_result_limit` | `Repository result exceeds the item or byte limit.` | safe bounded completion is not possible |
-| `repository_policy_invalid` | `Repository ignore policy could not be loaded safely.` | applicable policy input is invalid, oversized, or unreadable |
+| `repository_policy_invalid` | `Repository ignore policy could not be loaded safely.` | an applicable policy source escapes, is hard-denied, dangling, inaccessible, retargeted, non-regular, invalid, oversized, or unreadable |
 | `repository_read_failed` | `Repository content could not be read.` | another bounded local access fails |
 
 - Direct access to ignored or unavailable targets fails with the table above. Recursive listing and
@@ -208,8 +228,14 @@ denylist rule, ignore pattern, raw OS text, or repository content.
    Normal Git ignore negation works within each view only under that rule, either view's ignored
    ancestor or target wins, and no cross-view negation, caller override, or pattern can re-include an
    ignored-in-the-other-view or hard-denied path.
-4. Policy files enforce 64-KiB per-file, 16-file, 256-KiB aggregate, strict-UTF-8, and no-NUL limits
-   with fixed safe failures.
+4. Every present policy candidate preserves its owner-relative rule scope while its source passes
+   `WorkspaceBoundary`, canonical hard denial, regular-file, 64-KiB per-file, 16-distinct-source,
+   256-KiB aggregate, strict-UTF-8, and no-NUL admission. The source is re-resolved and rechecked
+   immediately before a cache-miss read. Containment, hard-deny, disappearance, non-regular,
+   retarget, and pre-read size failures perform no policy-source content read. Invalid UTF-8 or NUL
+   may be detected only in one bounded, uncommitted policy candidate; it is never exposed, cached, or
+   charged, and every failure prevents requested content I/O under fixed
+   `repository_policy_invalid`.
 5. Direct ignored targets fail explicitly; traversal consumers can omit ignored and denied
    descendants without disclosing their labels.
 6. Shared limits, immutable decisions, and the exact error table are typed, documented, and contain
@@ -226,8 +252,9 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 | --- | --- | --- | --- |
 | Ancestor traversal and nested precedence | Compare `private/` plus `!private/keep.py` with the traversable-parent control `private/*` plus `!private/keep.py`; put an invalid nested policy below the ignored directory | Unit | The ignored parent denies direct access, its nested policy is never opened or charged, and leaf negation works only in the traversable-parent control |
 | Relative pattern scope | Repeat a filename inside and outside a nested policy directory | Unit | Nested rule affects only its subtree |
-| Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; access requires both complete walks to admit, lexical denial performs no target resolution, canonical denial performs no content I/O, and neither label nor rule leaks |
+| Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; access requires both complete walks to admit, lexical denial performs no requested target resolution, canonical denial performs no requested content I/O, and neither label nor rule leaks |
 | Dual-chain policy budget | Share root and aliased policy files across both chains, give the two view owners different labels, then cross the unique-file count and aggregate-byte edges | Unit | Canonically identical policy inputs are read/charged once but their cached rules are scoped and evaluated in both views; the union still fails closed above 16 files or 256 KiB |
+| Policy-source containment | Point root and nested `.gitignore` candidates outside the workspace and at `.git/config` or `secrets/dev.env`; use an actually absent control, a safe internal symlink, a dangling candidate, and pre-read disappearance/retarget/type/size replacements | Policy/boundary integration | Only the absent entry is normal; every present unsafe source returns exact `repository_policy_invalid` and causes no requested content read; pre-read rejection opens no policy content, the internal source is committed once after validation, and its rules remain scoped to each candidate owner |
 | Shared lexical admission | Pass scalar relative paths, `.`, redundant legal `.` components, a non-string object, empty text, absolute paths, every `..` placement, NUL, and lone high/low surrogates while spying on `Path`, boundary, and filesystem calls | Unit/read-policy integration | Valid components normalize deterministically; invalid inputs raise only the fixed, content-suppressed `RepositoryPathSyntaxError` before construction, resolution, or I/O; ordinary reads map it to their fixed vocabulary |
 | CAH-024 lexical parity | Run the representative string corpus through the pure helper and CAH-024's existing pre-filesystem admission, creating targets only for accepted controls | Policy/boundary integration | Both accept/reject the same string grammar without Unicode normalization; valid helper components reflect only legal path-component normalization, and PathLike-only CAH-024 inputs remain outside the model-facing helper contract |
 | Shared hard-deny primitive | Call `is_hard_denied_path` directly for every exact component, basename, suffix, case rule, documented `.env` exception, empty-root tuple, and a normal control; run the same normalized components through the read policy | Unit/read-policy integration | The pure call performs no path or filesystem I/O, returns only a Boolean, and the read policy makes the same deny/admit decision without revealing the matching rule |
@@ -245,8 +272,17 @@ denylist rule, ignore pattern, raw OS text, or repository content.
   lexical/canonical ignore truth table and prove an opposing negation cannot override the other
   view's ignored decision. Direct-access regressions prove `private/` plus `!private/keep.py` denies
   in both lexical and canonical views, while `private/*` plus `!private/keep.py` admits only when the
-  other view also admits. A boundary spy proves lexical ancestor denial starts no target resolution;
-  an I/O spy proves canonical ancestor denial starts no content access.
+  other view also admits. A boundary spy proves lexical ancestor denial starts no requested target
+  resolution; an I/O spy proves canonical ancestor denial starts no requested content access.
+- Cover root and nested policy candidates that symlink outside the workspace or to `.git/config` and
+  `secrets/dev.env`, plus an actually absent entry, an allowed internal-policy-source control, a
+  present dangling link, and deterministic disappearance, retarget, directory/special-file, and
+  oversized-file replacements between initial admission and the cache-miss read. Boundary and I/O
+  spies prove canonical hard denial and every pre-read rejection precede policy-source content access;
+  only the absent entry is ignored; rejected sources never enter cache or budgets; invalid UTF-8/NUL
+  is held only as a bounded uncommitted candidate; every failure uses exact leak-free
+  `repository_policy_invalid`; and a shared allowed source is read and charged once only after full
+  validation while its rules remain candidate-owner relative.
 - Put an invalid or oversized `.gitignore` below an already ignored directory and prove it is never
   opened or charged and cannot replace `repository_path_ignored` with `repository_policy_invalid`.
 - Test every numeric policy boundary below, at, and above; test the shared constants as public
@@ -297,8 +333,10 @@ Do not add or revise a presentation.
    hard-deny classification; the hard-deny classifier is the only implementation of the exact table,
    performs no I/O or rule disclosure, and has parity evidence through the full read policy.
 4. GitIgnoreSpec precedence and ancestor traversability in both lexical and canonical views, lexical
-   pre-resolution denial, canonical pre-I/O denial, either-view-denies combination, canonical-only
-   public labels, hard-deny dominance, and no ignored override are proved.
+   denial before requested target resolution, denial before requested content I/O, either-view-denies
+   combination, canonical-only public labels, hard-deny dominance, and no ignored override are
+   proved. Every present policy source has owner/source identity, boundary and hard-deny admission,
+   pre-read recheck, fixed failure, safe internal-symlink, and canonical cache/budget evidence.
 5. Public contracts are immutable, typed, documented, and emit only the fixed safe failures.
 6. Focused tests and the canonical offline `./scripts/check` pass without a model, subprocess, or
    network.

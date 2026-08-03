@@ -504,6 +504,7 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
         "cah-030-build-budgeted-context.md",
         "cah-031-register-read-tools.md",
         "cah-032-define-provider-tool-contract.md",
+        "cah-033-stage-and-validate-tool-aware-response.md",
         "cah-034-run-one-read-tool-round-trip.md",
         "cah-035-run-bounded-agent-loop.md",
         "cah-036-map-openai-tool-calls.md",
@@ -514,6 +515,35 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
             (REPOSITORY_ROOT / "user-stories" / name).read_text(encoding="utf-8").split()
         )
         for name in story_names
+    }
+    lesson_names = (
+        "cah-026-repository-read-policy.md",
+        "cah-030-budgeted-context.md",
+        "cah-031-read-tool-registry.md",
+        "cah-032-provider-tool-contract.md",
+        "cah-033-tool-aware-response-admission.md",
+        "cah-034-one-read-tool-round-trip.md",
+        "cah-035-bounded-agent-loop.md",
+        "cah-036-openai-tool-calls.md",
+        "cah-037-read-only-assistant-evaluation.md",
+    )
+    lessons = {
+        name: " ".join(
+            (REPOSITORY_ROOT / "docs" / "lessons" / name).read_text(encoding="utf-8").split()
+        )
+        for name in lesson_names
+    }
+    conceptual_names = (
+        "agent-loop.md",
+        "architecture.md",
+        "context-engineering.md",
+        "evaluation.md",
+        "safety-model.md",
+        "tool-system.md",
+    )
+    conceptual = {
+        name: " ".join((REPOSITORY_ROOT / "docs" / name).read_text(encoding="utf-8").split())
+        for name in conceptual_names
     }
 
     instruction = stories["cah-025-discover-repository-instructions.md"]
@@ -555,6 +585,31 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert "CAH-025 owns the later control-plane consumer evidence" in read_policy
     assert "CAH-025/read-policy integration tests" not in read_policy
 
+    policy_lesson = lessons["cah-026-repository-read-policy.md"]
+    policy_concept = conceptual["safety-model.md"]
+    runtime_rules = " ".join((REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8").split())
+    for document in (read_policy, policy_lesson, policy_concept):
+        assert ".gitignore" in document
+        assert "canonical source" in document
+        assert "candidate owner" in document or "candidate-owner" in document
+        assert "repository_policy_invalid" in document
+        assert "internal symlink" in document
+    assert "`WorkspaceBoundary.resolve_existing` before content I/O" in read_policy
+    assert "canonical hard denial" in read_policy
+    assert "rechecks regular-file type and size" in read_policy
+    assert "never enter the cache or consume count or byte budget" in read_policy
+    assert "pre-read size failures perform no policy-source content read" in read_policy
+    assert "one bounded, uncommitted policy candidate" in read_policy
+    assert "actually absent directory entry is normal" in read_policy
+    assert "Pre-read-rejected sources are not opened, cached, or charged" in policy_lesson
+    assert "budget commit occur atomically only after text validation" in policy_lesson
+    assert "no policy failure is followed by requested-content I/O" in policy_lesson
+    assert "WorkspaceBoundary" in policy_concept
+    assert "canonical hard denial" in policy_concept
+    assert "re-resolve" in policy_concept and "before" in policy_concept
+    assert "not opened, cached, or charged" in policy_concept
+    assert "without reading requested content" in policy_concept
+
     instruction_lesson = (
         REPOSITORY_ROOT / "docs" / "lessons" / "cah-025-repository-instructions.md"
     ).read_text(encoding="utf-8")
@@ -591,8 +646,21 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
         "CAH-030 - Build budgeted repository context | E3 | Core | Selection priority, "
         "provenance, and omission evidence | 475-600" in planning_note
     )
+    assert "present `.gitignore`" in planning_note
+    assert "candidate-owner" in planning_note and "canonical source" in planning_note
+    assert "repository_policy_invalid" in planning_note
+    assert "Pre-read-rejected policy sources" in planning_note
+    assert "are not opened, cached, or charged" in planning_note
+    assert "bounded uncommitted candidate" in planning_note
+    assert "never exposed, cached, or charged" in planning_note
+    assert "pair-preserving" in planning_note
+    assert "unknown-tool lookup" in planning_note
+    assert "duplicate" in planning_note and "invalid_read_tool_input" in planning_note
+    assert "instruction_scopes" in planning_note
+    assert "first-occurrence search-match owner" in planning_note
+    assert "never becomes a search root" in planning_note
+    assert "before replay" in planning_note
 
-    runtime_rules = " ".join((REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8").split())
     assert "use one `cooperate_then_guard` seam" in runtime_rules
     assert "`await asyncio.sleep(0)` outside every lock" in runtime_rules
     assert (
@@ -635,30 +703,115 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
         "`SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`"
         in context
     )
+    assert "search-result paths never become search roots" in context
+    assert "every first-occurrence canonical owner directory of a search match" in context
+    assert "complete scope-plus-focus-plus-search-owner instruction union" in context
     assert (
-        "Focus paths, admitted focus results, and search-result paths never become search roots"
+        "no search excerpt becomes visible before its owner's applicable instruction chain"
         in context
     )
+    assert "Search-owner discovery never launches another search" in context
     assert "It never derives applicability from the source path" in context
     assert "same source under a different `applies_to` is an unseen valid binding" in context
 
+    context_lesson = lessons["cah-030-budgeted-context.md"]
+    assert "Every search keeps the supplied scope as its root" in context_lesson
+    assert "focus or match cannot silently widen search" in context_lesson
+    assert "A match owner does trigger instruction discovery" in context_lesson
+    assert "search-match owner" in context_lesson
+    assert "instruction union" in context_lesson
+    assert "before any focus item or search excerpt" in context_lesson
+
     registry = stories["cah-031-register-read-tools.md"]
-    assert "pure `target_scope(validated_input)` extractor" in registry
-    assert "A known native or registry failure carries no target scope" in registry
+    assert "`instruction_scopes(validated_input, validated_result)` extractor" in registry
+    assert "A known native or registry failure carries no instruction scopes" in registry
+    assert "validated `request.path` byte-for-byte" in registry
+    assert "`list_files`: for each returned entry" in registry
+    assert "`stat_path`: append the canonical result path" in registry
+    assert "`read_file`: append the canonical result file's parent directory" in registry
+    assert "`search_text`: append each canonical match file's parent directory" in registry
+    assert "at most 501 pre-deduplication candidates for `list_files`" in registry
+    assert "201 for `search_text`" in registry
+    assert (
+        "parsing, walking, or otherwise deriving authority from `output_json` is prohibited"
+        in registry
+    )
+
+    registry_lesson = lessons["cah-031-read-tool-registry.md"]
+    assert "ordered `instruction_scopes`" in registry_lesson
+    assert "requested path first" in registry_lesson
+    assert "directory entry itself or file entry parent" in registry_lesson
+    assert "append every match file parent" in registry_lesson
+    assert "501 candidates for listing, 201 for search" in registry_lesson
+    assert "no partial tuple" in registry_lesson
 
     provider = stories["cah-032-define-provider-tool-contract.md"]
     assert "Every `ProviderRequest` is an immutable snapshot" in provider
     assert "successive request from CAH-030's atomically enriched package" in provider
-    assert "local `ReadToolSuccess.target_scope` never enters" in provider
+    assert "local `ReadToolSuccess.instruction_scopes` never enter" in provider
+    assert "target_scope" not in provider
     assert "canonical candidate-owner `applies_to`" in provider
     assert "never derived from a possibly symlink-resolved source" in provider
+    assert "already JSON-decoded, duplicate-free object" in provider
+    assert "CAH-034's pair-preserving decoder" in provider
+    assert "unparsed JSON argument string" in provider
+
+    provider_lesson = lessons["cah-032-provider-tool-contract.md"]
+    assert "raw arguments" in provider_lesson
+    assert "pair preservation" in provider_lesson
+    assert "normal dictionary has already forgotten earlier duplicate values" in provider_lesson
+    assert "local `instruction_scopes`" in provider_lesson
+    assert "target_scope" not in provider_lesson
+
+    staged_turn = stories["cah-033-stage-and-validate-tool-aware-response.md"]
+    assert (
+        "preserves CAH-032's bounded `arguments_json` byte-for-byte and does not parse it"
+        in staged_turn
+    )
+    assert "CAH-034 is the sole owner of pair-preserving decode" in staged_turn
+    assert "before its exact-key gate, Pydantic validation, or dispatch" in staged_turn
+    staged_turn_lesson = lessons["cah-033-tool-aware-response-admission.md"]
+    assert (
+        "argument string byte-for-byte without parsing or duplicate detection" in staged_turn_lesson
+    )
+    assert "deferred to CAH-034" in staged_turn_lesson
 
     round_trip = stories["cah-034-run-one-read-tool-round-trip.md"]
     assert "post-dispatch" in round_trip and "deadline check" in round_trip
-    assert "checks once more after merge before committing" in round_trip
+    assert "seam runs after every scope's discovery and merge" in round_trip
     assert "pre-start guard runs immediately before the follow-up" in round_trip
     assert "CAH-025" in round_trip and "CAH-030" in round_trip
-    assert "paths merely returned in its result never become scopes" in round_trip
+    assert "exact registry lookup, duplicate-aware JSON-object decoding" in round_trip
+    assert "consumes preserved object pairs" in round_trip
+    assert "repeated decoded member name at any nesting depth" in round_trip
+    assert "Equality is exact after JSON escape decoding" in round_trip
+    assert "no case folding or Unicode normalization" in round_trip
+    assert "unknown lookup wins before decoding" in round_trip
+    assert "same-value/conflicting/reversed duplicate names" in round_trip
+    assert "escape-equivalent `path` names" in round_trip
+    assert "nested duplicates" in round_trip
+    assert "maps to `invalid_read_tool_input`" in round_trip
+    assert "duplicate arguments run no key gate, Pydantic validation, dispatch" in round_trip
+    assert "charged call and fixed error must replay" in round_trip
+    assert "one charged observation, unchanged context, exact call/error history" in round_trip
+    admitted_call = round_trip.index("CAH-033 atomically returns the first accepted call")
+    charged_call = round_trip.index("charge the one observed tool call")
+    assert admitted_call < charged_call
+    assert round_trip.index("charge the one observed tool call") < round_trip.index(
+        "exact registry lookup, duplicate-aware JSON-object decoding"
+    )
+    assert round_trip.index(
+        "exact registry lookup, duplicate-aware JSON-object decoding"
+    ) < round_trip.index("CAH-032's exact model-facing required-key gate")
+    assert round_trip.index("CAH-032's exact model-facing required-key gate") < round_trip.index(
+        "native Pydantic input validation"
+    )
+    assert round_trip.index("native Pydantic input validation") < round_trip.index(
+        "synchronous dispatch"
+    )
+    assert "ordered, exact-deduplicated local `instruction_scopes` tuple" in round_trip
+    assert "owner directory for every model-visible returned path" in round_trip
+    assert "process each scope in order" in round_trip
     assert "`await asyncio.sleep(0)` outside every lock" in round_trip
     for checkpoint in (
         '"before_dispatch"',
@@ -672,11 +825,25 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert "production-mode seam test installs no observer/gate" in round_trip
     assert "deleting the unconditional outside-lock `asyncio.sleep(0)` must fail" in round_trip
 
+    round_trip_lesson = lessons["cah-034-one-read-tool-round-trip.md"]
+    assert "lookup name -> pair-preserving recursive decode" in round_trip_lesson
+    assert "repeated decoded name at any depth" in round_trip_lesson
+    assert "without normalization or case folding" in round_trip_lesson
+    assert "unknown-tool lookup still wins first" in round_trip_lesson
+    assert "For each scope in order" in round_trip_lesson
+    assert (
+        "All scope candidates, the result, and the complete context remain local"
+        in round_trip_lesson
+    )
+
     agent_loop = stories["cah-035-run-bounded-agent-loop.md"]
     assert "accumulate instruction items" in agent_loop
-    assert "Only the requested target scope is admitted" in agent_loop
-    assert "paths returned by broad listing/search output never drive discovery" in agent_loop
-    assert "guards run after discovery, after merge before result/context append" in agent_loop
+    assert "every model-visible returned-path owner before each result replay" in agent_loop
+    assert "duplicate-aware JSON-object decode" in agent_loop
+    assert "later loop iterations reuse this decoder" in agent_loop
+    assert "validated request path first" in agent_loop
+    assert "every exact-deduplicated owner of a model-visible returned path" in agent_loop
+    assert "guards run after every discovery, after every merge" in agent_loop
     assert (
         "reuses—not wraps or reimplements—CAH-034's `cooperate_then_guard(checkpoint)`"
         in agent_loop
@@ -684,17 +851,44 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert "unconditionally yields with `await asyncio.sleep(0)` outside locks" in agent_loop
     assert "same source under another owner remains a distinct charged binding" in agent_loop
 
+    agent_loop_lesson = lessons["cah-035-bounded-agent-loop.md"]
+    assert (
+        "Every iteration calls CAH-034's one pair-preserving recursive decoder" in agent_loop_lesson
+    )
+    assert (
+        "requested path first, then every exact-deduplicated returned-path owner"
+        in agent_loop_lesson
+    )
+    assert "discover and merge all scopes before replay" in agent_loop_lesson
+    assert "YIELD/GUARD -> for each instruction_scope" in agent_loop_lesson
+
     adapter = stories["cah-036-map-openai-tool-calls.md"]
     assert "exactly `source`, `applies_to`, and `content`" in adapter
     assert "one sibling never overrides another" in adapter
     assert "canonical candidate-owner directory" in adapter
     assert "copied without derivation" in adapter
+    assert "preserved byte-for-byte" in adapter
+    assert "completed argument object with repeated member names" in adapter
+    assert "must not decode it into a last-value-wins dictionary" in adapter
+    assert "CAH-034's pair-preserving decoder owns duplicate rejection" in adapter
+
+    adapter_lesson = lessons["cah-036-openai-tool-calls.md"]
+    assert "byte-exact function-call text forwarded without parsing" in adapter_lesson
+    assert "duplicate-member collapse" in adapter_lesson
+    assert "never calls a JSON decoder on function-call arguments" in adapter_lesson
 
     evaluation = stories["cah-037-prove-read-only-assistant.md"]
     assert '`read_file` with `path="pkg/file.py"`' in evaluation
     assert 'next request containing the binding `source="shared/rules.md"`' in evaluation
     assert '`applies_to="pkg"`' in evaluation
-    assert "merely returned by a broad `list_files` or `search_text` result" in evaluation
+    assert "broad `list_files` or `search_text` result is not replayed until" in evaluation
+    assert "every owner bundle is discovered, folded, budgeted, and guarded" in evaluation
+    assert "complete result/context transaction fails" in evaluation
+    assert "duplicate-aware decoder as `invalid_read_tool_input`" in evaluation
+    assert "conflicting and escape-equivalent `path` names" in evaluation
+    assert "zero key-gate, Pydantic, native read" in evaluation
+    assert "one charged observation" in evaluation
+    assert "exact call/error replay in a follow-up against unchanged context" in evaluation
     assert (
         '`SearchTextRequest(query="completion", path=".", max_depth=4, max_matches=100)`'
         in evaluation
@@ -706,6 +900,41 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert "`before_dispatch`" in evaluation
     assert "zero dispatch at the first gate" in evaluation
     assert "next provider-start count remains zero" in evaluation
+
+    evaluation_lesson = lessons["cah-037-read-only-assistant-evaluation.md"]
+    evaluation_lesson_lower = evaluation_lesson.lower()
+    assert "broad list/search" in evaluation_lesson_lower
+    assert "instruction" in evaluation_lesson_lower and "before replay" in evaluation_lesson_lower
+    assert "duplicate" in evaluation_lesson_lower and "zero dispatch" in evaluation_lesson_lower
+
+    agent_loop_doc = conceptual["agent-loop.md"]
+    agent_loop_doc_lower = agent_loop_doc.lower()
+    assert "pair-preserving" in agent_loop_doc_lower
+    assert "unknown-tool lookup" in agent_loop_doc_lower
+    assert "instruction_scopes" in agent_loop_doc_lower
+    assert "after every discovery" in agent_loop_doc_lower
+    assert "after every merge" in agent_loop_doc_lower
+
+    architecture = conceptual["architecture.md"]
+    assert "duplicate-aware" in architecture
+    assert "instruction_scopes" in architecture
+    assert "every model-visible returned path" in architecture
+
+    context_engineering = conceptual["context-engineering.md"]
+    assert "first-occurrence search-match owner" in context_engineering
+    assert "never become inferred search roots" in context_engineering
+    assert "before result replay" in context_engineering
+
+    tool_system = conceptual["tool-system.md"]
+    assert "instruction_scopes" in tool_system
+    assert "501" in tool_system and "201" in tool_system
+    assert "pair-preserving" in tool_system
+    assert "unknown-tool lookup" in tool_system
+
+    evaluation_doc = conceptual["evaluation.md"].lower()
+    assert "broad list/search" in evaluation_doc
+    assert "duplicate-member" in evaluation_doc
+    assert "zero dispatch" in evaluation_doc
 
 
 def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:

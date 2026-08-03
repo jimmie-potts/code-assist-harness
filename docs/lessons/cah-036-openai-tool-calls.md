@@ -58,6 +58,11 @@ turn 2 input:  [...original input, complete reasoning item, function call, funct
 `reasoning.context="current_turn"` does not make it safe to drop replayed output items. A common
 misconception is also that `parallel_tool_calls=false` validates output count; the adapter still must.
 
+Function-call arguments cross this adapter as bounded raw text. Parsing them here would blur provider
+translation with harness policy and can silently collapse repeated names into a last-value-wins
+dictionary. CAH-036 instead preserves the exact fragments and completed value; CAH-034 is the only
+duplicate-aware decoder.
+
 Instructions need both identity and applicability. `pkg/AGENTS.md` may resolve to
 `shared/rules.md` while still guiding `pkg/file.py`, not `shared/file.py` or `other/file.py`.
 Sending content without its canonical source and separately preserved candidate-owner `applies_to`
@@ -72,6 +77,8 @@ would erase the harness's scope decision at the provider boundary.
 - **Strict adapter grammar:** `[reasoning?, function_call]` or `[reasoning?, message]` only.
 - **Egress consent:** explicit OpenAI selection authorizes bounded admitted repository content.
 - **Semantic result:** compact function-output JSON interpreted by the model, not SDK lifecycle.
+- **Raw argument preservation:** byte-exact function-call text forwarded without parsing or
+  duplicate-member collapse.
 - **Scoped instruction:** content paired with canonical source and the separately preserved
   candidate-owner directory it applies to.
 - **Chain precedence:** root-to-nearest ordering inside one canonical ancestor chain; siblings do not
@@ -108,7 +115,8 @@ before CAH-033 exposes an atomic outcome.
    preserve root-to-nearest order within each chain and distinct sibling applicability.
 2. Map strict local function definitions and the complete positional neutral history.
 3. Set stateless/sequential options, request encrypted reasoning replay, and omit continuation IDs.
-4. Reconcile exactly one of the two legal output-item sequences.
+4. Reconcile exactly one of the two legal output-item sequences and preserve function-call argument
+   bytes without constructing a dictionary.
 5. Canonicalize the complete reasoning replay item into one bounded opaque neutral value.
 6. Return atomic neutral output; let CAH-035 decide dispatch or completion.
 
@@ -153,12 +161,27 @@ item = FunctionCallOutput(call_id=result.call_id, output=result.output_json)
 `result.output_json` already contains exact compact success/error JSON. Any SDK lifecycle status is one
 fixed transport value, never a policy decision.
 
+### Planned pseudocode: raw function arguments
+
+```python
+call = ProviderToolCall(
+    call_id=reconciled_call_id,
+    name=reconciled_name,
+    arguments_json=reconciled_argument_text,
+)
+```
+
+The adapter reconciles fragment and completed values but never calls a JSON decoder on function-call
+arguments or `arguments_json`. If the raw object contains two `path` members, both remain present in
+the neutral call so CAH-034 can reject the ambiguity before its exact-key gate and Pydantic validation.
+
 ## Failure scenarios to study
 
 | Scenario | Safe result | Evidence |
 | --- | --- | --- |
 | message plus function call | invalid response | no neutral value escapes |
 | two calls despite parallel=false | invalid response | output-count mutation |
+| one call repeats the `path` argument member | exact raw neutral call; CAH-034 later rejects input | byte snapshot and zero adapter JSON-decode calls on function-call arguments |
 | encrypted-content include missing on any turn | outbound contract failure | turn-one-through-four snapshots |
 | reasoning item omitted on replay | request mismatch | exact turn-two snapshot |
 | `source` or `applies_to` omitted | outbound contract failure | exact instruction JSON snapshot |
@@ -214,10 +237,14 @@ security control; do not imply path policy already scans file contents.
 6. Map omitted, null, and present `content`/`status` through canonical storage and input replay.
 7. Serialize root, `pkg`, and sibling `other` instructions; identify where precedence is defined and
    why the adapter must not collapse the siblings.
+8. Explain why decoding duplicate-member arguments in the adapter would erase evidence CAH-034 needs
+   to reject the call deterministically.
 
 ## Key takeaways
 
 - The adapter translates; the harness admits, dispatches, and continues.
+- Function-call arguments remain byte-exact raw text through the adapter; CAH-034 alone decodes and
+  rejects repeated member names.
 - Every mapped instruction carries canonical `source` and `applies_to`; ordering expresses
   root-to-nearest precedence only inside an ancestor chain, never sibling override.
 - Every stateless request asks for `reasoning.encrypted_content`; otherwise later full replay is not

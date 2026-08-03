@@ -454,15 +454,17 @@ remains candidate evidence until accepted final text completes the session.
 > ownership handoff is visible before general iteration.
 
 This [planned story](../user-stories/cah-034-run-one-read-tool-round-trip.md) implements exactly two
-fake-backed model turns around one native read dispatch. It preserves the registry-derived catalog,
-gates exact model-facing keys before native Pydantic validation, and dispatches only after CAH-033
-accepts the complete first response. After a successful dispatch, it discovers the validated target's
-applicable instructions and atomically enriches context before replaying one canonical correlated
-result envelope and appending `continuation? -> call -> result` to the single ordered history.
+fake-backed model turns around one native read dispatch. It preserves the registry-derived catalog
+and dispatches only after CAH-033 accepts the complete first response. Unknown-tool lookup runs first;
+CAH-034 alone then performs pair-preserving decoding of JSON object members and rejects any repeated
+decoded name before the exact-key gate, Pydantic validation, or dispatch. After a successful dispatch, it processes
+CAH-031's ordered local `instruction_scopes`—the requested path plus every model-visible result
+owner—and atomically enriches context before replaying one canonical correlated result envelope and
+appending `continuation? -> call -> result` to the single ordered history.
 Synchronous native reads, instruction discovery, and context merge are bounded and non-preemptive;
-one shared scheduling seam runs before dispatch, after each synchronous stage, and before the
-follow-up start. It unconditionally yields once to the event loop outside locks, then applies the
-existing cancellation/deadline guard. Tool results, instruction bundles, merged context, history,
+one shared scheduling seam runs before dispatch, after dispatch, after every discovery, after every
+merge, and before the follow-up start. It unconditionally yields once to the event loop outside locks,
+then applies the existing cancellation/deadline guard. Tool results, instruction bundles, merged context, history,
 and the next request stay local until the final guard passes, so another terminal commits none of
 those candidates. A production-mode regression installs no awaited checkpoint hook, queues
 cancellation on the same loop, and asserts at guard entry that the unconditional yield alone let it
@@ -476,8 +478,9 @@ handler was reaped.
 
 This [planned story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces the teaching branch
 with a sequential state machine capped at four model turns and three within-budget tool calls. It
-permits one call per turn, accumulates successful target-scoped instructions without removing prior
-context, keeps all budgets cumulative, and retains exactly one rejecting fourth
+permits one call per turn, accumulates instructions for all direct and result-derived owner scopes
+without removing prior context, reuses CAH-034's sole duplicate-aware argument decoder, keeps all
+budgets cumulative, and retains exactly one rejecting fourth
 observation when that limit wins, matching CAH-022 evidence semantics. It fails closed on mixed,
 multiple, or parallel call shapes. Provider usage is optional session-aggregate evidence and is
 admitted only alongside accepted final assistant text, never as a per-tool-turn lifecycle fact.

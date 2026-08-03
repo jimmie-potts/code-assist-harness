@@ -100,8 +100,11 @@ native capability, implement MCP, or create protocol/transcript schemas.
   and completed-response snapshots reconcile exactly. No neutral call, text, reasoning continuation,
   or usage escapes until the complete SDK response is accepted and CAH-033 returns atomically.
 - Argument fragments are accumulated under the neutral argument bound and preserved byte-for-byte.
-  The adapter never parses, normalizes, logs, or diagnoses them; CAH-035 owns later validation and
-  dispatch. `parallel_tool_calls=false` is defense in depth, not a substitute for output-count checks.
+  This includes a completed argument object with repeated member names: the adapter must not decode it
+  into a last-value-wins dictionary or choose a first/last value. It never parses, normalizes,
+  deduplicates, logs, or diagnoses arguments; CAH-034's pair-preserving decoder owns duplicate
+  rejection and CAH-035 reuses that validation/dispatch path. `parallel_tool_calls=false` is defense
+  in depth, not a substitute for output-count checks.
 - CAH-030 `instruction` items map into the compact `instructions` document under CAH-023's existing
   prefix. Each JSON array element has exactly `source`, `applies_to`, and `content` in that insertion
   order. `source` is the canonical workspace-relative instruction path and `applies_to` is its
@@ -149,7 +152,8 @@ native capability, implement MCP, or create protocol/transcript schemas.
    null-to-omitted mappings for optional `content` and `status`, retained `[]`/`"completed"` values,
    and matched function-call/function-output items at their original positions.
 3. The adapter accepts only `[reasoning?, function_call]` or `[reasoning?, message]`, reconciles every
-   streamed/terminal field, and exposes one atomic CAH-033 outcome after completion.
+   streamed/terminal field, preserves function-call argument bytes exactly even when member names
+   repeat, and exposes one atomic CAH-033 outcome after completion without parsing arguments.
 4. Function output carries CAH-034 compact JSON unchanged; SDK lifecycle status does not represent
    semantic tool success/error or decide loop continuation.
 5. Multiple/parallel/mixed/reordered/unsupported items and every identity, sequence, status, delta,
@@ -174,8 +178,8 @@ native capability, implement MCP, or create protocol/transcript schemas.
 | 1-2 | Exact request snapshots cover turns one through four, the current context snapshot, unchanged definitions/options, positional opaque/call/result history, all stored reasoning fields, the four canonical `content`/`status` combinations and their null-to-omitted replay, the exact one-element `include=["reasoning.encrypted_content"]` on every turn, and explicit absence of response continuation/storage fields. An invocation spy checks every provider start; request-object mutations remove, misspell, or add an include value and fail exact mapping evidence. |
 | 3 | SDK-fake success cases cover both exact item sequences with/without reasoning and usage plus the nine omitted/null/present `content` and `status` input combinations, asserting one atomic neutral outcome only after completed response reconciliation. Mutation tables reject missing required fields, extras, invalid optional values, and tampered stored envelopes with no continuation/call/text/usage effect; boundary snapshots cover 65,535/65,536/65,537-byte six-key canonical replay envelopes. |
 | 4 | Success/error function-output snapshots prove identical fixed transport status and byte-exact compact JSON; mutations cannot alter loop decisions. |
-| 5 | Single-field tables mutate response/item IDs, indices, types, order, names, statuses, deltas/done, completed snapshots, usage, duplicates, mixed/parallel shapes, early EOF, and post-terminal events; no value escapes. |
-| 6 | Turn-by-turn context snapshots prove root-only start followed by instruction growth after successful nested and sibling target scopes. Exact JSON asserts `source` plus `applies_to`, root-to-nearest chain order, non-overriding siblings, idempotent repeats, known-error stability, focus/search provenance, full replay, and distinctive excluded sentinels absent from SDK arguments. |
+| 5 | Single-field tables mutate response/item IDs, indices, types, order, names, statuses, deltas/done, completed snapshots, usage, duplicate output items, mixed/parallel shapes, early EOF, and post-terminal events; no value escapes. A separate accepted function-call case carries same-value and conflicting duplicate `path` members through deltas, done, and the neutral call byte-for-byte, with zero JSON-decode calls on function-call arguments or `arguments_json` in the adapter. |
+| 6 | Turn-by-turn context snapshots prove root-only start followed by instruction growth after successful nested and sibling result-owner scopes. Exact JSON asserts `source` plus `applies_to`, root-to-nearest chain order, non-overriding siblings, idempotent repeats, known-error stability, focus/search provenance, full replay, and distinctive excluded sentinels absent from SDK arguments. |
 | 7 | Configuration tests prove mock sends nothing, explicit OpenAI selection enables bounded requests without another prompt, and help/setup/startup warning names the absent content secret scan without printing content. |
 | 8 | Existing adapter error, cleanup, cancellation, deadline, model, credential, protocol, transcript, and text-grammar suites pass plus tool/reasoning races. |
 | 9 | Socket/import/policy tests deny HTTP by default, SDK leakage, hosted/remote/MCP shapes, and accidental live selection; optional smoke gating is tested separately. |
@@ -187,6 +191,8 @@ native capability, implement MCP, or create protocol/transcript schemas.
 - Assert exact outbound request objects—including the one-element encrypted-content include on every
   turn—atomic normalized outcomes, operation cleanup, no late observations, safe failure codes, and
   egress-selection behavior.
+- Assert duplicate-member argument strings survive SDK fragment reconciliation byte-for-byte and no
+  adapter parser, dictionary conversion, normalization, diagnostic, or log observes their contents.
 - Run focused OpenAI adapter/provider-session/configuration tests, unchanged real process-boundary
   tests, and the canonical network-free gate. Run live smoke only when deliberately requested.
 

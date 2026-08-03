@@ -28,7 +28,7 @@ After this unit, you should be able to:
 
 - separate a tool definition, a requested call, and a returned result;
 - project selected context, including instruction `applies_to`, without sending its local inclusion
-  report or CAH-031 target scope;
+  report or CAH-031 instruction scopes;
 - distinguish immutable successive context snapshots from in-place mutation;
 - explain why arguments remain unparsed at the provider boundary;
 - explain why model-facing required keys must be checked before native defaults can apply;
@@ -54,8 +54,10 @@ result:     call_1 receives bounded text or a bounded error
 ```
 
 The call ID pairs the result with the request. A common misconception is that JSON text is already a
-validated tool input. CAH-032 preserves argument bytes; CAH-034 will parse and validate them after
-CAH-033 admits the complete provider response. A
+validated tool input. CAH-032 preserves argument bytes—even when an object repeats a member name;
+CAH-034 will decode with pair preservation, reject duplicates, and validate them after CAH-033 admits
+the complete provider response. A normal dictionary has already forgotten earlier duplicate values,
+so the CAH-032 exact-key gate cannot repair that loss. A
 second misconception is that any valid JSON Schema is portable. The reviewed M2 subset is flat and
 requires every property plus `additionalProperties: false`, matching strict function-tool rules.
 Python callers may still use native request defaults; the model-facing schema requires explicit
@@ -92,7 +94,7 @@ deterministic order.
   `{"result":...}`, error exactly `{"error":{"code":...,"message":...}}`.
 - **History grammar:** rules preventing orphan, duplicate, or unresolved call/result items.
 - **Context projection:** the exact admitted CAH-030 items and instruction `applies_to`, without its
-  local omission report or CAH-031 success-only target scope.
+  local omission report or CAH-031 success-only instruction scopes.
 - **Context snapshot:** one immutable per-request value; a later enriched request does not mutate the
   earlier one.
 - **Raw-key gate:** exact model-facing key-set admission before native validation or defaults.
@@ -115,11 +117,11 @@ Future MCP: catalog snapshot + re-admission -> generalized registry port -> neut
             (not direct plug compatibility; transport/auth/timeouts/cancellation remain future)
 
 Later CAH-034 dispatch:
-raw JSON -> decode object -> [CAH-032 exact key gate] -> native Pydantic -> read tool
+raw JSON -> duplicate-aware object decode -> [CAH-032 exact key gate] -> native Pydantic -> read tool
                               missing/defaulted keys stop here
 
 Later context flow:
-CAH-031 local target_scope -> CAH-025 bundle -> CAH-030 merge -> new CAH-032 request snapshot
+CAH-031 local instruction_scopes -> each CAH-025 bundle -> CAH-030 merges -> new CAH-032 snapshot
 ```
 
 Definitions use a closed schema table: the root has exactly `type`, `properties`, `required`, and
@@ -130,7 +132,7 @@ strict UTF-8 after JSON parsing; lone surrogates and literal NUL fail without no
 status must match its sole top-level envelope key. Ordered history rejects orphan results and
 unresolved calls, and a continuation that does not immediately precede its provider-produced call or
 assistant message. Context preserves CAH-030 order/content/`applies_to` while omitting its report and
-local target-scope metadata. Every metadata byte is part of the 512-KiB request projection.
+local instruction-scope metadata. Every metadata byte is part of the 512-KiB request projection.
 
 ## Practical walkthrough
 
@@ -138,11 +140,11 @@ local target-scope metadata. Every metadata byte is part of the 512-KiB request 
 2. Extend one request-history tuple with legal user/assistant/continuation/call/result items; do not
    add an adapter side channel.
 3. Project one CAH-030 package with instruction `applies_to`, but without its inclusion report or
-   CAH-031 target scope.
+   CAH-031 local `instruction_scopes`.
 4. Call the separate pure bridge to filter Pydantic `title`/`default`, reject every other unsupported
    keyword, require all fields, and canonicalize all definitions atomically.
-5. Add the separate pure raw-key gate that CAH-034 will run after JSON-object decoding and before
-   native Pydantic validation.
+5. Add the separate pure raw-key gate that CAH-034 will run only after its pair-preserving decoder has
+   rejected repeated member names and before native Pydantic validation.
 6. Make the strict fake compare initial and enriched context snapshots, definitions, and history
    exactly without mutating the initial request.
 7. Prove every byte/item bound, including `applies_to`, and that mismatch messages reveal structure,
@@ -179,7 +181,7 @@ The bridge—not the provider value—converts a registry descriptor. The call p
 arguments. The opaque payload is one content-suppressed history item immediately before that call and
 counts once toward both the 16-item and 512-KiB request limits. The result reuses CAH-031's exact
 canonical success envelope and is admitted only after the matching call. The local
-`ReadToolSuccess.target_scope` is deliberately absent; only CAH-030's admitted scoped items enter the
+`ReadToolSuccess.instruction_scopes` tuple is deliberately absent; only CAH-030's admitted scoped items enter the
 new request.
 
 ### Exact schema subset
@@ -198,13 +200,15 @@ nested values, arrays, unions/combinators, formats, defaults, floats, and unknow
 ### Planned pseudocode: required keys before native defaults
 
 ```python
-decoded = decode_json_object(call.arguments_json)  # CAH-034 owns decoding
+decoded = decode_json_object_without_duplicate_names(call.arguments_json)  # CAH-034 owns decoding
 require_provider_tool_argument_keys(definition, decoded)  # CAH-032 pure gate
 native_request = descriptor.input_model.model_validate(decoded)
 ```
 
-If `decoded` omits a field that has a native default, line two still rejects it and line three never
-runs. A trusted direct Python caller may use the unchanged native model and receive that default.
+The first line must inspect object-member pairs before constructing a dictionary; otherwise repeated
+`path` members collapse before the gate can see them. If `decoded` omits a field that has a native
+default, line two still rejects it and line three never runs. A trusted direct Python caller may use
+the unchanged native model and receive that default.
 
 ### Planned pseudocode: orphan-result failure
 
@@ -226,9 +230,10 @@ The constructor rejects impossible history before an adapter or model sees it.
 | continuation above 65,536 bytes or request above 512 KiB | continuation/request constructor | reject atomically | below/at/above byte snapshots |
 | legacy and new context both supplied | request constructor | reject duplicate priority models | compatibility test |
 | missing/changed instruction `applies_to` | context projection/fake | reject the mismatched snapshot | exact-context snapshot |
-| CAH-031 local target scope enters request/result | projection boundary | reject the extra field | omission sentinel test |
+| CAH-031 local instruction scopes enter request/result | projection boundary | reject the extra field | omission sentinel test |
 | request projection above 512 KiB | request constructor | reject without truncation | byte-bound test |
 | raw malformed arguments | later dispatcher, not CAH-032 | preserve bytes without execution | constructor test |
+| raw arguments repeat a member name | later CAH-034 decoder, not CAH-032 | preserve exact bytes; do not choose a value | duplicate-member boundary test |
 | omitted defaulted or additional model key | CAH-032 raw-key gate | reject before Pydantic/defaults | spy-validator key-set tests |
 | oversized result | result constructor | fixed bounded failure | byte-bound test |
 | status/envelope mismatch | result constructor | reject before history | exact success/error snapshots |
@@ -273,7 +278,8 @@ features or MCP only when a real reviewed capability requires them and compatibi
 
 ## Practical exercises
 
-1. Explain why `arguments_json` must not be parsed inside a provider adapter.
+1. Explain why `arguments_json` must not be parsed inside a provider adapter, and why an ordinary
+   dictionary is too late to detect repeated JSON member names.
 2. Move an opaque continuation after its call and predict the constructor failure.
 3. Teach back how function calling differs from tool execution.
 4. Draw the snapshot, re-admission, remote execution, and result-mapping stages a future MCP port
@@ -286,13 +292,14 @@ features or MCP only when a real reviewed capability requires them and compatibi
 ## Key takeaways
 
 - The harness contract, not an SDK, defines tool meaning inside the loop.
-- Calls and results pair exactly; raw arguments are not validated inputs.
+- Calls and results pair exactly; raw arguments—including duplicate-member objects—are preserved as
+  byte-exact strings, not validated inputs.
 - Opaque provider state stays in the same ordered history as its call; it is bounded and preserved,
   never interpreted or stored in evidence.
 - Model-facing required keys are admitted before native Pydantic defaults; local callers keep their
   native defaults.
 - Each request is an immutable scoped-context snapshot; adapters serialize the whole admitted value
-  and never receive CAH-031's local target scope.
+  and never receive CAH-031's local instruction scopes.
 - OpenAI maps this neutral seam directly; MCP needs a future generalized registry port with explicit
   re-admission and remote-operation ownership.
 

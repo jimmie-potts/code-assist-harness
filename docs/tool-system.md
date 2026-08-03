@@ -33,10 +33,11 @@ and TUI help. Documentation is part of the definition rather than a separate bes
 ## Registration and dispatch
 
 A registry maps a unique name to its definition and executor. Model-provided dispatch follows a
-fixed order:
+fixed order; unknown-tool lookup deliberately wins before any argument decoding:
 
 1. Reject an unknown tool name.
-2. Decode exactly one JSON object without performing work.
+2. Decode exactly one JSON object with pair preservation in a pair-preserving decoder, and reject any
+   repeated decoded member name at any nesting depth before constructing a dictionary.
 3. Require its exact advertised key set before a native model can apply defaults.
 4. Validate native field types and constraints with Pydantic.
 5. Classify the requested capability.
@@ -47,9 +48,10 @@ fixed order:
 10. Execute with cancellation, time, and output bounds.
 11. Validate and emit the structured result and audit events.
 
-Unsupported arguments are errors rather than ignored hints. Provider-supplied JSON never reaches an
-executor as an unvalidated dictionary. An invalid request yields a structured result the loop can
-return to the model; it does not crash the session. Trusted direct Python callers may still use the
+Unsupported or duplicate arguments are errors rather than ignored hints. Duplicate equality is exact
+after JSON escape decoding, without case folding or Unicode normalization. Provider-supplied JSON
+never reaches an executor as an unvalidated dictionary. An invalid request yields a structured result
+the loop can return to the model; it does not crash the session. Trusted direct Python callers may still use the
 unchanged native request models and their defaults; that does not make an advertised model-facing
 field optional.
 
@@ -60,12 +62,16 @@ classified as reads and may execute automatically after policy validation. They 
 shell, access the network, or escape the workspace. Their outputs are bounded and carry source
 provenance. More detail appears in [Context Engineering](context-engineering.md).
 
-Each registered M2 read tool also owns one pure, typed `target_scope` extractor. It returns exactly
-the successfully validated requested `path` as harness-only control-plane metadata; it is never added
-to the model-facing result JSON. The loop uses that scope to discover and atomically add applicable
-instructions before the next provider turn. Known tool failures add no scope. Paths merely listed or
-returned as broad search matches do not independently expand instructions in M2; a specific
-path-targeting call is required before relying on a narrower scope.
+Each registered M2 read tool also owns one pure, typed `instruction_scopes` extractor over its exact
+validated request and success result. The requested `path` is first. In provider-visible result order,
+`list_files` then adds each directory or file parent, `stat_path` adds the returned directory or file
+parent, `read_file` adds the returned file parent, and `search_text` adds every match-file parent.
+Exact labels are deduplicated by first occurrence; later CAH-025 canonicalization and CAH-030 merge
+handle aliases and repeated owner snapshots. This ordered tuple is content-suppressed harness
+control-plane metadata, never model-facing result JSON. A known failure carries no scopes. The loop
+must discover and atomically merge every scope before replaying any successful result; one unsafe,
+invalid, changed, or over-budget scope rejects the whole candidate transaction. Native result limits
+bound extraction to 501 candidates for listing and 201 for search before exact deduplication.
 
 ## Function calling and MCP
 
@@ -148,9 +154,10 @@ validated, redacted events.
 > capability metadata so that dispatch and policy are predictable.
 
 The [implementation-ready story](../user-stories/cah-031-register-read-tools.md) admits exactly four
-native read operations through an immutable typed registry. Duplicate or side-effecting candidates,
-unknown names, wrong inputs, and wrong results fail with fixed non-leaking errors. General E4 policy
-and dynamic extension remain M3 or later.
+native read operations through an immutable typed registry and derives their complete ordered local
+instruction scopes only after exact success-result validation. Duplicate or side-effecting
+candidates, unknown names, wrong inputs, wrong results, and invalid scope extraction fail with fixed
+non-leaking errors. General E4 policy and dynamic extension remain M3 or later.
 
 ### Planned CAH-032 — Define the provider-neutral tool contract
 
@@ -175,8 +182,10 @@ and multiple calls cause neither text publication nor tool dispatch.
 
 The [one-round-trip story](../user-stories/cah-034-run-one-read-tool-round-trip.md) makes the entire
 request/call/validate/dispatch/result/response flow visible using one canonical compact JSON result
-envelope capped at 65,536 bytes inclusive. Model-facing keys are admitted before Pydantic defaults;
-oversize output fails instead of being truncated. The
+envelope capped at 65,536 bytes inclusive. CAH-034 alone performs duplicate-aware recursive argument
+decoding after name lookup and before the exact-key gate and Pydantic validation. Oversize output
+fails instead of being truncated. Every direct or result-derived instruction scope is discovered,
+merged, guarded, and budgeted before successful-result replay. The
 [bounded-loop story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces
 that teaching branch with a sequential four-turn, three-call state machine. Synchronous native tools
 are bounded and non-preemptive. Before dispatch, after each synchronous dispatch/discovery/merge

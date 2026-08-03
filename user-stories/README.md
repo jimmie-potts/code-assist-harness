@@ -53,7 +53,7 @@ provider/model configuration while preserving the mock default. M0 and M1 are co
 through CAH-037 are the 14 implementation-ready M2 units and all remain **Planned**. CAH-024 is the
 next dependency checkpoint; the sequence then adds shared read policy, scoped instructions and handlers,
 attributable context, a typed registry, provider-neutral tool exchange, atomic response admission,
-target-scoped instruction propagation through one explicit round trip, the bounded agent loop,
+complete result-path instruction coverage through one explicit round trip, the bounded agent loop,
 strict OpenAI tool mapping, and deterministic vertical-slice evaluation.
 
 ## Dependency-ordered implementation sequence

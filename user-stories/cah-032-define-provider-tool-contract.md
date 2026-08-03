@@ -81,19 +81,24 @@ transitions, parse or dispatch a call, run a second model turn, map OpenAI SDK e
   registry order. `ProviderToolDefinition` has no `from_descriptor` method, the registry does not
   import provider models, and no hand-maintained second tool catalog exists.
 - The separate pure `require_provider_tool_argument_keys(definition, arguments)` gate accepts only
-  an already JSON-decoded object and compares its keys exactly with the definition's canonical
-  `required` names. Missing keys—including fields for which the native Pydantic model has a
-  default—and additional keys fail with a bounded content-safe validation error before
-  `model_validate(...)` is called. The gate neither parses JSON nor performs native type validation,
-  coercion, lookup, or dispatch. It does not modify the CAH-031 request models: trusted direct Python
-  callers may still construct and validate those native models with their existing defaults.
+  an already JSON-decoded, duplicate-free object and compares its keys exactly with the definition's
+  canonical `required` names. CAH-034's pair-preserving decoder must establish that precondition
+  before a normal dictionary can collapse repeated JSON member names; this gate cannot recover or
+  prove member uniqueness after decoding. Missing keys—including fields for which the native
+  Pydantic model has a default—and additional keys fail with a bounded content-safe validation error
+  before `model_validate(...)` is called. The gate neither parses JSON nor performs duplicate-member
+  detection, native type validation, coercion, lookup, or dispatch. It does not modify the CAH-031
+  request models: trusted direct Python callers may still construct and validate those native models
+  with their existing defaults.
 
 ### Calls, result envelopes, and history
 
 - `ProviderToolCall` contains a bounded call ID, exact registered name, and the provider's unparsed
   JSON argument string. A call ID matches `[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}` exactly. The tool name
   uses the lower-snake grammar above. Construction validates those identifiers plus strict
-  scalar/UTF-8 and byte limits but deliberately does not parse arguments.
+  scalar/UTF-8 and byte limits but deliberately does not parse, normalize, or deduplicate arguments.
+  Even a string containing repeated JSON member names is retained byte-for-byte for later CAH-034
+  admission; construction neither accepts it as a typed input nor chooses a first or last value.
 - `ProviderToolResult` contains the matching call ID, an explicit `success` or `error` status, and
   one canonical `output_json` envelope. Success is byte-for-byte the CAH-031 compact envelope
   `{"result":<allowlisted-value>}`. Error is exactly
@@ -146,9 +151,9 @@ transitions, parse or dispatch a call, run a second model turn, map OpenAI SDK e
   silently filling a value the model omitted.
 - `ProviderToolCallRequested` is still only an observation. Neither its construction nor the fake
   parses arguments, performs lookup, executes a tool, or authorizes another turn.
-- CAH-031's local `ReadToolSuccess.target_scope` never enters `ProviderToolResult`, request context,
-  history, schema, or the canonical result envelope. Later harness orchestration may use it to obtain
-  a CAH-025 bundle and ask CAH-030 for a new snapshot; providers receive only the resulting admitted
+- CAH-031's local `ReadToolSuccess.instruction_scopes` never enter `ProviderToolResult`, request
+  context, history, schema, or the canonical result envelope. Later harness orchestration may use each
+  scope to obtain a CAH-025 bundle and ask CAH-030 for a new snapshot; providers receive only the resulting admitted
   context items.
 - Fake request mismatch diagnostics remain bounded and content-safe: they may identify a structural
   field path and exchange number but never include message text, schema content, arguments, result
@@ -167,8 +172,8 @@ transitions, parse or dispatch a call, run a second model turn, map OpenAI SDK e
   strict UTF-8 decode, and exact equality. Lone surrogates and literal NUL are rejected; valid
   Unicode scalar values remain unchanged and are never normalized. Identifier grammars apply after
   this check. The raw argument string may contain the literal characters of an escaped JSON value
-  such as `\\u0000`, but not an actual NUL; CAH-034 owns JSON decoding, the CAH-032 key gate, and
-  subsequent native-field admission.
+  such as `\\u0000`, but not an actual NUL; CAH-034 owns pair-preserving, duplicate-aware JSON
+  decoding before it invokes the CAH-032 key gate and subsequent native-field admission.
 - Bounds below count the strict UTF-8 bytes of the complete value named. Rejection is atomic and
   never truncates a string, schema, result, history, or request projection.
 
@@ -216,14 +221,15 @@ proxy, not a provider token count or a claim about an adapter's exact wire bytes
    text-only requests remain valid; no continuation uses a separate request field or side channel.
 3. Definitions require unique names, the exact keyword/type table, and canonical schema bytes;
    mutable input cannot mutate a constructed request and the bridge owns all descriptor conversion.
-4. Calls use the exact call-ID grammar and preserve argument bytes without parsing; results use the
-   exact canonical success/error envelopes and status always agrees with the sole top-level key.
+4. Calls use the exact call-ID grammar and preserve argument bytes without parsing, normalization, or
+   duplicate-member collapse; results use the exact canonical success/error envelopes and status
+   always agrees with the sole top-level key.
 5. The strict fake matches exact tool definitions and history, including opaque payload equality,
    emits scripted call requests, and reports structural mismatches without content leakage.
 6. The pure registry-to-definition bridge maps all four operations exactly or fails atomically
    before provider work, without reverse imports or a duplicate catalog.
 7. One successful CAH-030 package projects into exact ordered request context including instruction
-   `applies_to`; reports and CAH-031 local target scope are omitted, legacy instruction-only requests
+   `applies_to`; reports and CAH-031 local instruction scopes are omitted, legacy instruction-only requests
    remain valid, and mixed legacy/new context is rejected.
 8. Every owned model-facing string proves strict Unicode-scalar/UTF-8 round-trip admission and fixed
    byte boundaries without normalization or content leakage.
@@ -243,11 +249,11 @@ proxy, not a provider token count or a claim about an adapter's exact wire bytes
 | Acceptance | Required evidence |
 | --- | --- |
 | 1, 3 | Constructor/property tests cover every numeric bound below/at/above, immutability, defensive copying, all rows and constraints in the keyword table, title/default bridge filtering, canonical property/required order, compact sorted-key snapshot bytes, and every unsupported keyword/shape. |
-| 4, 8 | Call tests exercise the ID grammar's first/last/invalid characters and lengths 1/256/257; string tests accept unchanged multibyte scalars and reject high/low lone surrogates plus literal NUL before fake/provider work. Result snapshots prove byte-for-byte CAH-031 success reuse and the exact error envelope, then reject status/key mismatch, extras, floats, malformed/noncanonical JSON, and 65,537-byte output without leaks. |
+| 4, 8 | Call tests exercise the ID grammar's first/last/invalid characters and lengths 1/256/257; preserve a raw argument string containing same-value and conflicting duplicate members byte-for-byte without parsing or choosing a winner; and accept unchanged multibyte scalars while rejecting high/low lone surrogates plus literal NUL before fake/provider work. Result snapshots prove byte-for-byte CAH-031 success reuse and the exact error envelope, then reject status/key mismatch, extras, floats, malformed/noncanonical JSON, and 65,537-byte output without leaks. |
 | 2, 10 | Table tests cover valid text-only, `continuation? -> call -> result`, `continuation? -> assistant`, and multiple separated continuation/call/result groups in one history; reject start/end, orphan, duplicate, unresolved, reordered, and wrongly followed continuations; and prove 16/17-item plus 65,535/65,536/65,537-byte boundaries, NUL/lone-surrogate rejection, multibyte counting, safe `repr`, and exact per-item single-charge request projections at 524,287/524,288/524,289 bytes. |
 | 5 | Strict-fake tests accept one exact tool request and reject changed order, definition, continuation payload, call, and result fields with only a structural mismatch path. |
-| 6, 9 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. Argument-gate tests use a native model with a default, prove an omitted defaulted key and an extra key fail before a spy `model_validate` call, prove the exact key set reaches native validation unchanged, and prove direct native construction still applies the default. |
-| 7, 11 | Context-projection tests assert exact order/source/candidate-owner `applies_to`/path-local precedence/content, including source and applicability that differ, report and local-target-scope omission, inherited 16-binding/24-item/96-KiB bounds, and exact 512-KiB charging. Two-request fake scripts prove the first snapshot is unchanged while the second contains CAH-030's enriched instruction block; sibling serialization is not treated as precedence. |
+| 6, 9 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. Argument-gate tests use a duplicate-free object and a native model with a default, prove an omitted defaulted key and an extra key fail before a spy `model_validate` call, prove the exact key set reaches native validation unchanged, and prove direct native construction still applies the default. A boundary test documents that duplicate detection belongs to CAH-034 before this gate. |
+| 7, 11 | Context-projection tests assert exact order/source/candidate-owner `applies_to`/path-local precedence/content, including source and applicability that differ, report and local-instruction-scope omission, inherited 16-binding/24-item/96-KiB bounds, and exact 512-KiB charging. Two-request fake scripts prove the first snapshot is unchanged while the second contains CAH-030's enriched instruction block; sibling serialization is not treated as precedence. |
 | 7 | Compatibility tests preserve legacy instruction-only requests and reject mixed legacy/new context. |
 | 12 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
 
@@ -260,6 +266,8 @@ proxy, not a provider token count or a claim about an adapter's exact wire bytes
   65,536/65,537, and insertion-order-independent canonicalization.
 - Run deterministic argument-key tests that prove missing and additional model-facing keys fail
   before native Pydantic validation/default application while direct native callers retain defaults.
+- Prove call construction and the strict fake preserve bounded raw arguments containing duplicate
+  member names byte-for-byte without parsing, logging, or selecting a value; CAH-034 owns rejection.
 - Prove continuation order, item counting, tagged canonical request projection, exact strict-fake
   equality, 65,536-byte payload admission, and content-suppressed failures without parsing payloads.
 - Snapshot initial and enriched context requests, including `applies_to` and boundary-changing label

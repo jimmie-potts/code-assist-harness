@@ -284,8 +284,8 @@ session's one supervised cleanup task. This protects admission against competing
 deadline, or terminal selection; an ordinary later sink or observer failure does not roll back an
 earlier accepted view. The session is distinct from the default `MockSession`, provider adapter,
 multi-turn loop, and TUI projection. CAH-033 first makes one tool-aware response an atomic admission
-transaction. CAH-034 then adds the explicit two-turn teaching path plus atomic target-scoped
-instruction enrichment, and CAH-035 replaces it with the bounded sequential loop while preserving
+transaction. CAH-034 then adds the explicit two-turn teaching path plus atomic instruction coverage
+for requested and returned-path owner scopes, and CAH-035 replaces it with the bounded sequential loop while preserving
 current context, provider-session ownership, and cleanup.
 
 ## Reducer
