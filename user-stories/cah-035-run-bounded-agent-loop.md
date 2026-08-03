@@ -30,7 +30,8 @@ TUI behavior, or parallel execution.
 - Admit at most four started model turns and three within-budget tool calls per session while retaining
   the single rejecting fourth observation required by CAH-022 when tool-call exhaustion wins.
 - Reuse CAH-033 atomic turn outcomes and CAH-034 registry dispatch, safe result envelopes, immutable
-  replay, checked usage aggregation, cancellation handling, and existing transcript-v3 evidence.
+  replay, checked usage aggregation, cooperative checkpoint seam, cancellation handling, and
+  existing transcript-v3 evidence.
 - Keep all CAH-022 limits and CAH-032 complete-request bytes cumulative.
 - Accumulate applicable instruction items atomically across as many as three successful
   path-targeted reads without letting returned list/search paths select context.
@@ -41,9 +42,11 @@ TUI behavior, or parallel execution.
 
 - The Python harness owns the state machine:
   `admit_model -> publish_final` or
-  `admit_model -> admit_call -> validate -> dispatch -> check -> discover_scope -> check
-  -> enrich_context -> check -> append_result -> pre_start_check -> admit_model`. A known tool error
-  skips discovery/enrichment and appends its safe result against the current context.
+  `admit_model -> admit_call -> validate -> cooperate_before_dispatch -> dispatch
+  -> cooperate_after_dispatch -> discover_scope -> cooperate_after_discovery -> enrich_context
+  -> cooperate_after_merge -> stage_result/history/request -> cooperate_before_provider_start
+  -> admit_model -> commit/start`. A known tool error still crosses `cooperate_after_dispatch`, then
+  skips discovery/enrichment and stages its safe result against the current context.
   Provider adapters translate one operation; registry tools execute one validated input. Neither
   chooses whether another turn starts.
 - The exact M2 ceilings are four started model turns and three within-budget tool calls. When the
@@ -62,19 +65,24 @@ TUI behavior, or parallel execution.
   five-turn response script.
 - Each accepted call follows CAH-034's exact lookup, JSON-object decode, model-facing key gate,
   native Pydantic validation, dispatch, result validation, and compact-envelope rendering order.
-  Synchronous tools remain bounded and non-preemptive; cancellation and deadline checks occur
-  immediately before and after dispatch, and a late result is discarded.
+  Synchronous tools remain bounded and non-preemptive. CAH-035 reuses—not wraps or
+  reimplements—CAH-034's `cooperate_then_guard(checkpoint)` before and after dispatch. Each call
+  unconditionally yields with `await asyncio.sleep(0)` outside locks, invokes an optional injected
+  deterministic test observer/gate, then applies the existing cancellation/deadline guard with its
+  established precedence. A late result remains a local candidate and is discarded.
 - After each successful native dispatch and its post-dispatch guard, CAH-031 supplies the validated
   request `path` as `target_scope`; CAH-025 discovers that canonical ancestor chain and CAH-030
   atomically merges its instruction items. Cancellation/deadline guards run after discovery, after
-  merge before result/context append, and immediately before the next model start. These bounded
-  synchronous values are discarded when a guard loses. Up to three successful calls may therefore
-  accumulate instruction items. Only the requested target scope is admitted: paths returned by broad
-  listing/search output never drive discovery. Known tool errors keep the current context snapshot
-  unchanged.
-- Exact repeated target scopes and canonical aliases with identical source values are idempotent.
-  A canonical duplicate whose content or provenance changed fails closed instead of replacing the
-  prior item. New nested or sibling chains merge without mutating the prior snapshot; precedence is
+  merge before result/context append, and before the next provider start by reusing the same
+  cooperative seam at `after_discovery`, `after_merge`, and `before_provider_start`. These bounded
+  synchronous values are discarded when a checkpoint loses. Up to three successful calls may
+  therefore accumulate instruction items. Only the requested target scope is admitted: paths
+  returned by broad listing/search output never drive discovery. Known tool errors keep the current
+  context candidate unchanged and still cross `before_provider_start` before continuation.
+- A repeated candidate-owner `applies_to` binding is idempotent only when source, content, and
+  original byte count are identical. A changed owner snapshot fails closed instead of replacing the
+  prior item, while the same source under another owner remains a distinct charged binding. New
+  nested or sibling chains merge without mutating the prior snapshot; precedence is
   root-to-nearest only within an ancestor chain, and sibling instructions retain distinct
   `applies_to` scopes rather than overriding one another. Any discovery, changed-duplicate,
   validation, item-budget, or byte-budget failure is atomic: the session terminates with no pending
@@ -85,6 +93,11 @@ TUI behavior, or parallel execution.
   provider start, CAH-030 context item/byte bounds and CAH-032's 16-item and 512-KiB complete-request
   bounds are revalidated. No history or instruction item is silently truncated, summarized, reset,
   or evicted; only exact idempotent instruction duplicates are deduplicated.
+- Dispatch output, discovery, merged context, provider result, history, and complete bounded request
+  remain local candidates through `before_provider_start`. Only after that checkpoint and model
+  admission pass does the loop atomically commit the context/history transition and invoke
+  `Provider.start()`. A losing cancellation/deadline checkpoint therefore leaves no partial tool
+  result, transcript content, context, or next-turn request, including after a known tool error.
 - The absolute provider-work deadline is captured once. Model starts, observed calls, accepted
   assistant bytes, and complete request size remain cumulative. Limits are checked before costly
   work; the operation crossing a bound never starts or publishes.
@@ -100,8 +113,9 @@ TUI behavior, or parallel execution.
   terminal paths.
 - Cancellation or teardown selects through the existing terminal guard, reaps the active provider
   operation, and prevents future transitions. A synchronous dispatch, discovery, or merge already
-  running may return, but its next guard discards the late result, bundle, or package. Exactly one
-  terminal winner remains.
+  running may return, but its next cooperative yield lets a queued cancel command update session
+  state before the guard discards the late result, bundle, or package. Exactly one terminal winner
+  remains.
 - MCP may later supply registry descriptors and executor results, but it cannot own, continue, or
   bypass this state machine. M2 introduces no MCP client/server or remote trust boundary.
 
@@ -126,7 +140,7 @@ TUI behavior, or parallel execution.
 4. A fourth legal call fails first as `tool_call_limit_exceeded`; the fifth-turn admission guard is
    proven separately from seeded state as `model_turn_limit_exceeded` with zero provider starts.
 5. Successful requested target scopes accumulate applicable instructions atomically across up to
-   three calls; exact repeats/aliases are idempotent, changed duplicates fail closed, nested/sibling
+   three calls; exact owner snapshots are idempotent, changed owner snapshots fail closed, nested/sibling
    scopes retain their own applicability, and known tool errors or returned result paths do not
    change context.
 6. Checked usage from all accepted turns produces exactly one existing transcript-v3 aggregate only
@@ -134,7 +148,9 @@ TUI behavior, or parallel execution.
 7. Bounded tool errors may continue, while invalid response grammar, internal invariants, and limit
    exhaustion terminate safely without raw or intermediate content.
 8. Cancellation, teardown, provider failure, cleanup failure, and late synchronous tool/discovery/
-   merge values select one terminal and leave no owned provider work or actionable late value.
+   merge values select one terminal and leave no owned provider work, actionable late value, or
+   partially committed result/context/history; all synchronous boundaries reuse CAH-034's yielding
+   checkpoint seam.
 9. All cumulative limits, context and full request replay (including opaque continuations), safe
    result envelopes, and request-size accounting survive every transition without reset. Protocol
    v1, TUI reducers, transcript v3 schema, provider adapters, and native tool contracts remain
@@ -150,13 +166,16 @@ TUI behavior, or parallel execution.
 | 5, 9 | Changed-duplicate, nested/sibling discovery, merge validation, and CAH-030 item/byte-budget failures leave the preceding snapshot intact, publish/persist no pending result/context, and start no next turn. Seeded boundaries exhaust deadline, UTF-8 output, calls, turns, and 524,287/524,288/524,289-byte complete requests; every request rechecks context and request bounds. |
 | 6 | Usage tables cover any subset of four turns, checked exact sums, overflow, missing usage, rejected final turn, cancellation, and exactly one aggregate persistence call. |
 | 7 | Known tool errors continue once; grammar mutations, registry invariant faults, request overflow, and programmer defects assert exact safe terminal and no raw sentinel. |
-| 8 | Logical barriers race cancellation/teardown against provider await, post-admission, pre/post-dispatch, post-discovery, post-merge/pre-append, next-start, final publication, and cleanup. Distinctive late tool/bundle/package values never enter history, context, evidence, or another request. |
+| 8 | Named `asyncio.Event` gates race cancellation/teardown against provider await, post-admission, `before_dispatch`, `after_dispatch`, `after_discovery`, `after_merge`, `before_provider_start`, final publication, and cleanup. Injected clocks prove exact existing deadline/cancellation tie precedence without elapsed sleeps. Distinctive late tool/bundle/package/history/request values never enter history, context, evidence, or another request, including known errors. CAH-034's separate no-hook queued-cancel test mutation-proves the unconditional yield rather than relying on an awaited Event hook. Semantic policy assertions prove CAH-035 calls that same outside-lock yield/test-hook/guard seam rather than duplicating it. |
 | 9 | Transcript replay, protocol fixtures, reducer tests, adapter contract tests, and import-policy checks remain unchanged. |
 
 ## Validation
 
-- Use deterministic fake exchanges, bounded fake tools, injected clocks, seeded ledgers, and explicit
-  state traces; never use wall-clock sleeps or a live model.
+- Use deterministic fake exchanges, bounded fake tools, injected clocks, seeded ledgers, named
+  `asyncio.Event` checkpoint gates, and explicit state traces; never use elapsed timing assertions,
+  wall-clock sleeps, or a live model.
+- Reuse CAH-034's no-observer queued-cancel regression; do not treat an awaited Event hook as proof
+  that production's unconditional yield exists.
 - Assert exact provider starts, dispatches, discovery/merge calls, immutable context snapshots,
   maximum active work, request history, limits, aggregate usage, transcript projection, terminal
   count, cleanup, and protocol output.

@@ -17,8 +17,11 @@
 ## Single responsibility
 
 CAH-026 owns the common repository-read policy, fixed error vocabulary, and provider-neutral result
-contracts used by later native read operations. It does not list, read, or search source content and
-does not register or dispatch model-callable tools.
+contracts used by later native read operations. It exposes pure lexical-path admission and built-in
+hard-deny primitives for CAH-025, then composes those primitives with GitIgnoreSpec for ordinary
+reads. CAH-025 does not consume this unit's ordinary-read limits, decisions, errors, or ignore
+policy. This unit does not list, read, or search user-requested source content and does not register
+or dispatch model-callable tools.
 
 ## Scope
 
@@ -28,6 +31,16 @@ does not register or dispatch model-callable tools.
   and nested `.gitignore` evaluation; commit the resolved `uv.lock` change during implementation.
 - Define immutable, typed policy decisions, safe errors, canonical-label records, and shared hard
   limits consumed by CAH-027 through CAH-030.
+- Expose
+  `normalize_repository_path_components(value: str) -> tuple[str, ...]` as the pure pre-I/O lexical
+  admission helper for CAH-025 and the full read policy. It accepts exactly `str`; after JSON parsing
+  it enforces the same strict Unicode-scalar, nonempty relative Linux path syntax as the admission
+  pipeline, normalizes legal `.` components, returns `()` for the root, and rejects other input
+  types, NUL, absolute paths, and every `..` component without constructing a `Path`, resolving a
+  target, or touching the filesystem.
+- Expose `is_hard_denied_path(components)` as an intentional pure public primitive over an already
+  normalized tuple of workspace-relative path components. It performs no resolution or I/O and
+  returns only a Boolean; CAH-025 uses it without importing GitIgnoreSpec policy.
 - Define the shared model-facing string admission rule used by later path and query request models:
   after JSON parsing, require an exact strict UTF-8 encode/decode round-trip before policy or
   filesystem work.
@@ -43,6 +56,12 @@ does not register or dispatch model-callable tools.
 
 ### Admission pipeline and ownership
 
+- `RepositoryPathSyntaxError` is the helper's only failure. It is a typed, policy-neutral
+  `ValueError` with the exact fixed message `Repository path syntax is invalid.`; its string and
+  representation contain no supplied value. The ordinary read pipeline catches it and maps it to
+  `invalid_repository_path`; CAH-025 catches the same value and maps it to
+  `invalid_instruction_scope`. Neither consumer exposes the neutral helper exception directly or
+  imports the other's error contract.
 - The Python harness owns repository read admission. Every later operation validates its input,
   first applies the shared model-facing string admission rule, applies the hard denylist and lexical
   ignore view to supplied relative components, resolves through `WorkspaceBoundary` only when the
@@ -97,6 +116,12 @@ The denylist is applied to every supplied and canonical path component or basena
 `.gitignore`. VCS and credential-directory component names are case-sensitive on the supported
 Linux filesystem. Credential filename and suffix comparisons use ASCII lowercase so an uppercase
 extension cannot bypass the same secret-file rule.
+
+`is_hard_denied_path(components)` is the single implementation of this table. Callers first use
+`normalize_repository_path_components` or supply an equivalently normalized canonical tuple; the
+classifier neither resolves paths nor reveals which entry matched. The full repository-read
+pipeline and CAH-025 instruction discovery both call these pure primitives, so the control-plane
+exemption from `.gitignore` cannot become a hard-deny bypass.
 
 - Any component exactly `.git`, `.hg`, `.svn`, `.ssh`, `.gnupg`, or `.aws` is denied.
 - A basename exactly `.envrc`, `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`, `credentials`,
@@ -175,19 +200,24 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 1. One typed Python policy composes CAH-024 containment, the exact hard denylist, and applicable root
    plus nested `GitIgnoreSpec` rules for both the supplied lexical and resolved canonical ancestor
    chains in deterministic precedence order.
-2. Every proper ancestor remains traversable in both views before a leaf negation can take effect.
+2. Pure public lexical admission rejects invalid Unicode/path syntax before `Path` construction or
+   I/O, and one pure hard-deny classifier implements the exact table without I/O or rule disclosure;
+   the full read policy consumes both primitives and produces the same decisions as their direct
+   calls from the same normalized components.
+3. Every proper ancestor remains traversable in both views before a leaf negation can take effect.
    Normal Git ignore negation works within each view only under that rule, either view's ignored
    ancestor or target wins, and no cross-view negation, caller override, or pattern can re-include an
    ignored-in-the-other-view or hard-denied path.
-3. Policy files enforce 64-KiB per-file, 16-file, 256-KiB aggregate, strict-UTF-8, and no-NUL limits
+4. Policy files enforce 64-KiB per-file, 16-file, 256-KiB aggregate, strict-UTF-8, and no-NUL limits
    with fixed safe failures.
-4. Direct ignored targets fail explicitly; traversal consumers can omit ignored and denied
+5. Direct ignored targets fail explicitly; traversal consumers can omit ignored and denied
    descendants without disclosing their labels.
-5. Shared limits, immutable decisions, and the exact error table are typed, documented, and contain
+6. Shared limits, immutable decisions, and the exact error table are typed, documented, and contain
    canonical labels only when access has been admitted.
-6. Every model-facing path/query string passes strict Unicode-scalar/UTF-8 round-trip admission
-   without normalization; lone surrogates fail before policy evaluation or any filesystem call.
-7. The implementation makes no subprocess, network, provider, protocol, transcript, or TUI change,
+7. Every model-facing path/query string passes strict Unicode-scalar/UTF-8 round-trip admission
+   without Unicode normalization; lone surrogates fail before policy evaluation or any filesystem
+   call.
+8. The implementation makes no subprocess, network, provider, protocol, transcript, or TUI change,
    and tests use temporary local repositories only.
 
 ## Acceptance-to-test matrix
@@ -198,6 +228,9 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 | Relative pattern scope | Repeat a filename inside and outside a nested policy directory | Unit | Nested rule affects only its subtree |
 | Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; access requires both complete walks to admit, lexical denial performs no target resolution, canonical denial performs no content I/O, and neither label nor rule leaks |
 | Dual-chain policy budget | Share root and aliased policy files across both chains, give the two view owners different labels, then cross the unique-file count and aggregate-byte edges | Unit | Canonically identical policy inputs are read/charged once but their cached rules are scoped and evaluated in both views; the union still fails closed above 16 files or 256 KiB |
+| Shared lexical admission | Pass scalar relative paths, `.`, redundant legal `.` components, a non-string object, empty text, absolute paths, every `..` placement, NUL, and lone high/low surrogates while spying on `Path`, boundary, and filesystem calls | Unit/read-policy integration | Valid components normalize deterministically; invalid inputs raise only the fixed, content-suppressed `RepositoryPathSyntaxError` before construction, resolution, or I/O; ordinary reads map it to their fixed vocabulary |
+| CAH-024 lexical parity | Run the representative string corpus through the pure helper and CAH-024's existing pre-filesystem admission, creating targets only for accepted controls | Policy/boundary integration | Both accept/reject the same string grammar without Unicode normalization; valid helper components reflect only legal path-component normalization, and PathLike-only CAH-024 inputs remain outside the model-facing helper contract |
+| Shared hard-deny primitive | Call `is_hard_denied_path` directly for every exact component, basename, suffix, case rule, documented `.env` exception, empty-root tuple, and a normal control; run the same normalized components through the read policy | Unit/read-policy integration | The pure call performs no path or filesystem I/O, returns only a Boolean, and the read policy makes the same deny/admit decision without revealing the matching rule |
 | Non-overridable denial | Try ignore negation and a fabricated override for every denylist class | Unit/schema | Generic unavailable result; unsupported override rejected |
 | Exact policy limits | Exercise 65,535/65,536/65,537 bytes, 16/17 files, aggregate edge | Unit | Success at limits and fixed failure above |
 | Strict text | Use invalid UTF-8 and NUL in applicable `.gitignore` files | Unit | `repository_policy_invalid` with no decoder or content leak |
@@ -219,9 +252,16 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 - Test every numeric policy boundary below, at, and above; test the shared constants as public
   reviewed defaults rather than duplicated literals. For the two-chain policy budget, prove shared
   canonical policy files are charged once and distinct files across the union are all charged.
+- Test `normalize_repository_path_components` and `is_hard_denied_path` as pure functions, including
+  scalar paths, the empty root tuple, non-string/absolute/empty/`..`/NUL/surrogate failures, exact
+  fixed helper exception/message/representation, case rules, suffix rules, and the three documented
+  `.env` examples. `Path`, filesystem, and boundary spies prove both primitives perform no I/O. Run
+  the same string corpus through CAH-024's established lexical admission and prove parity. Read-policy
+  integration proves ordinary repository reads use the public primitives and map the neutral lexical
+  failure into their own fixed error vocabulary.
 - Use injected policy and filesystem spies to prove lone-surrogate and NUL path/query rejection
   happens after JSON parsing but before denylist matching, `Path` construction, resolution, stat, or
-  file access. Include valid non-ASCII scalar text to prove no normalization occurs.
+  file access. Include valid non-ASCII scalar text to prove no Unicode normalization occurs.
 - Inspect the dependency and lockfile diff and prove default tests perform no network access.
 - Keep protocol, transcript, provider, and TUI schemas unchanged; use the full repository gate as
   nearest parity evidence.
@@ -231,8 +271,9 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 
 Update dependency documentation, context-engineering, safety model, glossary, story and lesson
 indexes, E3 backlog sequence, and the Markdown lesson's compact architecture diagram. Record why
-GitIgnoreSpec and the non-overridable denylist are separate policy layers. Do not add or revise a
-presentation.
+GitIgnoreSpec and the non-overridable denylist are separate policy layers, why CAH-026 precedes
+CAH-025 in delivery, and why the shared classifier exposes a decision rather than deny-rule detail.
+Do not add or revise a presentation.
 
 ## Exclusions
 
@@ -241,6 +282,7 @@ presentation.
 - User/workspace configuration that broadens or narrows policy, secret scanning, content
   classification, tokenization, or approval prompts.
 - Instruction discovery behavior from CAH-025; `AGENTS.md` remains a separate control-plane input.
+  This unit supplies only pure lexical-path and hard-deny decisions that CAH-025 consumes.
 - File writes, subprocesses, shell use, network access, protocol events, transcript fields, TUI
   rendering, MCP transport, and agent-loop continuation.
 - Descriptor-relative access, filesystem watchers, multiple roots, non-Linux matching semantics,
@@ -251,26 +293,32 @@ presentation.
 1. Every acceptance criterion has deterministic happy, boundary, and adversarial failure evidence.
 2. All policy and shared numeric limits pass below/at/above tests, and model-facing path/query
    strings pass strict Unicode-scalar/UTF-8 boundary tests before filesystem access.
-3. GitIgnoreSpec precedence and ancestor traversability in both lexical and canonical views, lexical
+3. Pure lexical admission performs no construction/resolution/I/O and rejects invalid syntax before
+   hard-deny classification; the hard-deny classifier is the only implementation of the exact table,
+   performs no I/O or rule disclosure, and has parity evidence through the full read policy.
+4. GitIgnoreSpec precedence and ancestor traversability in both lexical and canonical views, lexical
    pre-resolution denial, canonical pre-I/O denial, either-view-denies combination, canonical-only
    public labels, hard-deny dominance, and no ignored override are proved.
-4. Public contracts are immutable, typed, documented, and emit only the fixed safe failures.
-5. Focused tests and the canonical offline `./scripts/check` pass without a model, subprocess, or
+5. Public contracts are immutable, typed, documented, and emit only the fixed safe failures.
+6. Focused tests and the canonical offline `./scripts/check` pass without a model, subprocess, or
    network.
-6. Existing protocol, transcript, provider, and TUI boundaries remain unchanged and pass their
+7. Existing protocol, transcript, provider, and TUI boundaries remain unchanged and pass their
    existing tests.
-7. The Markdown lesson includes exact implementation and failure-test excerpts after code exists;
+8. The Markdown lesson includes exact implementation and failure-test excerpts after code exists;
    no presentation work is introduced.
-8. Story, lesson, conceptual docs, indexes, backlog, planning note, dependency declaration, lockfile,
+9. Story, lesson, conceptual docs, indexes, backlog, planning note, dependency declaration, lockfile,
    and statuses agree.
-9. Delivered production-source churn is recorded and stays near the planned range or is split before
+10. Delivered production-source churn is recorded and stays near the planned range or is split before
    review.
-10. The PR is ready for review and no addressed review thread remains unresolved.
+11. The PR is ready for review and no addressed review thread remains unresolved.
 
 ## Planned evidence
 
 - A repository-access policy module and temporary-repository tests prove exact matching and denial,
   including aliases whose lexical and canonical ignore decisions disagree.
+- Pure lexical/classifier tests plus read-policy integration prove pre-I/O path admission and the
+  hard-deny table cannot drift inside ordinary-read policy; CAH-025 owns the later control-plane
+  consumer evidence.
 - `pyproject.toml` and `uv.lock` record the reviewed PathSpec dependency without any runtime network
   requirement.
 - The lesson locates policy between the workspace boundary and all native read operations; its
@@ -279,7 +327,9 @@ presentation.
 
 ## Deferred work
 
-- CAH-027, CAH-028, and CAH-029 reuse this policy for listing, reading, and literal search.
+- CAH-025 consumes only the pure lexical-path and hard-deny helpers while retaining its explicit
+  `.gitignore` exemption for instruction control-plane files.
+- CAH-027, CAH-028, and CAH-029 reuse the full read policy for listing, reading, and literal search.
 - CAH-030 applies the shared item and byte limits to deterministic context inclusion.
 - E4 later adds schema-validated tool registration and dispatch without moving policy ownership out
   of the harness.

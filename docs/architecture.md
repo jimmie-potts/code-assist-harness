@@ -192,7 +192,9 @@ teardown wins.
 
 For M2, a plain task enters **initial** context selection with scope `.` and empty `focus_paths` and
 `search_queries`; deterministic evaluations may inject explicit values through their composition
-seam. A successful native read contributes its validated requested target as harness-only scope
+seam. An injected request discovers instructions for its supplied scope and every validated,
+canonical-distinct focus path before selecting focus content; search stays rooted at the supplied
+scope with fixed depth and match bounds. A successful native read contributes its validated requested target as harness-only scope
 metadata, and the loop atomically enriches later requests with newly applicable instructions before
 another provider start. Planned CAH-037 explicitly composes the M2 limit profile as four model turns,
 120 provider-work seconds, 4,096 assistant-output bytes, and three observed tool calls; it does not inherit the current
@@ -221,7 +223,7 @@ dependency-resolution changes commit `uv.lock`.
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
 | Workspace path containment | Python workspace boundary | Planned in CAH-024: one immutable canonical root resolves contained, workspace-relative targets; later tools recheck at access time. |
-| Context selection | Python context subsystem | Planned in CAH-025 through CAH-030: context items retain source, applicable directory, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
+| Context selection | Python context subsystem | Planned in CAH-026, CAH-025, then CAH-027 through CAH-030: context items retain source separately from candidate-owner applicability, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
 | Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel and typed target-scope metadata; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
 | Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs and explicitly typed non-lifecycle evidence are persisted after admission. |
@@ -492,11 +494,15 @@ documentation, respects ignored paths and size limits, and preserves provenance 
 item. The context builder must be able to explain why an item was included and enforce a total
 budget before calling a provider.
 
-CAH-024 through CAH-030 refine that subsystem into single-responsibility units. The sequence owns the
-canonical workspace boundary, scoped `AGENTS.md` discovery, shared read policy, native listing,
+CAH-024 through CAH-030 refine that subsystem into single-responsibility units. The delivery sequence
+owns the canonical workspace boundary, a shared hard-deny/read policy, scoped `AGENTS.md` discovery, native listing,
 bounded text reads, literal search, and atomic context selection with inclusion and omission
-evidence. CAH-030 also admits a newly discovered required instruction bundle atomically without
-removing earlier context. Each filesystem operation re-resolves immediately before access and reports only
+evidence. CAH-026's pure lexical/hard-deny helpers are reused by CAH-025 even though instruction
+candidates are exempt from `.gitignore`; ordinary-read limits and errors are not. CAH-025 preserves each resolved source separately from the canonical
+candidate owner to which it applies. CAH-030 initially unions required instruction bindings for the
+supplied scope and all explicit focus paths before selecting focus content, searches only the exact
+supplied scope, and later admits a newly discovered required bundle atomically without removing
+earlier context. Each filesystem operation re-resolves immediately before access and reports only
 workspace-relative provenance. CAH-031 then exposes those handlers through the smallest generic,
 typed read registry needed by the M2 loop, including a harness-only target-scope extractor for each
 successful read; later E4 work extends that seam for side effects.
@@ -506,18 +512,20 @@ one request/call/result/response round trip, bounded iteration, and strict OpenA
 translation. A response is fully buffered and validated before final text is published or a tool is
 dispatched. Decoded model arguments must contain the exact advertised key set before native Pydantic
 validation can apply defaults; direct Python callers keep the unchanged native models and defaults.
-After successful dispatch and its cancellation/deadline guard, CAH-034/035 discover the requested
-target's scoped instructions and atomically enrich the next immutable request. Additional guards run
-after bounded synchronous discovery, after merge before commit, and before the next provider start;
-late candidate values are discarded. Repeated canonical sources are idempotent only when unchanged;
-a late ancestor enters before existing descendants, while sibling scopes retain explicit
-applicability rather than an invented cross-sibling precedence. Known tool failures keep context
-unchanged.
+CAH-034/035 use one cooperative scheduling seam before dispatch, after each bounded synchronous
+dispatch/discovery/merge stage, and before the next provider start. The seam unconditionally yields
+to the shared event loop outside locks, then runs the existing cancellation/deadline guard, so a
+readable cancel command can latch before the guard observes it. Successful dispatch results,
+instruction bundles, merged context, history, and the bounded next request remain local candidates
+until the final guard passes. Repeats for one candidate-owner scope are idempotent only when source,
+content, and bytes are unchanged; the same source under another owner remains a distinct binding. A
+late ancestor enters before existing descendants, while sibling scopes retain explicit applicability
+rather than an invented cross-sibling precedence. Known tool failures keep context unchanged.
 Opaque provider continuation is a bounded, content-suppressed item in the same ordered request
 history immediately before its call or assistant item, so neither core nor an adapter side channel
 loses its replay position.
-Synchronous native handlers are bounded and non-preemptive, with cancellation/deadline
-checks before and after execution; each provider-facing result is one canonical compact JSON
+Synchronous native handlers are bounded and non-preemptive; the scheduling seam does not claim to
+reap one in flight. Each provider-facing result is one canonical compact JSON
 success-or-error envelope capped at 65,536 bytes inclusive, with oversize output rejected rather
 than truncated. OpenAI stateless replay under `store=false` preserves bounded canonical full
 reasoning-item envelopes—including required IDs and item fields, not only encrypted content—even with

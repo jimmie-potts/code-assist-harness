@@ -105,8 +105,9 @@ native capability, implement MCP, or create protocol/transcript schemas.
 - CAH-030 `instruction` items map into the compact `instructions` document under CAH-023's existing
   prefix. Each JSON array element has exactly `source`, `applies_to`, and `content` in that insertion
   order. `source` is the canonical workspace-relative instruction path and `applies_to` is its
-  canonical workspace-relative directory (`.` for the root). Items remain root-to-nearest within
-  each ancestor chain. Accumulated sibling-chain items preserve harness order and their distinct
+  canonical candidate-owner directory (`.` for the root), copied without derivation even when the
+  source is a symlink target elsewhere. Items remain root-to-nearest within each ancestor chain.
+  Accumulated sibling-chain items preserve harness order and their distinct
   `applies_to` values; one sibling never overrides another, and the adapter does not interpret
   instruction prose or invent cross-sibling precedence. `focus_file` and `search_excerpt` items
   retain order in exactly one user-role item immediately before the task, beginning `Repository

@@ -74,9 +74,11 @@ does not understand it.
 
 Repository context has a similar ownership rule. CAH-030 decides which items exist. CAH-032 copies
 one complete immutable snapshot and charges every field—including an instruction's canonical
-`applies_to` directory—to the request bound. If later orchestration enriches context, it constructs a
-new request; an adapter may serialize that value but may not omit or select an item. Sibling scopes
-remain unrelated even when serialization needs one deterministic order.
+candidate-owner `applies_to` directory—to the request bound. That scope is copied from CAH-025 and
+may differ from a symlink-resolved `source`; CAH-032 never reconstructs it from provenance. If later
+orchestration enriches context, it constructs a new request; an adapter may serialize that value but
+may not omit or select an item. Sibling scopes remain unrelated even when serialization needs one
+deterministic order.
 
 ## Key concepts
 

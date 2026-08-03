@@ -15,16 +15,19 @@
 
 ## Quick summary
 
-CAH-026 creates the policy gate every native repository read must cross. It combines CAH-024
-containment, a non-overridable VCS/credential denylist, and nested Git-style ignore rules evaluated
-for both the supplied lexical path and its resolved canonical target while keeping the decision
-inside the Python harness.
+CAH-026 creates the policy gate every native repository read must cross. It owns pure lexical-path
+normalization and `is_hard_denied_path(components)`, then combines those primitives with CAH-024
+containment and nested Git-style ignore rules for ordinary reads. CAH-025 reuses only those two pure
+decisions, so its control-plane `.gitignore` exemption cannot bypass input or credential denial and
+does not inherit ordinary-read limits or errors.
 
 ## Learning objectives
 
 After completing this unit, you should be able to:
 
 - explain admission order and why lexical plus canonical checks are both required;
+- explain how invalid model-facing path syntax fails before `Path`, resolution, or filesystem I/O;
+- explain why the hard-deny table has one pure, reusable classifier with no I/O or rule disclosure;
 - explain why JSON parsing alone does not guarantee Unicode-scalar text and where the harness rejects
   lone surrogates;
 - apply nested `.gitignore` precedence and ancestor-traversability rules independently to lexical and
@@ -62,6 +65,19 @@ ask only for the leaf's final matcher result.
 A common misconception is that approval makes any read safe. Here, ignored and hard-denied decisions
 have no override field. Future approval cannot broaden this boundary.
 
+Another misconception is that a shared classifier must also resolve paths or load ignore files.
+`is_hard_denied_path` accepts an already normalized tuple of workspace-relative components and
+returns only `True` or `False`. It performs no filesystem access and does not reveal which rule
+matched. The sibling pure `normalize_repository_path_components` helper owns model-facing lexical
+normalization without constructing a `Path`; callers still own resolution, safe public errors, and
+any later ignore evaluation.
+
+That helper accepts exactly `str` and returns `tuple[str, ...]`. Its only failure is the fixed,
+content-suppressed `RepositoryPathSyntaxError("Repository path syntax is invalid.")`. Ordinary reads
+map it to `invalid_repository_path`; CAH-025 maps it to `invalid_instruction_scope`. A shared corpus
+must also match CAH-024's established string admission so extracting the pure seam cannot create a
+second lexical grammar.
+
 Another misconception is that a parsed JSON string is automatically safe Unicode. Python can hold
 an isolated surrogate in `str`, even though strict UTF-8 cannot encode it. The shared request
 boundary performs an exact strict UTF-8 round-trip before building a path or invoking policy. It
@@ -79,6 +95,10 @@ does not normalize spelling, because normalization could change which repository
 - **Dual-view ignore:** preserve the normalized supplied label and the resolved target label as
   independent ignore-policy inputs; one view cannot re-include the other.
 - **Hard denylist:** conservative VCS and credential names that ignore negation cannot re-include.
+- **Pure hard-deny classifier:** one Boolean function over normalized components, without path
+  resolution, I/O, GitIgnoreSpec evaluation, or matching-rule disclosure.
+- **Pure lexical admission:** strict Unicode-scalar and relative-path normalization that rejects
+  empty/absolute/`..`/NUL input before `Path`, resolution, or I/O.
 - **Safe error:** one fixed code/message without path, pattern, rule, content, or raw OS detail.
 - **Deterministic budget:** bytes and items, not provider tokens.
 - **Scalar-text admission:** accept only exact strict UTF-8 round-trips after JSON parsing; reject
@@ -89,19 +109,18 @@ does not normalize spelling, because normalization could change which repository
 ```text
 Ink TUI ---- NDJSON ----> Python harness <---- provider may request tools later
                               |
-                     future tool dispatcher
+             pure lexical admission -> normalized components
                               |
-                   supplied lexical label
+              [CAH-026 hard-deny classifier]
+                    /                     \
+      CAH-025 AGENTS source            ordinary read policy
+      (skip `.gitignore`)          (hard deny + GitIgnoreSpec)
+                    \                     /
+                     CAH-024 workspace boundary
                               |
-           hard deny + lexical ancestor walk --deny--> fixed safe error
-                              |
-                    CAH-024 resolve target
-                              |
-          hard deny + canonical ancestor walk --deny--> fixed safe error
-                              |
-                   [CAH-026 admitted target]
-                              |
-             CAH-027 list / CAH-028 read / CAH-029 search (later)
+                  admitted bounded local access
+                     /                    \
+       instruction discovery       CAH-027/028/029 reads
                               |
 Repository filesystem --------+
 Transcript/evidence: unchanged; denied paths and policy details never enter it
@@ -109,21 +128,26 @@ Transcript/evidence: unchanged; denied paths and policy details never enter it
 
 The provider can propose a future operation, but only the harness admits it. The gate has no
 `include_ignored` or “approved anyway” path. It rechecks before I/O because a policy decision is a
-snapshot, not durable authorization.
+snapshot, not durable authorization. The pure classifier is the single implementation of hard-deny
+product policy for both branches; only ordinary reads add ignore semantics.
 
 ## Practical walkthrough
 
-1. Define immutable decisions, shared limits, the scalar-text admission helper, and fixed errors.
-2. Admit path/query strings as unchanged Unicode scalar text, then apply the exact credential/VCS
-   denylist to supplied path components.
-3. Preserve the normalized supplied label and walk its directory prefixes root-to-leaf. Before
+1. Define immutable decisions, shared ordinary-read limits, pure lexical admission, and fixed errors.
+2. Implement `normalize_repository_path_components(value)` and
+   `is_hard_denied_path(components)`; prove they reject invalid syntax before construction/I/O and
+   return only normalized components or a Boolean without a matching-rule oracle.
+3. Admit path/query strings as unchanged Unicode scalar text, normalize supplied path components,
+   then call the classifier.
+4. Preserve the normalized supplied label and walk its directory prefixes root-to-leaf. Before
    entering each directory, apply the policies available at that point; load its nested policy only
    after it admits. Deny before target resolution if any ancestor or the leaf is ignored.
-4. Resolve an admitted lexical path with CAH-024 and repeat the hard denylist on canonical components.
-5. Walk the canonical chain by the same rule. Reuse cached rules for policy files already read and
+5. Resolve an admitted lexical path with CAH-024 and call the same classifier on canonical
+   components.
+6. Walk the canonical chain by the same rule. Reuse cached rules for policy files already read and
    charged, read only newly reachable files, and still attach every applicable rule set at the
    canonical view's owner-relative scope before denying any ignored ancestor or leaf before I/O.
-6. Re-run admission before use, then test negation, nested scope, aliases, staleness, and every limit
+7. Re-run admission before use, then test negation, nested scope, aliases, staleness, and every limit
    boundary.
 
 ## Implementation code samples
@@ -131,6 +155,15 @@ snapshot, not durable authorization.
 No implementation exists yet. This is planned pseudocode:
 
 ```text
+def is_hard_denied_path(components):
+    return any(component_is_denied(component) for component in components)
+
+def normalize_repository_path_components(value: str) -> tuple[str, ...]:
+    if not isinstance(value, str):
+        raise RepositoryPathSyntaxError("Repository path syntax is invalid.")
+    validate_unicode_scalar_utf8(value)
+    return normalize_relative_without_io(value)  # rejects empty, absolute, NUL, and `..`
+
 def admit_ignore_view(label, policy_cache):
     policies = scoped_rules(load_or_reuse_root_policy(policy_cache), owner=".")
     for directory in label.proper_directory_prefixes():
@@ -139,18 +172,19 @@ def admit_ignore_view(label, policy_cache):
         policies.extend(scoped_rules(cached, owner=directory))
     deny_if_ignored(policies.check(label))
 
-validate_unicode_scalar_utf8(request.path)
-validate_relative(request.path)
-deny_if_sensitive(request.path.components)
-lexical = normalized_relative_label(request.path)
+components = normalize_repository_path_components(request.path)
+deny_if_hard_denied(is_hard_denied_path(components))
+lexical = label_from_components(components)
 admit_ignore_view(lexical, bounded_union)
 resolved = boundary.resolve_existing(request.path)
-deny_if_sensitive(resolved.relative_path.components)
+deny_if_hard_denied(is_hard_denied_path(resolved.relative_path.parts))
 admit_ignore_view(resolved.relative_path, bounded_union)
 return admit(resolved)
 ```
 
-The string check runs before every filesystem or policy call. In each ignore view, a denied directory
+The classifier is intentionally smaller than admission: it assumes normalized input, returns one
+bit, and neither touches the filesystem nor identifies the matched rule. The string check runs before
+every filesystem or policy call. In each ignore view, a denied directory
 stops the walk before its `.gitignore` is opened, so unreachable policy cannot re-include descendants
 or consume the budget. The cache reads and charges a canonically identical file once; it does not
 cache an admission decision. Lexical and canonical walks each attach those rules to their own
@@ -162,6 +196,9 @@ views to admit. A caller repeats this sequence immediately before access.
 ## Failure scenarios to study
 
 - **Negated credential:** `.gitignore` says `!.env`; the hard deny still returns generic unavailable.
+- **Instruction-source bypass:** an otherwise valid `pkg/AGENTS.md` is ignored but points to
+  `secrets/dev.env`. CAH-025 skips ignore policy but calls the same classifier on the resolved target,
+  so it returns its fixed source-unavailable failure without reading bytes or revealing the rule.
 - **Untraversable parent:** root rules `private/` then `!private/keep.py` still deny a direct read;
   `private/.gitignore` is never loaded.
 - **Traversable-parent control:** `private/*` then `!private/keep.py` may admit the file because the
@@ -211,7 +248,8 @@ provenance; preserve local fail-closed enforcement if the central service is una
 
 ## Practical exercises
 
-1. Trace admission for `link/config` when the link targets `.git/config`.
+1. Trace admission for `link/config` when the link targets `.git/config`; identify each classifier
+   call and which caller owns resolution.
 2. Create a symlink whose lexical and canonical labels receive opposite ignore decisions; explain
    why access is denied in both orientations.
 3. Create root and nested ignore rules whose last match changes one view's result.
@@ -220,10 +258,14 @@ provenance; preserve local fail-closed enforcement if the central service is una
 6. Explain why strict UTF-8 round-trip validation rejects surrogates but deliberately does not
    normalize two canonically equivalent path spellings.
 7. Compare `private/` and `private/*`: why can the same leaf negation work only in the second case?
+8. Test both pure helpers with spies that fail if they construct a `Path`, resolve or open a file,
+   construct a GitIgnoreSpec, log a matching rule, or return more than components/a Boolean.
 
 ## Key takeaways
 
 - The Python harness owns final repository-read admission.
+- Pure lexical and hard-deny helpers give ordinary reads and CAH-025 identical pre-I/O decisions
+  without sharing ignore-policy behavior, ordinary-read limits, or errors.
 - Lexical and canonical ignore views each require a traversable ancestor chain, and either denied
   ancestor or leaf denies access.
 - Hard denial precedes and dominates Git-style ignore policy.
@@ -233,6 +275,8 @@ provenance; preserve local fail-closed enforcement if the central service is una
 
 - **Admission:** The complete decision that permits one bounded capability use.
 - **Hard denylist:** Built-in paths that no lower-trust input can re-include.
+- **Pure classifier:** A deterministic Boolean decision over normalized components with no I/O or
+  observable matching-rule detail.
 - **Ignore negation:** A `!` rule that reverses a normal ignore match within Git semantics.
 - **Ancestor traversability:** The rule that every parent directory must remain reachable before a
   descendant or nested policy can affect admission.

@@ -498,6 +498,8 @@ def test_m2_plans_are_reviewable_learning_units() -> None:
 
 def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     story_names = (
+        "cah-025-discover-repository-instructions.md",
+        "cah-026-define-repository-read-contracts.md",
         "cah-029-search-repository-text.md",
         "cah-030-build-budgeted-context.md",
         "cah-031-register-read-tools.md",
@@ -513,6 +515,96 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
         )
         for name in story_names
     }
+
+    instruction = stories["cah-025-discover-repository-instructions.md"]
+    assert "**Dependencies:** CAH-024 and CAH-026" in instruction
+    assert "pure lexical path admission and non-overridable hard-deny classifier" in instruction
+    assert "deliberately skipping GitIgnoreSpec" in instruction
+    assert "canonical candidate-owner directory as `applies_to`" in instruction
+    assert '`source="shared/rules.md"`, `applies_to="pkg"`' in instruction
+    assert "same canonical target referenced by different owners produces distinct" in instruction
+    assert (
+        "reruns containment plus CAH-026 hard denial immediately before each bounded read"
+        in instruction
+    )
+    assert "Before any `WorkspaceBoundary` or filesystem call" in instruction
+    assert (
+        "rejects non-string values, lone surrogates, NUL, empty/absolute paths, and every "
+        "`..` component" in instruction
+    )
+    assert "never loads an ancestor `.gitignore` as policy input" in instruction
+    assert "bytes are read only as instruction content" in instruction
+    assert "binding or byte limit" in instruction
+    assert "catch only its fixed `RepositoryPathSyntaxError`" in instruction
+    assert "map that rejection to `invalid_instruction_scope`" in instruction
+    assert "a parity corpus matches CAH-024's established string grammar" in instruction
+
+    read_policy = stories["cah-026-define-repository-read-contracts.md"]
+    assert "`normalize_repository_path_components(value: str) -> tuple[str, ...]`" in read_policy
+    assert "`is_hard_denied_path(components)`" in read_policy
+    assert "single implementation of this table" in read_policy
+    assert "classifier neither resolves paths nor reveals which entry matched" in read_policy
+    assert "CAH-025 instruction discovery both call these pure primitives" in read_policy
+    assert "`RepositoryPathSyntaxError` is the helper's only failure" in read_policy
+    assert "exact fixed message `Repository path syntax is invalid.`" in read_policy
+    assert "maps it to `invalid_repository_path`" in read_policy
+    assert "CAH-025 catches the same value" in read_policy
+    assert "without Unicode normalization" in read_policy
+    assert "CAH-024 lexical parity" in read_policy
+    assert "the full read policy consumes both primitives" in read_policy
+    assert "CAH-025 owns the later control-plane consumer evidence" in read_policy
+    assert "CAH-025/read-policy integration tests" not in read_policy
+
+    instruction_lesson = (
+        REPOSITORY_ROOT / "docs" / "lessons" / "cah-025-repository-instructions.md"
+    ).read_text(encoding="utf-8")
+    read_policy_lesson = (
+        REPOSITORY_ROOT / "docs" / "lessons" / "cah-026-repository-read-policy.md"
+    ).read_text(encoding="utf-8")
+    assert ".relative_path.parts" in instruction_lesson
+    assert ".relative_path.parts" in read_policy_lesson
+    assert ".components" not in instruction_lesson
+    assert ".components" not in read_policy_lesson
+
+    story_index = " ".join(
+        (REPOSITORY_ROOT / "user-stories" / "README.md").read_text(encoding="utf-8").split()
+    )
+    assert story_index.index("CAH-026: Define repository read contracts") < story_index.index(
+        "CAH-025: Discover scoped repository instructions"
+    )
+    lesson_index = " ".join(
+        (REPOSITORY_ROOT / "docs" / "lessons" / "README.md").read_text(encoding="utf-8").split()
+    )
+    assert lesson_index.index("CAH-026") < lesson_index.index("CAH-025")
+
+    planning_note = " ".join(
+        (
+            REPOSITORY_ROOT
+            / "user-stories"
+            / "notes"
+            / "2026-08-03-m2-read-only-assistant-planning.md"
+        )
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert (
+        "CAH-030 - Build budgeted repository context | E3 | Core | Selection priority, "
+        "provenance, and omission evidence | 475-600" in planning_note
+    )
+
+    runtime_rules = " ".join((REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8").split())
+    assert "use one `cooperate_then_guard` seam" in runtime_rules
+    assert "`await asyncio.sleep(0)` outside every lock" in runtime_rules
+    assert (
+        "before dispatch, after dispatch, after instruction discovery, after context merge"
+        in runtime_rules
+    )
+    assert (
+        "Keep results, context, history, and the bounded request as local candidates"
+        in runtime_rules
+    )
+    assert "with no observer/gate installed, queue cancellation on the same loop" in runtime_rules
+    assert "awaited `asyncio.Event` hook" in runtime_rules
 
     search = stories["cah-029-search-repository-text.md"]
     assert "`candidate_files`" not in search
@@ -530,12 +622,25 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert 'if entry.kind != "file":' in search_lesson
 
     context = stories["cah-030-build-budgeted-context.md"]
+    assert "**Estimated production-code churn:** 475-600 changed lines." in context
     assert "pure, atomic merge" in context
     assert "without evicting or rewriting prior context" in context
     assert "canonical `applies_to` directory" in context
-    assert "16 distinct instruction sources, 24 total items, and 96 KiB" in context
+    assert "16 distinct instruction bindings, 24 total items, and 96 KiB" in context
     assert "topology-correct positions inside the instruction block" in context
     assert "an ancestor created after its descendant was admitted" in context
+    assert "bundle for `request.scope` first" in context
+    assert "bundle for every distinct canonical focus path" in context
+    assert (
+        "`SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`"
+        in context
+    )
+    assert (
+        "Focus paths, admitted focus results, and search-result paths never become search roots"
+        in context
+    )
+    assert "It never derives applicability from the source path" in context
+    assert "same source under a different `applies_to` is an unseen valid binding" in context
 
     registry = stories["cah-031-register-read-tools.md"]
     assert "pure `target_scope(validated_input)` extractor" in registry
@@ -545,6 +650,8 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert "Every `ProviderRequest` is an immutable snapshot" in provider
     assert "successive request from CAH-030's atomically enriched package" in provider
     assert "local `ReadToolSuccess.target_scope` never enters" in provider
+    assert "canonical candidate-owner `applies_to`" in provider
+    assert "never derived from a possibly symlink-resolved source" in provider
 
     round_trip = stories["cah-034-run-one-read-tool-round-trip.md"]
     assert "post-dispatch" in round_trip and "deadline check" in round_trip
@@ -552,21 +659,53 @@ def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
     assert "pre-start guard runs immediately before the follow-up" in round_trip
     assert "CAH-025" in round_trip and "CAH-030" in round_trip
     assert "paths merely returned in its result never become scopes" in round_trip
+    assert "`await asyncio.sleep(0)` outside every lock" in round_trip
+    for checkpoint in (
+        '"before_dispatch"',
+        '"after_dispatch"',
+        '"after_discovery"',
+        '"after_merge"',
+        '"before_provider_start"',
+    ):
+        assert checkpoint in round_trip
+    assert "remain local candidates" in round_trip
+    assert "production-mode seam test installs no observer/gate" in round_trip
+    assert "deleting the unconditional outside-lock `asyncio.sleep(0)` must fail" in round_trip
 
     agent_loop = stories["cah-035-run-bounded-agent-loop.md"]
     assert "accumulate instruction items" in agent_loop
     assert "Only the requested target scope is admitted" in agent_loop
     assert "paths returned by broad listing/search output never drive discovery" in agent_loop
     assert "guards run after discovery, after merge before result/context append" in agent_loop
+    assert (
+        "reuses—not wraps or reimplements—CAH-034's `cooperate_then_guard(checkpoint)`"
+        in agent_loop
+    )
+    assert "unconditionally yields with `await asyncio.sleep(0)` outside locks" in agent_loop
+    assert "same source under another owner remains a distinct charged binding" in agent_loop
 
     adapter = stories["cah-036-map-openai-tool-calls.md"]
     assert "exactly `source`, `applies_to`, and `content`" in adapter
     assert "one sibling never overrides another" in adapter
+    assert "canonical candidate-owner directory" in adapter
+    assert "copied without derivation" in adapter
 
     evaluation = stories["cah-037-prove-read-only-assistant.md"]
     assert '`read_file` with `path="pkg/file.py"`' in evaluation
-    assert "the next request containing `pkg/AGENTS.md` with its `applies_to`" in evaluation
+    assert 'next request containing the binding `source="shared/rules.md"`' in evaluation
+    assert '`applies_to="pkg"`' in evaluation
     assert "merely returned by a broad `list_files` or `search_text` result" in evaluation
+    assert (
+        '`SearchTextRequest(query="completion", path=".", max_depth=4, max_matches=100)`'
+        in evaluation
+    )
+    assert '`source="shared/rules.md"` with `applies_to="pkg"`' in evaluation
+    assert "hard-denied instruction target" in evaluation
+    assert "denied target is never read and yields no partial package" in evaluation
+    assert "Named `asyncio.Event` gates" in evaluation
+    assert "`before_dispatch`" in evaluation
+    assert "zero dispatch at the first gate" in evaluation
+    assert "next provider-start count remains zero" in evaluation
 
 
 def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:

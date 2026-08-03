@@ -179,8 +179,11 @@ envelope capped at 65,536 bytes inclusive. Model-facing keys are admitted before
 oversize output fails instead of being truncated. The
 [bounded-loop story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces
 that teaching branch with a sequential four-turn, three-call state machine. Synchronous native tools
-are bounded and non-preemptive: cancellation and deadline checks bracket execution, and a result is
-discarded if cancellation wins while the handler runs. CAH-037's planned composition root supplies
+are bounded and non-preemptive. Before dispatch, after each synchronous dispatch/discovery/merge
+stage, and before provider start, one shared seam unconditionally yields outside locks and then runs
+the existing cancellation/deadline guard. Candidate results, context, history, and requests remain
+uncommitted until the final guard; the seam makes pending cancellation observable but does not reap
+an in-flight handler. CAH-037's planned composition root supplies
 that four-turn/three-call profile explicitly while retaining the 120-second and 4,096-byte CAH-022
 values; it does not inherit bare `LoopLimits()` defaults.
 

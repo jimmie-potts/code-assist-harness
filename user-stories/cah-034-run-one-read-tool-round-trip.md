@@ -35,7 +35,7 @@ another tool capability, or new transcript schema.
   existing session-level model-usage aggregate only after accepted final text.
 - Reuse the existing transcript-v3 aggregate loop evidence; add no per-call record or migration.
 - Prove validation order, bounded synchronous execution, cancellation, and exact safe result JSON
-  with deterministic fakes.
+  with deterministic fakes through one reusable cooperative scheduling seam.
 
 ## Locked contract
 
@@ -50,19 +50,36 @@ another tool capability, or new transcript schema.
   result validation, and bounded rendering. The key gate runs before Pydantic can apply a native
   default; a failed stage runs no later stage. Direct Python calls remain free to use the unchanged
   native request models and defaults outside this model-facing path.
-- M2 native tools are intentionally synchronous, bounded, and non-preemptive. The harness checks
-  cancellation and the captured absolute deadline immediately before dispatch and immediately after
-  it returns. Cancellation cannot interrupt Python code already executing; a result that returns
-  after cancellation or deadline selection is discarded, never replayed, published, or persisted.
+- CAH-034 owns one reusable asynchronous `cooperate_then_guard(checkpoint)` scheduling seam. At
+  every named synchronous boundary it unconditionally `await asyncio.sleep(0)` outside every lock,
+  then invokes an optional injected deterministic test observer or gate, and only then applies the
+  existing cancellation/deadline guard with its established precedence unchanged. Production code
+  does not install a gate. The unconditional yield lets a queued cancel command run on the same
+  event loop before the guard reads session state; calling a synchronous guard without yielding is
+  not a cancellation checkpoint.
+- M2 native tools are intentionally synchronous, bounded, and non-preemptive. Orchestration calls
+  `cooperate_then_guard("before_dispatch")`, executes dispatch, then calls
+  `cooperate_then_guard("after_dispatch")`. Cancellation cannot interrupt Python code already
+  executing; a result that returns after cancellation or deadline selection remains a local
+  candidate and is discarded, never replayed, published, or persisted. This is the post-dispatch
+  cancellation/deadline check; the yield is what makes newly queued state observable to it.
 - After an admitted call passes validation and its native tool succeeds, CAH-031 exposes the
-  validated request `path` as the local `target_scope`. Only after the post-dispatch
-  cancellation/deadline check passes does orchestration ask CAH-025 to discover instructions for
-  that scope. It checks cancellation/deadline again after discovery, asks CAH-030 for a candidate
-  merged package, and checks once more after merge before committing either the context replacement
-  or pending result to history. The existing pre-start guard runs immediately before the follow-up
-  `Provider.start()`. Discovery and merge are synchronous and bounded but not preemptible; a value
-  returned after cancellation/deadline wins is discarded. A known tool error skips discovery and
-  merge, produces its safe result, and leaves the initial context snapshot intact.
+  validated request `path` as the local `target_scope`. Only after the `after_dispatch` checkpoint
+  passes does orchestration ask CAH-025 to discover instructions for that scope. It calls
+  `cooperate_then_guard("after_discovery")`, asks CAH-030 for a candidate merged package, then calls
+  `cooperate_then_guard("after_merge")`. Discovery and merge are synchronous and bounded but not
+  preemptible; the seam checks once more after merge before committing, and values returned before
+  a losing checkpoint are discarded. A known tool error still passes through `after_dispatch`,
+  skips discovery and merge, produces a local safe-result candidate, and retains the initial
+  context candidate.
+- Dispatch output, discovered instructions, merged context, result, replay history, and the complete
+  bounded follow-up request remain local candidates. After request construction, orchestration
+  calls `cooperate_then_guard("before_provider_start")`, performs the existing model-start
+  admission, then atomically commits the selected history/context and invokes `Provider.start()`.
+  The pre-start guard runs immediately before the follow-up admission/commit/start transition. No
+  earlier checkpoint mutates session context, transcript evidence, or replay state. Thus a cancel
+  command admitted at any named gate leaves no partial tool result or enriched context, including
+  on the known-error path.
 - Instruction discovery or context-merge failure is a safe session terminal: no follow-up provider
   operation starts and neither the pending result nor a partially enriched context is published or
   persisted. A successful broad `list_files` or `search_text` enriches only for its validated
@@ -127,8 +144,9 @@ another tool capability, or new transcript schema.
 4. One accepted follow-up final answer publishes staged chunks through existing events and selects
    one completed session; a second call or invalid response starts no third turn.
 5. Synchronous dispatch, discovery, and merge are never represented as preemptible:
-   cancellation/deadline is checked before and after dispatch, after discovery, after merge before
-   committing result/context, and before the follow-up start; every late value is discarded.
+   CAH-034's cooperative seam yields and then checks cancellation/deadline before and after
+   dispatch, after discovery, after merge, and before the follow-up start; every late candidate is
+   discarded and no result/context/history is committed before the final checkpoint and admission.
 6. Optional per-turn usage is summed with checked arithmetic and exactly one existing aggregate is
    persisted only after accepted final text; partial/rejected usage is absent.
 7. Instruction discovery/merge and all budgets span the two turns and one call without reset;
@@ -143,15 +161,19 @@ another tool capability, or new transcript schema.
 | --- | --- |
 | 1, 3-4 | One strict-fake/native-fixture integration starts with root instructions, dispatches a nested path, and asserts a second exact request with its newly applicable instruction—including `[user, opaque, call, result]` when continuation is present—one dispatch, full replay, unchanged definitions, ordered final events, one terminal, and zero third starts. A known-error case proves the second request retains the initial context. |
 | 2 | Parameterized malformed/non-object JSON, omitted defaulted keys, additional keys, unknown tool, invalid input/result, every CAH-026 access error, oversized rendering, and programmer defect asserts the exact envelope or safe session failure plus stage counters. A spy proves the raw-key gate rejects before native Pydantic validation/default application. |
-| 5 | Logical checkpoints select cancellation/deadline immediately before dispatch, after dispatch, after discovery, after merge before append, and immediately before the follow-up start. Distinctive late tool/bundle/package sentinels are discarded; discovery and merge failures publish/persist neither result nor context and start no follow-up. |
+| 5 | Named `asyncio.Event` gates at `before_dispatch`, `after_dispatch`, `after_discovery`, `after_merge`, and `before_provider_start` deterministically admit cancellation on the event loop; injected clocks prove the exact existing deadline/cancellation tie precedence without elapsed sleeps. Distinctive late tool/bundle/package/history/request sentinels remain local and are discarded, including the known-error path. A separate production-mode seam test installs no observer/gate, queues a ready cancellation task, and has the non-awaiting guard spy assert that task already ran before guard entry; deleting the unconditional outside-lock `asyncio.sleep(0)` must fail this test. A semantic documentation-policy assertion locks yield, optional hook, guard order, and CAH-035 reuse. |
 | 6 | Two-turn tables cover no usage, usage on either/both turns, exact checked sums, aggregate overflow, rejected turn two, cancellation, and one transcript-v3 aggregate write. |
 | 7 | Seeded boundary tests exhaust instruction/context item and byte budgets, model starts, deadline, assistant UTF-8 output, tool calls, and 512-KiB request projection without reset or late work. Broad list/search results prove returned paths do not become scopes. |
 | 8 | Transcript/replay and protocol fixture suites prove unchanged schemas and absence of call IDs, arguments, result/continuation content, and host paths. |
 
 ## Validation
 
-- Use strict fake exchanges, bounded synchronous fake tools, injected clocks, and logical
-  checkpoints; never use live requests or wall-clock sleeps.
+- Use strict fake exchanges, bounded synchronous fake tools, injected clocks, and named
+  `asyncio.Event` checkpoint gates; never use live requests, elapsed timing assertions, or
+  wall-clock sleeps.
+- Separately exercise `cooperate_then_guard` with no test hook: queue cancellation on the same event
+  loop, let a synchronous guard spy assert it latched before guard entry, and mutation-test removal
+  of `asyncio.sleep(0)`. The awaited Event gates do not count as evidence for the production yield.
 - Assert exact request history and context snapshots, registry/discovery/merge stage counters, result
   bytes, provider starts/cleanup, aggregate usage, transcript projection, protocol events, and
   terminal count.

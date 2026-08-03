@@ -65,12 +65,12 @@ one-round and iterative loops, OpenAI mapping, and end-to-end evaluation are cor
 | Order | Story | Primary epic | Learning emphasis | Review focus | Estimated production churn |
 | ---: | --- | --- | --- | --- | ---: |
 | 16 | CAH-024 - Establish the workspace boundary | E3 | Core | Containment ownership and residual check/use risk | 250-400 |
-| 17 | CAH-025 - Discover scoped repository instructions | E3 | Core | Instruction scope, precedence, and untrusted guidance | 300-450 |
-| 18 | CAH-026 - Define repository read contracts and policy | E3 | Core | Capability, ignore, secret-path, and limit policy | 300-450 |
+| 17 | CAH-026 - Define repository read contracts and policy | E3 | Core | Capability, ignore, secret-path, and limit policy | 300-450 |
+| 18 | CAH-025 - Discover scoped repository instructions | E3 | Core | Instruction scope, provenance, applicability, and untrusted guidance | 350-500 |
 | 19 | CAH-027 - List files and inspect path metadata | E3 | Supporting | Deterministic enumeration through the shared policy | 350-500 |
 | 20 | CAH-028 - Read one bounded text file | E3 | Supporting | Exact excerpts, encoding, and access-time recheck | 300-450 |
 | 21 | CAH-029 - Search repository text literally | E3 | Supporting | Bounded native search and stable result order | 400-550 |
-| 22 | CAH-030 - Build budgeted repository context | E3 | Core | Selection priority, provenance, and omission evidence | 350-500 |
+| 22 | CAH-030 - Build budgeted repository context | E3 | Core | Selection priority, provenance, and omission evidence | 475-600 |
 | 23 | CAH-031 - Register and dispatch read-only tools | E4 | Core | Typed capability registry and fail-closed dispatch | 450-600 |
 | 24 | CAH-032 - Define the provider-neutral tool contract | E2 | Core | LLM context, tool definitions, calls, results, and correlation | 450-600 |
 | 25 | CAH-033 - Stage and validate one tool-aware response | E2 | Core | Atomic response grammar and admission before publication or dispatch | 350-500 |
@@ -114,12 +114,16 @@ is likely to cross the ceiling.
 - Decoded model arguments must contain exactly the advertised required keys before native Pydantic
   validation can apply defaults. Native request models remain unchanged so trusted direct Python
   callers retain their defaults.
-- Registry handlers remain synchronous and bounded. Cancellation and deadline checks run before and
-  after a handler; an in-flight handler is non-preemptive, its eventual result is discarded when
-  cancellation wins, and later work must add a cooperative interface before claiming mid-call reap.
-- Scoped instruction discovery and context merge are also bounded synchronous stages. The loop checks
-  after each one, commits neither result nor candidate context until those guards pass, and checks
-  again before the next provider start.
+- Registry handlers remain synchronous and bounded. Before dispatch, after each synchronous
+  dispatch/discovery/merge stage, and before provider start, the loop unconditionally yields once to
+  the shared event loop outside locks and then applies the existing cancellation/deadline guard. An
+  in-flight handler is non-preemptive, but the yield lets an already-readable cancel command latch
+  before the next guard; later work must add a cooperative handler interface before claiming
+  mid-call reap.
+- Dispatch results, discovered instructions, merged context, history, and the next bounded request
+  remain local candidates until the final post-yield pre-provider guard passes. Cancellation at any
+  named seam commits none of them. Deterministic tests pause at injected named `asyncio.Event` gates
+  and use injected clocks rather than elapsed-time sleeps.
 - Every provider-facing tool outcome uses compact, sorted-key UTF-8 JSON capped at 65,536 bytes
   inclusive: exactly `{"result":<projected>}` for success or
   `{"error":{"code":"<code>","message":"<fixed message>"}}` for failure. Oversize output fails with
@@ -142,8 +146,14 @@ is likely to cross the ceiling.
 
 ### Repository context and reads
 
-- M2 discovers only exact `AGENTS.md` files. Applicable files are ordered from workspace root to the
-  deepest target scope and remain untrusted guidance that cannot weaken harness policy.
+- M2 discovers only exact `AGENTS.md` files. CAH-026 first supplies pure lexical-path and hard-deny
+  helpers used by ordinary reads and instruction discovery; CAH-025 exempts instruction files from
+  `.gitignore`, never from lexical or hard-deny admission, and does not inherit ordinary-read limits
+  or errors. Each binding preserves the resolved canonical instruction
+  source separately from the canonical candidate-owner directory to which it applies. The same
+  source reached through two owners therefore remains two separately charged bindings. Applicable
+  bindings are ordered from workspace root to the deepest target scope and remain untrusted guidance
+  that cannot weaken harness policy.
 - Repository enumeration honors nested `.gitignore` semantics through the small `pathspec`
   `GitIgnoreSpec` dependency plus a non-overridable harness denylist for VCS internals and local
   credential-bearing files. Ignore rules are evaluated independently against the normalized supplied
@@ -160,16 +170,23 @@ is likely to cross the ceiling.
 - Every accepted path is resolved again immediately before access. Results use canonical
   workspace-relative labels and fixed failures rather than host paths or raw OS errors.
 - Context items are atomic. Selection either includes a complete bounded item or records why it was
-  omitted; it never silently cuts invalid JSON or removes provenance. An instruction item carries its
-  canonical `applies_to` directory; sibling directories do not invent a precedence relationship.
+  omitted; it never silently cuts invalid JSON or removes provenance. An instruction item copies
+  CAH-025's canonical candidate-owner `applies_to`; it never derives scope from a symlink target
+  `source`. Sibling directories do not invent a precedence relationship.
 - Plain runtime tasks use **initial** context scope `.` with empty `focus_paths` and `search_queries`.
   Evaluation may inject those fields explicitly through a test-only composition seam; the model does
-  not choose initial context-selection inputs.
+  not choose initial context-selection inputs. A non-empty request discovers the instruction bundle
+  for `scope` first and for every validated, canonical-distinct explicit focus path in input order,
+  completing that required union before focus content. Each search query projects exactly to
+  `SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`; focus paths,
+  search results, and matched files never become inferred search or instruction roots.
 - Each successful native read returns the validated requested `path` as harness-only target-scope
   metadata. Before another provider start, CAH-034/035 use CAH-025 and CAH-030 to add previously unseen
   applicable instructions atomically without evicting prior items. A newly appearing ancestor enters
-  before existing descendants while every prior pair retains its relative order. Exact repeats are
-  idempotent; changed duplicates, discovery failures, and item/byte overflow stop before replay.
+  before existing descendants while every prior pair retains its relative order. A repeat for the
+  same `applies_to` owner is idempotent only when source, content, and original bytes agree; the same
+  source under a different owner is a distinct binding. Changed duplicates, discovery failures, and
+  item/byte overflow stop before replay.
   Known tool failures keep context unchanged. M2 does not fan out instructions for paths merely
   returned by a broad listing or search, so its grounded evaluation performs a specific
   path-targeting read before final text.

@@ -58,9 +58,10 @@ turn 2 input:  [...original input, complete reasoning item, function call, funct
 `reasoning.context="current_turn"` does not make it safe to drop replayed output items. A common
 misconception is also that `parallel_tool_calls=false` validates output count; the adapter still must.
 
-Instructions need both identity and applicability. `pkg/AGENTS.md` may guide `pkg/file.py` without
-guiding `other/file.py`. Sending content without `source` and `applies_to` would erase the harness's
-scope decision at the provider boundary.
+Instructions need both identity and applicability. `pkg/AGENTS.md` may resolve to
+`shared/rules.md` while still guiding `pkg/file.py`, not `shared/file.py` or `other/file.py`.
+Sending content without its canonical source and separately preserved candidate-owner `applies_to`
+would erase the harness's scope decision at the provider boundary.
 
 ## Key concepts
 
@@ -71,7 +72,8 @@ scope decision at the provider boundary.
 - **Strict adapter grammar:** `[reasoning?, function_call]` or `[reasoning?, message]` only.
 - **Egress consent:** explicit OpenAI selection authorizes bounded admitted repository content.
 - **Semantic result:** compact function-output JSON interpreted by the model, not SDK lifecycle.
-- **Scoped instruction:** content paired with canonical source and the directory it applies to.
+- **Scoped instruction:** content paired with canonical source and the separately preserved
+  candidate-owner directory it applies to.
 - **Chain precedence:** root-to-nearest ordering inside one canonical ancestor chain; siblings do not
   override one another.
 

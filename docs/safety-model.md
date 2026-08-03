@@ -257,10 +257,14 @@ perform filesystem access or eliminate time-of-check-to-time-of-use races.
 > so that a prior path snapshot cannot silently authorize changed content.
 
 [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) owns the shared admission
-policy. It applies Git-compatible ignore rules independently to the normalized supplied path and the
-resolved canonical target; each view requires every parent directory to remain traversable before a
-leaf negation or nested policy can apply. Either view's ignored ancestor or target denies, so a
-symlink alias cannot bypass policy on either name. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
+policy and exposes pure lexical-path admission plus its exact hard-deny table. CAH-025 reuses those
+pre-I/O decisions for supplied and canonical scope plus each resolved instruction source, while its
+control-plane `AGENTS.md` candidates remain exempt only from `.gitignore`. It preserves the canonical
+candidate owner as `applies_to` even when a leaf symlink resolves to another source directory. The
+full read policy applies Git-compatible ignore rules independently to the normalized supplied path
+and resolved canonical target; each view requires every parent directory to remain traversable
+before a leaf negation or nested policy can apply. Either view's ignored ancestor or target denies,
+so a symlink alias cannot bypass policy on either name. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
 [CAH-028](../user-stories/cah-028-read-bounded-text-file.md), and
 [CAH-029](../user-stories/cah-029-search-repository-text.md) reuse it immediately before access and
 return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
@@ -283,6 +287,12 @@ opaque payload out of policy and evidence. CAH-037 explicitly composes the four-
 4,096-byte, three-call M2 profile instead of inheriting defaults. A future MCP client must enter
 through a generalized registry and separate remote-trust design; the local M2 registry is not a
 direct MCP compatibility claim.
+
+Before dispatch, after each bounded synchronous dispatch/discovery/merge stage, and before provider
+start, CAH-034/035 unconditionally yield once outside locks and then apply the existing
+cancellation/deadline guard. Candidate tool results, instruction bundles, context, history, and the
+next request remain uncommitted until the final guard passes. This makes a pending cancel observable
+without claiming that an in-flight synchronous handler can be preempted.
 
 Repository instructions remain untrusted guidance. A discovered `AGENTS.md` can neither broaden read
 policy nor turn a failed target into an admitted scope; discovery or context-budget failure stops

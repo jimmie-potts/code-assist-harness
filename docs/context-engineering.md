@@ -32,9 +32,12 @@ The context builder will assemble provider-neutral items from:
 - File excerpts and search matches requested through repository read tools.
 
 Instruction discovery follows filesystem scope. A nested instruction file can refine rules for its
-subtree, but must not silently weaken harness safety policy. Repository content is untrusted data:
-text in a source file cannot authorize a command, broaden the command allowlist, or bypass an
-approval.
+subtree, but must not silently weaken harness safety policy. CAH-026's pure lexical admission and
+hard-deny classifier apply before instruction scope/source access even though exact `AGENTS.md`
+control-plane candidates are exempt from `.gitignore`. A binding records the resolved canonical source separately from the canonical
+candidate-owner directory to which it applies, so a symlink cannot move the instruction's scope.
+Repository content is untrusted data: text in a source file cannot authorize a command, broaden the
+command allowlist, or bypass an approval.
 
 ## Native read tools
 
@@ -67,7 +70,11 @@ model-inferred. After a native read succeeds, the registry's harness-owned metad
 validated requested target scope; the loop discovers its applicable instructions and atomically adds
 previously unseen sources before another provider start. Deterministic evaluation may inject
 non-empty initial values through a test-only composition seam without granting the model context
-policy authority.
+policy authority. For such a request, instruction discovery covers `scope` first and every
+validated, canonical-distinct focus path in input order before focus content is selected. Each query
+searches only the supplied scope through
+`SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`; focus paths,
+matches, and result paths do not become inferred search or instruction roots.
 
 ## Provenance and attribution
 
@@ -153,16 +160,6 @@ relative-path, missing-target, symlink-containment, and workspace-relative repor
 meaningful tests. Instruction discovery, file reads, model tool schemas, and execution-time race
 protection remain later work.
 
-### Planned CAH-025 — Discover scoped repository instructions
-
-> As a contributor, I want applicable workspace instructions included with their scope so that the
-> agent follows repository-specific rules while preserving harness safety.
-
-The [implementation-ready story](../user-stories/cah-025-discover-repository-instructions.md)
-discovers only applicable root-to-nearest `AGENTS.md` files on one canonical ancestor chain. It
-locks exact source/byte limits, strict UTF-8, canonical labels, and non-leaking failures without
-provider, registry, or loop behavior.
-
 ### Planned CAH-026 — Define repository read contracts and policy
 
 > As a user, I want every native read to reuse one containment, ignore, deny, and limit policy so
@@ -173,7 +170,22 @@ nested Git-compatible ignore evaluation through PathSpec, a non-overridable cred
 shared text rules, and fixed safe failures. Ignore rules are evaluated independently against both the
 normalized supplied path and its resolved canonical target. Each view admits every directory prefix
 before loading deeper policy or evaluating the leaf, and either view's ignored ancestor or target
-denies access. It performs no user-requested read operation itself.
+denies access. Its pure lexical-path and `is_hard_denied_path` helpers perform no I/O and are reused
+by CAH-025 so instruction discovery cannot drift to weaker pre-I/O admission. CAH-025 does not
+inherit ordinary-read limits or errors. This unit performs no user-requested read operation itself.
+
+### Planned CAH-025 — Discover scoped repository instructions
+
+> As a contributor, I want applicable workspace instructions included with their scope so that the
+> agent follows repository-specific rules while preserving harness safety.
+
+The [implementation-ready story](../user-stories/cah-025-discover-repository-instructions.md)
+discovers exact root-to-nearest `AGENTS.md` candidates after CAH-026. Every binding preserves the
+resolved canonical `source` separately from the canonical candidate-owner `applies_to` scope; the
+same source reached through different owners remains separately applicable and charged. It exempts
+these control-plane candidates from `.gitignore`, not from hard denial, and locks strict text,
+source/binding limits, rechecks, no-partial failure, and non-leaking errors without provider,
+registry, or loop behavior.
 
 ### Planned CAH-027 through CAH-029 — Add bounded native read operations
 
@@ -194,11 +206,13 @@ by Python `str.splitlines()`, including its C0, C1, and Unicode separators.
 > the model input.
 
 The [implementation-ready story](../user-stories/cah-030-build-budgeted-context.md) selects required
-instructions and focus files before optional search excerpts under fixed item/UTF-8-byte budgets. It
-also owns pure atomic enrichment with an already-discovered instruction bundle: prior items retain
-their relative order, new instruction items carry an `applies_to` directory, and a late ancestor is
-inserted before existing descendants without evicting anything. Its inclusion report preserves
-admitted provenance and aggregate omission reasons without exposing denied labels.
+instruction bindings for scope plus every explicit focus path, then focus files, before optional
+search excerpts under fixed item/UTF-8-byte budgets. It copies each binding's candidate-owner
+`applies_to` rather than deriving scope from its source, and uses the exact supplied-scope search
+projection above. It also owns pure atomic enrichment with an already-discovered instruction bundle:
+prior items retain their relative order, and a late ancestor is inserted before existing descendants
+without evicting anything. Its inclusion report distinguishes source and applicability while
+preserving admitted provenance and aggregate omission reasons without exposing denied labels.
 
 ### Planned CAH-037 — Evaluate the composed read-only outcome
 
@@ -208,5 +222,6 @@ admitted provenance and aggregate omission reasons without exposing denied label
 The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) composes the
 strict fake, fixture workspaces, context, registry, and bounded loop. It checks exact retrieval and
 small grounded answer facts, including root-only initial context followed by nested instructions
-after a successful path-targeting read. Broad result-derived scope expansion, semantic ranking, and
-live-model quality remain later work.
+after a successful path-targeting read, plus injected focus-path context that proves the nested
+instruction union and exact supplied-scope search projection. Broad result-derived scope expansion,
+semantic ranking, and live-model quality remain later work.

@@ -18,17 +18,21 @@
 ## Quick summary
 
 CAH-030 is the M2 context-engineering checkpoint: the harness chooses ordered repository evidence
-under exact item and UTF-8 byte budgets and explains every inclusion or aggregate omission. It also
-defines a pure atomic merge for one newly discovered scoped-instruction bundle. The package remains
-provider-neutral so later LLM and tool-loop work cannot silently take ownership of selection.
+under exact instruction-binding, item, and UTF-8 byte budgets and explains every inclusion or
+aggregate omission. Its initial instruction union covers both the supplied scope and every distinct
+explicit focus path. It also defines the same pure atomic merge for later scoped enrichment. The
+package remains provider-neutral so later LLM and tool-loop work cannot silently take ownership of
+selection.
 
 ## Learning objectives
 
 After completing this unit, you should be able to:
 
 - explain required versus optional context and their different failure behavior;
-- apply instruction, focus-file, and search priority deterministically;
+- build a deterministic scope-plus-focus instruction union before appending focus content;
+- project exact bounded focus and fixed-scope search requests without hidden fanout;
 - merge a newly discovered instruction chain without eviction or sibling-precedence mistakes;
+- preserve target `source` separately from candidate-owner `applies_to`;
 - design provenance and an inclusion report without leaking excluded sources; and
 - distinguish a reproducible byte budget from a provider token-window guarantee.
 
@@ -45,10 +49,28 @@ context item is a candidate that passed policy and selection. Required sources a
 applicable instructions and explicitly requested focus files must all appear or the build fails.
 Search excerpts are optional hints and may be omitted with evidence.
 
-Every instruction also carries `applies_to`, derived from the canonical parent of its `AGENTS.md`.
-Ancestor and descendant instructions have precedence only along the same path. Two sibling scopes do
-not override one another merely because one was discovered first. A later tool loop may discover one
-new CAH-025 bundle, but this unit only defines the pure merge of that already-validated value.
+Every CAH-025 instruction binding already carries two different labels. `source` is the canonical
+file whose bytes were read. `applies_to` is the canonical directory that owned the `AGENTS.md`
+candidate. CAH-030 copies both; it never derives one from the other. If `pkg/AGENTS.md` is a symlink
+to `shared/rules.md`, the binding is `source="shared/rules.md"` and `applies_to="pkg"`. Deriving
+`applies_to="shared"` would silently widen or move the rule's authority.
+
+Binding identity is therefore the candidate owner. The same target shared by `pkg/AGENTS.md` and
+`other/AGENTS.md` is two valid bindings, consumes budget twice, and appears as two distinguishable
+inclusion records. Repeating one owner is idempotent only when source, content, and original byte
+count match. A retargeted source or changed snapshot fails atomically.
+
+The initial build starts with instructions for `request.scope`, then folds in instructions for every
+canonical-distinct focus path in input order. Ancestor and descendant owners have precedence only
+along the same path; sibling owners do not override one another merely because one was discovered
+first. A later tool loop may discover one new CAH-025 bundle, but this unit only defines the pure
+merge of that already-validated value.
+
+Validation must precede deduplication. Otherwise a duplicate-looking but malformed focus or query
+could be hidden without passing its owning contract. All exact CAH-028 and CAH-029 projections are
+schema-validated before candidate I/O. Focuses are canonical-deduplicated only after admission;
+queries are exact-deduplicated after validation. Every search keeps the supplied scope as its root,
+so a focus or match cannot silently widen search or trigger instruction fanout.
 
 A common misconception is that 96 KiB means the same number of model tokens for every provider.
 Tokenization varies. This story counts UTF-8 content bytes because tests can reproduce them; a later
@@ -56,11 +78,16 @@ provider layer must fit its complete message to the selected model.
 
 ## Key concepts
 
-- **Priority:** instructions root-to-nearest, focus files in request order, then search excerpts in
-  query and match order.
+- **Priority:** the complete topology-ordered scope-plus-focus instruction union, focus files in
+  request order, then search excerpts in query and match order.
 - **Required all-or-nothing:** never silently drop a narrower instruction or explicit focus source.
 - **Optional first-fit:** include a search item when both remaining budgets permit, then continue.
-- **Canonical deduplication:** one source keeps its highest-priority reason despite aliases.
+- **Validation before deduplication:** every supplied focus/query projection must satisfy its owner
+  before canonical or exact duplicate removal.
+- **Binding identity:** `applies_to` identifies an instruction binding; one source can legitimately
+  back multiple separately charged owners.
+- **Canonical deduplication:** a non-instruction source keeps its highest-priority reason despite
+  aliases.
 - **Monotonic enrichment:** add unseen required instructions at topology-correct positions inside the
   instruction block while preserving every prior item's relative order and evicting nothing.
 - **Scoped precedence:** `applies_to` defines where guidance applies; sibling serialization order is
@@ -73,86 +100,124 @@ provider layer must fit its complete message to the selected model.
 ```text
 Ink TUI -- task/scope --> Python harness
                               |
-        +---------------------+----------------------+
-        |                     |                      |
-  CAH-025 instructions   CAH-027/028 files    CAH-029 search excerpts
-        |                     |                      |
-        +---------------------v----------------------+
-                    [CAH-030 context builder]
-                       |                 |
-             ContextPackage       InclusionReport
-                       ^
- admitted tool scope -> CAH-025 bundle -> pure atomic instruction merge
-                       |
-            provider-neutral request mapping (later)
-                       |
-               Provider port / explicit agent loop (later)
+            [CAH-030 request projection]
+                 |
+ request.scope -> CAH-025(scope first) -------------------\
+ focus paths -> CAH-028 -> canonical focuses -> CAH-025(each) +-> instruction union
+                                                            (topology/no eviction)
+                         \------------------------------------> focus items
+ queries -> CAH-029(path=request.scope) ---------------------> search excerpts
+                                             \        |        /
+                              [CAH-030 bounded selection]
+                                             |
+                            16 bindings / 24 items / 96 KiB
+                                             |
+                               ContextPackage + InclusionReport
+                                             ^
+ admitted tool scope -> CAH-025 bundle -> same topology/no-eviction merge
+                                             |
+                              provider mapping / agent loop (later)
 
 Tool registry/MCP dispatch and transcript evidence are unchanged in CAH-030.
 ```
 
-The package allows at most 16 distinct instruction sources, 24 total items, and 96 KiB of item
-content. Up to eight focus files and four search queries enter the initial deterministic pipeline.
-The provider receives no authority to reorder, bypass policy, or request hidden exclusions.
+The package allows at most 16 distinct instruction bindings, 24 total items, and 96 KiB of item
+content across the whole initial build or enriched value. Two owners of one instruction source use
+two binding slots, two item slots, and both copies' content bytes. Up to eight focus files and four
+search queries enter the initial deterministic pipeline. The provider receives no authority to
+reorder, bypass policy, or request hidden exclusions.
 
 ## Practical walkthrough
 
 1. Validate one scope, no more than eight focus paths, and no more than four literal queries.
-2. Discover all required instructions; read required focus files from line 1 within 32 KiB/400 lines.
-3. Generate optional 512-byte search excerpts in deterministic query/match order.
-4. Canonicalize and deduplicate, keeping the highest-priority reason.
-5. Prove all required items fit 24 items and 96 KiB or fail without a partial package.
-6. First-fit optional items and emit exact included records plus aggregate omissions.
-7. Given one later CAH-025 bundle, derive each `applies_to`, skip only exact duplicate sources, insert
-   unseen instructions before the first strict descendant or at the instruction-block end, and
-   recheck 16/24/96-KiB atomically.
+2. Materialize every exact focus projection as
+   `ReadFileRequest(path=focus_path, start_line=1, max_lines=400, max_bytes=32768)` and every exact
+   search projection as
+   `SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`. Validate all of
+   them before candidate I/O.
+3. Read every required focus, then canonical-deduplicate admitted results in input order. Exact-dedup
+   validated queries in input order.
+4. Discover the required CAH-025 bundle for `request.scope` first, then one bundle per distinct focus
+   path. Fold every bundle through the topology merge and finish the union before focus items.
+5. Append required focus items, then generate optional 512-byte search excerpts. Every search uses the
+   unchanged supplied scope; focus and match paths cause no extra searches or instruction discovery.
+6. Prove the complete required set fits 16 bindings, 24 items, and 96 KiB or fail with no partial
+   package. First-fit optional items and emit owner-aware inclusion records plus aggregate omissions.
+7. Given one later CAH-025 bundle, copy each `source` and `applies_to`, skip only exact owner
+   snapshots, insert unseen bindings before the first strict descendant or at the instruction-block
+   end, and recheck the same 16/24/96-KiB limits atomically.
 
 ## Implementation code samples
 
 No shipped code exists. Planned pseudocode:
 
 ```text
-required = instructions(scope) + focus_files(request.focus_paths)
-optional = search_excerpts(request.search_queries)
-required = canonical_deduplicate(required)
-require_fits(required, item_limit=24, byte_limit=96_KiB)
+focus_requests = tuple(
+    ReadFileRequest(path=path, start_line=1, max_lines=400, max_bytes=32768)
+    for path in request.focus_paths
+)
+search_requests = tuple(
+    SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)
+    for query in request.search_queries
+)
+# Constructing both tuples validates every projection before source I/O.
+
+focuses = canonical_unique(read(focus_request) for focus_request in focus_requests)
+queries = exact_query_unique(search_requests)
+
+package = merge(empty_package(), discover_for_path(request.scope))
+for focus in focuses:
+    package = merge(package, discover_for_path(focus.path))
+# The complete instruction union now exists before any focus item is appended.
+
+required = append_focus_items(package, focuses)
+require_fits(required, binding_limit=16, item_limit=24, byte_limit=96_KiB)
+optional = tuple(search(search_request) for search_request in queries)
 items = first_fit(required, optional)
-return ContextPackage(items, InclusionReport.from_selection(items, optional))
+return ContextPackage(items, owner_aware_report(items, optional))
 
 def enrich(package, discovered_instructions):
-    checked = require_exact_duplicates_or_unseen(discovered_instructions)
+    checked = require_exact_owner_snapshots_or_unseen(discovered_instructions)
     merged = stable_topological_instruction_insert(package, checked.unseen)
-    require_fits(merged, instruction_limit=16, item_limit=24, byte_limit=96_KiB)
+    require_fits(merged, binding_limit=16, item_limit=24, byte_limit=96_KiB)
     return immutable_package_and_report(merged)
 ```
 
-The first two lines separate correctness-critical and optional evidence. Canonical deduplication
-prevents aliases from spending budget twice. `require_fits` is all-or-nothing; `first_fit` may skip
-optional items but must report why. Enrichment performs no discovery or tool work, and a conflicting
-duplicate fails rather than silently replacing the session's earlier instruction snapshot. Stable
-topological insertion places a newly appearing ancestor before an existing descendant without
-changing the relative order of any prior items.
+The two projection tuples lock the exact downstream request shapes before any candidate operation can
+touch the filesystem. Canonical focus deduplication happens only after CAH-028 admission; query dedup
+uses exact validated query equality. Notice that every search request keeps `request.scope` rather
+than substituting a focus or a result path.
+
+The scope bundle is folded first, then one bundle per distinct focus. The same merge core governs
+initial assembly and later enrichment, so owner identity, topology, conflict handling, and budgets
+cannot drift between paths. `require_fits` is all-or-nothing; `first_fit` may skip optional search
+items but must report why. A repeated `applies_to` with a changed source, content, or original byte
+count fails rather than replacing the earlier snapshot. Stable topological insertion places a newly
+appearing ancestor before an existing descendant without changing the relative order of prior items.
 
 ## Failure scenarios to study
 
-- **Instruction overflow:** required instructions exceed 96 KiB. The build fails; it never drops the
-  nearest rule.
-- **Seventeenth instruction:** enrichment fails `required_context_exceeds_budget`; no old or new item
-  is evicted.
-- **Changed duplicate:** the same canonical source arrives with different content, bytes, or
-  `applies_to`; the merge fails `context_build_failed` without revealing either value.
-- **Sibling scopes:** both remain in first-admission order, but neither receives precedence over the
-  other.
-- **Late ancestor:** a root or intermediate instruction appears after a descendant was admitted. It
-  inserts before that descendant while every previously admitted pair keeps its relative order.
+- **Required overflow:** required content crosses 96 KiB or a seventeenth instruction binding appears.
+  The build fails without dropping or evicting any rule, even when owners share one physical source.
+- **Binding identity:** two owners targeting `shared/rules.md` remain separately charged. Repeating one
+  owner with a changed source, content, or original byte count instead fails `context_build_failed`.
+- **Missed nested rule:** `scope="."` plus focus `pkg/file.py` must include `pkg/AGENTS.md`; discovering
+  only the scope bundle would produce falsely incomplete required context.
+- **Invalid duplicate projection:** a duplicate-looking focus or query is malformed. Validation fails
+  before source I/O rather than deduplication hiding the error.
+- **Search-root drift:** a focus or match sits under `pkg/`. Search still uses the unchanged supplied
+  scope; neither path triggers an extra search or per-match instruction bundle.
+- **Topology:** sibling scopes retain first-admission order without precedence; a late ancestor
+  inserts before a descendant while every previously admitted pair keeps its relative order.
 - **Missing focus file:** an explicitly requested source becomes unavailable. The source's fixed safe
   error ends the build instead of producing falsely complete context.
 - **Optional pressure:** one large search excerpt cannot fit but a later smaller one can. First-fit
   omits the former and includes the latter with exact counters.
 - **Credential probe:** a search encounters a denied file. The report increments a generic aggregate
   and never includes its label or existence detail.
-- **Alias duplication:** instruction, focus, and search paths resolve to the same source; only the
-  highest-priority representation spends package budget.
+- **Alias duplication:** non-instruction focus and search paths resolve to one source; only the
+  highest-priority representation spends package budget. Instruction owner bindings remain distinct
+  even when they share that target.
 
 ## Production expansion
 
@@ -178,7 +243,7 @@ remain observable and evaluated against grounded tasks.
 
 | Dimension | This repository | Production expansion |
 | --- | --- | --- |
-| Scope | Explicit local instructions, monotonic scoped enrichment, files, and literal matches | Multi-source indexed retrieval and ranking |
+| Scope | Initial scope-plus-focus instructions, monotonic scoped enrichment, files, and fixed-root literal matches | Multi-source indexed retrieval and ranking |
 | Reliability | Deterministic fresh build | Cache/index freshness, fallback, and replayable ranking |
 | Operations | Fixture tests and inclusion report | Traces, retrieval metrics, alerts, and governance |
 | Cost | Low services and cognitive load | Indexing, storage, model calls, telemetry, and ownership |
@@ -192,22 +257,30 @@ latency, and provenance tests.
 
 ## Practical exercises
 
-1. Given three instructions, two focus files, and search excerpts, write the exact inclusion order.
-2. Calculate whether required content at 98,303, 98,304, and 98,305 bytes succeeds.
-3. Construct an optional first-fit example where a later item fits after an earlier omission.
-4. Inspect an inclusion report and identify what it intentionally does not reveal.
-5. Admit a package instruction before a root instruction appears, then merge root/package and
+1. With `scope="."` and focuses `pkg/a.py`, `other/b.py`, and an alias of `pkg/a.py`, list the CAH-025
+   calls and the final instruction/focus ordering.
+2. Write the exact CAH-028 and CAH-029 projections for one focus and query. Explain why all projections
+   validate before I/O and why search keeps the supplied scope.
+3. Let `pkg/AGENTS.md` and `other/AGENTS.md` target `shared/rules.md`. Write both item and report
+   identities, then calculate their binding/item/content budget charge.
+4. Calculate whether required content at 98,303, 98,304, and 98,305 bytes succeeds.
+5. Construct an optional first-fit example where a later item fits after an earlier omission.
+6. Admit a package instruction before a root instruction appears, then merge root/package and
    root/other chains; place the late ancestor and explain why siblings have no precedence.
-6. Change one exact duplicate's content and predict the atomic failure.
-7. Teach back: which context decisions must remain in the harness before any evidence reaches an
-   LLM?
+7. Retarget one repeated owner while keeping its content equal. Predict the atomic failure and explain
+   why source identity is part of the snapshot.
+8. Teach back: which context, instruction-scope, and search-root decisions must remain in the harness
+   before any evidence reaches an LLM?
 
 ## Key takeaways
 
 - The Python harness owns context selection, priority, provenance, and omissions.
-- Required all-or-nothing and deterministic optional first-fit are the central invariants.
-- Scoped enrichment is pure, monotonic, and atomic: late ancestors enter before descendants, exact
-  duplicates are idempotent, and conflicts or budget overflow produce no partial package.
+- Required all-or-nothing includes instructions for the request scope and every distinct focus path;
+  optional search remains deterministic first-fit from one unchanged scope.
+- CAH-030 copies `source` and owner `applies_to`: shared targets remain separately scoped and charged.
+- Initial assembly and later enrichment use one pure, monotonic, atomic merge: late ancestors enter
+  before descendants, exact owner snapshots are idempotent, and conflicts or budget overflow produce
+  no partial package.
 - Production retrieval can improve recall and scale but demands evaluation, observability, access
   control, and operational ownership.
 
@@ -218,7 +291,11 @@ latency, and provenance tests.
 - **First-fit:** Consider candidates in order and include each only when remaining budgets permit.
 - **Inclusion report:** Bounded evidence of what was selected and why other classes were omitted.
 - **Provenance:** Canonical source identity and the reason a context item exists.
-- **`applies_to`:** Canonical directory subtree governed by one instruction source.
+- **Instruction binding:** One candidate owner paired with its validated instruction target snapshot.
+- **`source`:** Canonical instruction target whose content was read.
+- **`applies_to`:** Canonical candidate-owner directory subtree governed by one instruction binding;
+  it is copied from CAH-025, not inferred from `source`.
+- **Projection:** Exact downstream request constructed from one higher-level context request.
 - **Monotonic enrichment:** Adding required instructions without removing or reordering prior items
   relative to one another.
 

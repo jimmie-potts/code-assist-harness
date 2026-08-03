@@ -58,8 +58,8 @@ not add or revise presentations unless the user explicitly reverses this freeze.
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Verified against implementation |
 | 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Verified against implementation |
 | 16 | CAH-024 | [Workspace boundary](cah-024-workspace-boundary.md) | Planned |
-| 17 | CAH-025 | [Scoped repository instructions](cah-025-repository-instructions.md) | Planned |
-| 18 | CAH-026 | [Repository read policy](cah-026-repository-read-policy.md) | Planned |
+| 17 | CAH-026 | [Repository read policy](cah-026-repository-read-policy.md) | Planned |
+| 18 | CAH-025 | [Scoped repository instructions](cah-025-repository-instructions.md) | Planned |
 | 19 | CAH-027 | [Repository listing and metadata](cah-027-list-files-and-stat-path.md) | Planned |
 | 20 | CAH-028 | [Bounded repository reads](cah-028-bounded-text-file.md) | Planned |
 | 21 | CAH-029 | [Literal repository search](cah-029-literal-text-search.md) | Planned |

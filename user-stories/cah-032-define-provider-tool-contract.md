@@ -120,9 +120,10 @@ transitions, parse or dispatch a call, run a second model turn, map OpenAI SDK e
   round-trip order is therefore original input, optional continuation, call, matching result.
 - `ProviderRequest.repository_context` is the exact immutable ordered `ContextItem` tuple projected
   from one successful CAH-030 package. An instruction projection includes canonical source,
-  canonical `applies_to`, path-local precedence, exact admitted content, byte count, and truncation
-  state; focus and search items retain their existing kind-specific provenance. It inherits that
-  package's 16-source, 24-item, and 96-KiB content bounds. The inclusion report remains
+  canonical candidate-owner `applies_to`, path-local precedence, exact admitted content, byte count,
+  and truncation state; `applies_to` is copied and never derived from a possibly symlink-resolved
+  source. Focus and search items retain their existing kind-specific provenance. It inherits that
+  package's 16-binding, 24-item, and 96-KiB content bounds. The inclusion report remains
   harness evidence and never becomes model input. The existing `repository_instructions` field
   remains valid for CAH-020 through CAH-023 compatibility only when `repository_context` is empty.
   Supplying both representations fails construction, so no source is duplicated or silently given
@@ -246,7 +247,7 @@ proxy, not a provider token count or a claim about an adapter's exact wire bytes
 | 2, 10 | Table tests cover valid text-only, `continuation? -> call -> result`, `continuation? -> assistant`, and multiple separated continuation/call/result groups in one history; reject start/end, orphan, duplicate, unresolved, reordered, and wrongly followed continuations; and prove 16/17-item plus 65,535/65,536/65,537-byte boundaries, NUL/lone-surrogate rejection, multibyte counting, safe `repr`, and exact per-item single-charge request projections at 524,287/524,288/524,289 bytes. |
 | 5 | Strict-fake tests accept one exact tool request and reject changed order, definition, continuation payload, call, and result fields with only a structural mismatch path. |
 | 6, 9 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. Argument-gate tests use a native model with a default, prove an omitted defaulted key and an extra key fail before a spy `model_validate` call, prove the exact key set reaches native validation unchanged, and prove direct native construction still applies the default. |
-| 7, 11 | Context-projection tests assert exact order/source/`applies_to`/path-local precedence/content, report and local-target-scope omission, inherited 16-source/24-item/96-KiB bounds, and exact 512-KiB charging. Two-request fake scripts prove the first snapshot is unchanged while the second contains CAH-030's enriched instruction block; sibling serialization is not treated as precedence. |
+| 7, 11 | Context-projection tests assert exact order/source/candidate-owner `applies_to`/path-local precedence/content, including source and applicability that differ, report and local-target-scope omission, inherited 16-binding/24-item/96-KiB bounds, and exact 512-KiB charging. Two-request fake scripts prove the first snapshot is unchanged while the second contains CAH-030's enriched instruction block; sibling serialization is not treated as precedence. |
 | 7 | Compatibility tests preserve legacy instruction-only requests and reject mixed legacy/new context. |
 | 12 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
 

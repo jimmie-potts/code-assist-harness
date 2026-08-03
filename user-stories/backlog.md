@@ -52,7 +52,7 @@ These ratios count checkpoints, not elapsed time, effort, or remaining complexit
 | MVP capability progress | 2 of 4 milestones through the M3 controlled-coding outcome complete (50%) | This is a capability-checkpoint count, not a release forecast. |
 | Outcome-level planning | 6 of 6 milestones and 10 of 10 epics have defined outcomes | The product direction is mapped at a useful high level. |
 | Story-level planning | 29 implementation-ready stories: 15 Done and 14 Planned | 52% of the currently refined inventory is Done; this is not a product-completion percentage. |
-| Ready-story runway | The complete 14-story M2 sequence | CAH-024 is the next dependency-ready unit; CAH-025 through CAH-037 are refined behind explicit dependencies. |
+| Ready-story runway | The complete 14-story M2 sequence | CAH-024 is next; CAH-026 then supplies shared hard-deny policy before CAH-025, and the remaining M2 stories follow explicit dependencies. |
 
 The M0/M1 work in E0 through E2 is decomposed and complete. The complete M2 vertical slice is now
 refined across E2, E3, the read-only kernel of E4, and one E8 evaluation story. M3 through M5 remain
@@ -81,7 +81,9 @@ cleanup supervision, and transcript-v3 loop evidence around that turn. CAH-023 n
 explicitly configured, text-only OpenAI Responses adapter behind that bounded provider port while
 keeping the mock as the default. M1 is complete. CAH-024 is the next dependency-ready E3 story: it
 plans an immutable Python workspace boundary while leaving repository discovery and reads to the
-now-refined CAH-025 through CAH-030 units. CAH-031 through CAH-037 complete the planned M2 registry,
+now-refined CAH-026, CAH-025, then CAH-027 through CAH-030 units. CAH-026 intentionally precedes
+CAH-025 so instruction discovery reuses pure lexical/hard-deny admission without importing
+ordinary-read limits, errors, or `.gitignore` behavior. CAH-031 through CAH-037 complete the planned M2 registry,
 target-scoped instruction propagation, LLM/tool exchange, atomic provider-response admission,
 explicit agent loop, OpenAI mapping, and evaluation sequence.
 
@@ -151,7 +153,7 @@ workspace.
 - Evaluate known-file retrieval using fixture workspaces.
 
 CAH-024 through CAH-030 are the implementation-ready E3 sequence. They separate the canonical
-workspace boundary, scoped repository instructions, common read policy, listing and metadata,
+workspace boundary, common hard-deny/read policy, scoped repository instructions, listing and metadata,
 bounded text reads, literal search, and attributable context selection. CAH-024 is first and does
 not discover instructions, read file content, register model tools, or claim protection against
 filesystem changes after validation. CAH-037 later proves these pieces through the composed M2

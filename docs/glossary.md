@@ -71,9 +71,10 @@ shell string in the MVP.
 
 A bounded piece of information selected for a provider request. It includes content, source
 provenance such as a path and line range, an inclusion reason, and a contribution to the context
-budget. An instruction item also names its canonical `applies_to` directory. Later successful tool
-targets may add unchanged, previously unseen instruction items atomically; sibling scopes do not
-imply precedence over one another.
+budget. An instruction item also names its canonical candidate-owner `applies_to` directory, which
+may differ from a symlink-resolved canonical `source`. The same source under different owners is two
+separately charged bindings. Later successful tool targets may add unchanged, previously unseen
+instruction items atomically; sibling scopes do not imply precedence over one another.
 
 ## Correlation ID
 

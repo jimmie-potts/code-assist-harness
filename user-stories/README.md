@@ -51,7 +51,7 @@ tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop
 v1/v2/v3 replay. CAH-023 adds the strict OpenAI Responses adapter plus explicit cross-language
 provider/model configuration while preserving the mock default. M0 and M1 are complete. CAH-024
 through CAH-037 are the 14 implementation-ready M2 units and all remain **Planned**. CAH-024 is the
-next dependency checkpoint; the sequence then adds scoped instructions, read policy and handlers,
+next dependency checkpoint; the sequence then adds shared read policy, scoped instructions and handlers,
 attributable context, a typed registry, provider-neutral tool exchange, atomic response admission,
 target-scoped instruction propagation through one explicit round trip, the bounded agent loop,
 strict OpenAI tool mapping, and deterministic vertical-slice evaluation.
@@ -76,8 +76,8 @@ strict OpenAI tool mapping, and deterministic vertical-slice evaluation.
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Done | CAH-021 |
 | 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Done | CAH-022 |
 | 16 | [CAH-024: Establish the workspace boundary](cah-024-establish-workspace-boundary.md) | [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md) | M2 | Planned | CAH-023 |
-| 17 | [CAH-025: Discover scoped repository instructions](cah-025-discover-repository-instructions.md) | [Scoped repository instructions](../docs/lessons/cah-025-repository-instructions.md) | M2 | Planned | CAH-024 |
-| 18 | [CAH-026: Define repository read contracts and policy](cah-026-define-repository-read-contracts.md) | [Repository read policy](../docs/lessons/cah-026-repository-read-policy.md) | M2 | Planned | CAH-024 |
+| 17 | [CAH-026: Define repository read contracts and policy](cah-026-define-repository-read-contracts.md) | [Repository read policy](../docs/lessons/cah-026-repository-read-policy.md) | M2 | Planned | CAH-024 |
+| 18 | [CAH-025: Discover scoped repository instructions](cah-025-discover-repository-instructions.md) | [Scoped repository instructions](../docs/lessons/cah-025-repository-instructions.md) | M2 | Planned | CAH-024, CAH-026 |
 | 19 | [CAH-027: List files and inspect path metadata](cah-027-list-files-and-stat-path.md) | [Repository listing and metadata](../docs/lessons/cah-027-list-files-and-stat-path.md) | M2 | Planned | CAH-026 |
 | 20 | [CAH-028: Read one bounded text file](cah-028-read-bounded-text-file.md) | [Bounded repository reads](../docs/lessons/cah-028-bounded-text-file.md) | M2 | Planned | CAH-026 |
 | 21 | [CAH-029: Search repository text literally](cah-029-search-repository-text.md) | [Literal repository search](../docs/lessons/cah-029-literal-text-search.md) | M2 | Planned | CAH-027, CAH-028 |

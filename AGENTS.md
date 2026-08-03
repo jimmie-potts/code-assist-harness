@@ -98,7 +98,18 @@ to Python protocol stdout.
 
 Use one explicit `asyncio` event loop in the Python runtime. Preserve ordered event writes, model
 active work as cancellable tasks, and check cancellation and limits before starting another costly
-operation. Move blocking work to a worker thread only when it cannot remain small and bounded.
+operation. Move blocking work to a worker thread only when it cannot remain small and bounded. At
+M2 synchronous-stage boundaries, use one `cooperate_then_guard` seam: unconditionally
+`await asyncio.sleep(0)` outside every lock, run any injected deterministic test observer or gate,
+then apply the existing cancellation/deadline guard with its established precedence. Use that seam
+before dispatch, after dispatch, after instruction discovery, after context merge, and before the
+next provider start. Keep results, context, history, and the bounded request as local candidates
+until the final pre-start checkpoint and model admission pass; cancellation must not leave partial
+tool-result or context state.
+Test the unconditional yield separately from awaited checkpoint gates: with no observer/gate
+installed, queue cancellation on the same loop and assert at synchronous guard entry that it already
+latched. An awaited `asyncio.Event` hook can pause a stage but is not evidence that the production
+yield still exists. Use injected clocks, never elapsed sleeps, for deadline/cancellation ties.
 
 Treat a tool-aware provider response as one atomic admission transaction. Buffer and validate its
 complete closed grammar before publishing assistant text or dispatching a requested tool; an

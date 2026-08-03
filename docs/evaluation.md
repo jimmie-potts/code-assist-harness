@@ -268,10 +268,19 @@ silently narrow the loop. Optional live output remains observational and require
 OpenAI selection and repository-content egress warning as the application path.
 
 The deterministic fixture also proves context evolution: the exact first request contains only root
-instructions, a successful `read_file` target under `pkg/` causes `pkg/AGENTS.md` to appear with its
-scope in the next request, and a repeated alias-equivalent target adds nothing. Instruction-discovery
-or merge failures, changed instructions, and context/request overflow produce zero next provider
-starts; known bounded tool errors may continue against unchanged context.
+instructions, and a successful `read_file` target under `pkg/` causes the binding with
+`source="shared/rules.md"` and `applies_to="pkg"` to appear in the next request. An exact owner snapshot
+repeats idempotently. A separate injected case
+unions the instruction chains for the supplied root scope and every canonical-distinct focus path
+before focus content, then proves each literal query uses only the exact supplied-scope
+`SearchTextRequest` projection with depth four and 100 matches. An internal instruction link records
+its resolved source separately from candidate-owner applicability; a hard-denied target is never
+read. Named event gates before dispatch, after synchronous dispatch, after discovery, after merge,
+and before provider start prove zero native execution at the first gate and that later result,
+instruction, context, history, and request candidates remain uncommitted when cancellation wins.
+Instruction-discovery or merge failures, changed owner snapshots, and
+context/request overflow produce zero next provider starts; known bounded tool errors may continue
+against unchanged context.
 
 ### Future story — Generalize the scenario format and runner
 

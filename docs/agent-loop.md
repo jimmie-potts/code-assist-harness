@@ -460,8 +460,14 @@ accepts the complete first response. After a successful dispatch, it discovers t
 applicable instructions and atomically enriches context before replaying one canonical correlated
 result envelope and appending `continuation? -> call -> result` to the single ordered history.
 Synchronous native reads, instruction discovery, and context merge are bounded and non-preemptive;
-cancellation/deadline guards run after each stage and before the follow-up start, discarding any late
-result, bundle, or candidate package when another terminal wins.
+one shared scheduling seam runs before dispatch, after each synchronous stage, and before the
+follow-up start. It unconditionally yields once to the event loop outside locks, then applies the
+existing cancellation/deadline guard. Tool results, instruction bundles, merged context, history,
+and the next request stay local until the final guard passes, so another terminal commits none of
+those candidates. A production-mode regression installs no awaited checkpoint hook, queues
+cancellation on the same loop, and asserts at guard entry that the unconditional yield alone let it
+latch; Event gates separately pause named stages. This does not claim that an in-flight synchronous
+handler was reaped.
 
 ### CAH-035 — Run the bounded agent loop
 

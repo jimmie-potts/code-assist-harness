@@ -28,7 +28,8 @@ After this unit, you should be able to:
 - trace ownership across model, registry, native tool, and follow-up request;
 - explain why a successful requested path can add instructions while returned paths cannot;
 - distinguish a tool's semantic error from a provider transport status;
-- explain cancellation around bounded synchronous work;
+- explain why cancellation around bounded synchronous work requires an event-loop yield before its
+  state guard;
 - build immutable stateless call/result replay; and
 - aggregate usage without persisting partial turns.
 
@@ -40,11 +41,13 @@ the sequence inside iteration.
 
 ## Junior engineer foundation
 
-Synchronous Python code cannot be cancelled halfway through an instruction. The harness checks
-before and after bounded work, then discards a result if cancellation won while it ran.
+Synchronous Python code cannot be cancelled halfway through an instruction. A cancel command also
+cannot update session state while that code holds the event-loop thread. The harness therefore
+yields once before each state guard, then discards a candidate if cancellation won while bounded
+work ran.
 
 ```text
-check -> bounded sync tool -> check again -> admit or discard result
+yield -> guard -> bounded sync tool -> yield -> guard -> admit or discard candidate
 ```
 
 A common misconception is that returning an error result means the provider request failed. Tool
@@ -73,14 +76,15 @@ Ink TUI                Python harness                              Provider
                        | enriched context + [opaque? -> call -> result]
                  CAH-034 two-turn owner
                        |
- lookup -> decode -> key gate -> Pydantic -> dispatch/render -> check
-                       |                          |                |
-                 CAH-031 registry          native read tool       v
-                                           CAH-025 discover -> check
+ lookup -> decode -> key gate -> Pydantic -> yield/guard -> dispatch -> yield/guard
+                       |                                         |
+                 CAH-031 registry                         local candidate
+                                                               v
+                         CAH-025 discover -> yield/guard -> CAH-030 merge -> yield/guard
                                                                |
-                                           CAH-030 merge candidate -> check
+                                      build local history/context/request candidate
                                                                |
-                                           commit history/context -> pre-start check
+                                              yield/guard -> model admission -> commit/start
 
 Evidence: existing transcript-v3 session usage aggregate only; no per-call/content record
 ```
@@ -94,16 +98,37 @@ session. No third turn exists in this teaching slice.
 1. Build the exact four-tool catalog before provider work.
 2. Admit the first response; charge its one call before lookup/decoding.
 3. Validate and run one bounded synchronous native tool.
-4. Render exact compact success/error JSON and run the post-dispatch cancellation/deadline check.
+4. Render exact compact success/error JSON and run the cooperative post-dispatch checkpoint: yield
+   to the event loop, then apply the cancellation/deadline guard.
 5. On success, take CAH-031's validated request `path`, discover its instruction chain through
    CAH-025, check cancellation/deadline, atomically merge it through CAH-030, and check again. On a
    known tool error, keep the initial context.
-6. Only after those guards, commit the selected context plus optional opaque state, call, and result
-   to the one history tuple in that exact order; run the pre-start guard and replay turn two with
-   unchanged definitions.
+6. Build the selected context, optional opaque state, call, result, history, and bounded follow-up
+   request as local candidates. Yield and guard at `before_provider_start`, admit the model start,
+   then commit and replay turn two with unchanged definitions.
 7. Admit final text, publish its chunks, then persist one checked usage aggregate.
 
 ## Implementation code samples
+
+### Planned pseudocode: reusable cooperative checkpoint
+
+```python
+async def cooperate_then_guard(checkpoint):
+    await asyncio.sleep(0)  # no harness lock is held
+    if checkpoint_observer is not None:  # deterministic tests only
+        await checkpoint_observer(checkpoint)
+    check_cancel_and_deadline()  # preserve the established winner precedence
+```
+
+CAH-034 owns this one seam; CAH-035 calls it rather than wrapping or copying it. An
+`asyncio.Event`-backed observer can pause a named checkpoint while a test admits a cancel command,
+without relying on elapsed time. Production installs no observer.
+
+The critical yield regression does **not** install that awaited observer, because the observer could
+hide a missing production yield. It queues a same-loop cancellation task, calls the production-mode
+seam with `checkpoint_observer=None`, and lets a synchronous guard spy assert that cancellation ran
+before guard entry. Removing `await asyncio.sleep(0)` makes that deterministic test fail. Injected
+clocks separately lock the existing winner when cancellation and deadline coincide.
 
 ### Planned pseudocode: ordered dispatch
 
@@ -112,32 +137,42 @@ descriptor = registry.lookup(call.name)
 decoded = decode_json_object(call.arguments_json)
 require_provider_tool_argument_keys(definition, decoded)
 arguments = descriptor.input_model.model_validate(decoded)
-check_cancel_and_deadline()
-dispatch = registry.dispatch(descriptor, arguments)
-check_cancel_and_deadline()
-if dispatch.succeeded:
-    discovered = instructions.discover(dispatch.target_scope)
-    check_cancel_and_deadline()
-    candidate_context = context_builder.merge_atomically(context, discovered)
-    check_cancel_and_deadline()
-    context = candidate_context
-result = ProviderToolResult(output_json=dispatch.output_json)
+await cooperate_then_guard("before_dispatch")
+dispatch_candidate = registry.dispatch(descriptor, arguments)
+await cooperate_then_guard("after_dispatch")
+if dispatch_candidate.succeeded:
+    discovered_candidate = instructions.discover(dispatch_candidate.target_scope)
+    await cooperate_then_guard("after_discovery")
+    context_candidate = context_builder.merge_atomically(context, discovered_candidate)
+    await cooperate_then_guard("after_merge")
+else:
+    context_candidate = context
+result_candidate = ProviderToolResult(output_json=dispatch_candidate.output_json)
 ```
 
 The CAH-032 key gate rejects omitted model-facing fields—even when the unchanged native model has a
 default—and additional fields before Pydantic runs. Every failed line prevents the following line.
-A late native result is discarded after the second check. Discovery and merge each have their own
-post-return guard because they are also bounded synchronous operations. The candidate context and
-pending result become history only after every guard, so cancellation yields no observable change.
+A late native result is discarded after the second checkpoint. Discovery and merge each have their
+own post-return checkpoint because they are also bounded synchronous operations. Every checkpoint
+unconditionally `await asyncio.sleep(0)` outside locks, optionally invokes an injected deterministic
+test gate, then applies the existing guard. That order lets a queued cancel command update state
+before it is read. The candidate context and pending result remain local, so cancellation yields no
+observable change.
 
 ### Planned pseudocode: one follow-up
 
 ```python
-turn_items = (opaque, call, result) if opaque is not None else (call, result)
-history = (*original_history, *turn_items)
-follow_up = request.with_context(context).with_history(history)
-check_cancel_and_deadline()
-final_turn = await collect_one_turn(provider.start(follow_up))
+turn_items = (
+    (opaque, call, result_candidate)
+    if opaque is not None
+    else (call, result_candidate)
+)
+history_candidate = (*original_history, *turn_items)
+request_candidate = build_bounded_request(context_candidate, history_candidate)
+await cooperate_then_guard("before_provider_start")
+ledger.admit_model_start()
+context, history = context_candidate, history_candidate
+final_turn = await collect_one_turn(provider.start(request_candidate))
 require_final_text(final_turn)
 ```
 
@@ -150,10 +185,11 @@ separate request field.
 | --- | --- | --- |
 | malformed/non-object JSON | exact `invalid_read_tool_input` envelope | zero native calls |
 | omitted defaulted model key | exact `invalid_read_tool_input` envelope | zero Pydantic/dispatch calls |
+| production yield removed | queued cancellation is not latched | no-hook guard spy fails before dispatch |
 | unknown name | exact `unknown_read_tool` envelope | fixed message only |
 | missing file | exact repository error envelope | no OS/path leak |
-| cancellation during sync tool | late return discarded | no turn two start |
-| cancellation during discovery/merge | late bundle/package discarded | no result/context commit |
+| cancellation during sync tool | `after_dispatch` yields before guarding | no turn two start |
+| cancellation during discovery/merge | following checkpoint yields before guarding | no result/context commit |
 | instruction discovery/merge fails | safe session failure | no result/context publication or turn two |
 | broad list/search returns nested paths | no inferred scope | only the requested path may enrich |
 | turn two calls again | `tool_call_limit_exceeded` | zero third starts |
@@ -196,10 +232,13 @@ late-result handling, replay, and aggregate evidence pass adversarial tests.
 
 1. Trace malformed arguments and name every stage that must not run.
 2. Explain why a tool error still uses a completed function-output transport item.
-3. Design a fake synchronous tool whose result must be discarded after cancellation.
-4. Explain why `list_files` returning `pkg/file.py` cannot load `pkg/AGENTS.md` until a successful
+3. Design the no-observer queued-cancel test that fails if production's unconditional yield is
+   removed; explain why an awaited Event gate alone cannot prove this.
+4. Design a fake synchronous tool and named `asyncio.Event` gate that proves its result is discarded
+   after a queued cancel command without using elapsed sleeps.
+5. Explain why `list_files` returning `pkg/file.py` cannot load `pkg/AGENTS.md` until a successful
    path-targeting call requests that path.
-5. Teach back why usage is persisted only after accepted final text.
+6. Teach back why usage is persisted only after accepted final text.
 
 ## Key takeaways
 
@@ -207,13 +246,16 @@ late-result handling, replay, and aggregate evidence pass adversarial tests.
 - Successful requested paths refresh applicable instructions atomically before continuation;
   model-returned paths have no such authority.
 - Safe JSON errors let the model explain bounded failures without exposing internals.
-- Cancellation around synchronous tools is cooperative at explicit before/after boundaries.
+- Cancellation around synchronous tools is cooperative: each named boundary must yield before it
+  reads cancellation/deadline state.
 
 ## Glossary
 
 - **Semantic status:** tool success/error meaning inside the result payload.
 - **Transport status:** provider lifecycle state for delivering that payload.
 - **Non-preemptive:** cannot be interrupted mid-execution by task cancellation.
+- **Cooperative checkpoint:** an unconditional event-loop yield, optional deterministic test hook,
+  then the established cancellation/deadline guard.
 - **Replay:** reconstructed ordered input sent in a stateless follow-up.
 - **Context snapshot:** one immutable, fully validated context package used by a provider request.
 
