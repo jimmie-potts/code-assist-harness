@@ -330,6 +330,67 @@ def test_internal_markdown_links_resolve() -> None:
     assert broken == {}
 
 
+def test_presentations_are_frozen_and_markdown_is_authoritative() -> None:
+    agents = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    architecture = (REPOSITORY_ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    lesson_readme = (REPOSITORY_ROOT / "docs" / "lessons" / "README.md").read_text(encoding="utf-8")
+    template = (REPOSITORY_ROOT / "docs" / "lessons" / "lesson-template.md").read_text(
+        encoding="utf-8"
+    )
+    cah_024_story = (
+        REPOSITORY_ROOT / "user-stories" / "cah-024-establish-workspace-boundary.md"
+    ).read_text(encoding="utf-8")
+    cah_024_lesson = (
+        REPOSITORY_ROOT / "docs" / "lessons" / "cah-024-workspace-boundary.md"
+    ).read_text(encoding="utf-8")
+    cah_024_note = (
+        REPOSITORY_ROOT
+        / "user-stories"
+        / "notes"
+        / "2026-08-02-cah-024-workspace-boundary-planning.md"
+    ).read_text(encoding="utf-8")
+    agents_compact = " ".join(agents.split())
+    architecture_compact = " ".join(architecture.split())
+    lesson_readme_compact = " ".join(lesson_readme.split())
+    cah_024_story_compact = " ".join(cah_024_story.split())
+    cah_024_lesson_compact = " ".join(cah_024_lesson.split())
+    cah_024_note_compact = " ".join(cah_024_note.split())
+
+    assert "Markdown lessons are authoritative" in agents_compact
+    assert "All committed presentation files are frozen historical artifacts" in agents_compact
+    assert "Do not add or revise presentation files" in agents_compact
+    assert "Every new written lesson includes a compact architecture" in agents_compact
+    assert (
+        "All committed presentation files are frozen historical artifacts" in architecture_compact
+    )
+    assert "Starting with CAH-025" in architecture_compact
+    assert "No presentation is added or revised" in architecture_compact
+    assert (
+        "All committed presentation files are frozen historical artifacts" in lesson_readme_compact
+    )
+    assert "Starting with CAH-025" in lesson_readme_compact
+    assert "Do not add or revise presentations" in lesson_readme_compact
+    assert "do not add or revise presentation files while the freeze is active" in template
+    assert "The frozen visual companion remains unchanged" in cah_024_story_compact
+    assert "is not implementation or completion evidence" in cah_024_story_compact
+    assert "Frozen-deck warning" in cah_024_lesson_compact
+    assert "one `WorkspaceBoundaryError`" in cah_024_lesson_compact
+    assert "`ResolvedWorkspacePath`" in cah_024_lesson_compact
+    assert "five stable error codes" in cah_024_lesson_compact
+    assert "The frozen deck is not planned evidence" in cah_024_note_compact
+
+
+def test_review_follow_up_requires_thread_resolution() -> None:
+    agents = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    agents_compact = " ".join(agents.split())
+
+    assert (
+        "Whenever a review comment is addressed, mark its inline review thread as resolved."
+        in agents_compact
+    )
+    assert "verify that no unresolved actionable review thread remains" in agents_compact
+
+
 def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:
     violations: list[str] = []
     for path in _repository_files(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):

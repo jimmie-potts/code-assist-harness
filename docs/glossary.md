@@ -335,6 +335,13 @@ The single canonical directory tree the session may inspect or modify. It defaul
 directory and can be set with `--workspace PATH`. Path validation, including symlink resolution,
 must prevent escape from this boundary.
 
+## Workspace boundary
+
+The planned CAH-024 immutable Python value that owns one canonical workspace root and resolves
+model-facing relative targets into contained paths with workspace-relative labels. It describes a
+validated filesystem snapshot; later read, edit, or command code must recheck containment when it
+performs access because validation alone does not prevent filesystem replacement races.
+
 ## Workspace configuration
 
 Repository-owned configuration that may narrow user or built-in command policy but may not silently

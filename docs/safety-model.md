@@ -2,8 +2,9 @@
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
 > provider-session path, and CAH-023 makes that path available only through explicit, validated OpenAI
-> selection. The launch still defaults to `MockSession`; this is not a sandbox or a claim that
-> untrusted code can be executed safely.
+> selection. CAH-024 plans a Python workspace path boundary but has not implemented it. The launch
+> still defaults to `MockSession`; this is not a sandbox or a claim that untrusted code can be
+> executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
 repository content are untrusted inputs. Safety therefore comes from defense in depth: bounded
@@ -59,14 +60,17 @@ safe.
 ## Workspace and path safety
 
 The runtime will receive its workspace explicitly; the launch directory is only the default
-selected by the CLI. All model-facing paths are workspace-relative. Before access, the harness
-resolves and normalizes the requested path, checks the closest existing ancestor, and rejects
-traversal or symlink resolution outside the workspace.
+selected by the CLI. All model-facing paths are workspace-relative. CAH-024 will turn that existing
+canonical root into an immutable Python boundary, resolve one relative target against a filesystem
+snapshot, and reject absolute paths, traversal, or symlink resolution outside the workspace. It will
+report an accepted target with a workspace-relative label and will not itself read the target.
 
-Path checks must be repeated at execution time because files and symlinks can change after a
-proposal. Edit operations also use content-hash or exact-content preconditions. A stale proposal
-returns a conflict and never overwrites newer content. Tests must cover `..`, absolute paths,
-symlinked files and directories, missing descendants under symlinks, and replacement races.
+That planned snapshot check is necessary but not execution-time authorization. Path checks must be
+repeated when a later tool accesses a target because files and symlinks can change after validation
+or a proposal. Edit operations also use content-hash or exact-content preconditions. A stale
+proposal returns a conflict and never overwrites newer content. Later execution tests must cover
+missing descendants under symlinks and replacement races in addition to the CAH-024 containment
+matrix.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -216,7 +220,15 @@ into secure execution of arbitrary untrusted code.
 > As a user, I want each decision tied to the command or edit I reviewed so that stale approvals
 > cannot authorize changed work.
 
-### Future story — Protect the workspace boundary
+### Planned CAH-024 — Establish snapshot workspace containment
+
+> As a user, I want every repository target interpreted relative to one canonical workspace so that
+> a context operation cannot begin with an outside-workspace path.
+
+CAH-024 introduces the immutable Python boundary and deterministic containment tests. It does not
+perform filesystem access or eliminate time-of-check-to-time-of-use races.
+
+### Future story — Recheck workspace targets at execution
 
 > As a user, I want traversal, symlinks, and stale edit targets checked at execution time so that
 > tools cannot escape or overwrite newer content.

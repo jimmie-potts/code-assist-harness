@@ -24,8 +24,9 @@ The TypeScript application lives in `tui/`, with source in `tui/src/` and tests 
 language's generated output the unreviewed source of truth during the first implementation.
 Evaluation scenarios belong in `evals/`. Architecture guidance belongs in `docs/`, accepted
 decisions in `docs/adr/`, unit learning companions in `docs/lessons/`, and dependency-ordered
-delivery work in `user-stories/`. Visual lessons for CAH-007 and all newly completed units going
-forward belong in `docs/lessons/assets/` as linked PowerPoint files.
+delivery work in `user-stories/`. All committed presentation files are frozen historical artifacts;
+the existing lesson decks remain under `docs/lessons/assets/`. Markdown lessons are authoritative.
+Do not add or revise presentation files unless the user explicitly reverses this freeze.
 
 Do not add empty planned directories. Introduce a path with the story that first uses it. Project
 metadata, Python dependencies, and tool settings are defined in `pyproject.toml`; commit `uv.lock`
@@ -126,13 +127,10 @@ Every implementation-ready story, including documentation-only work, must keep i
 consistent with the story status and delivered evidence. The additional behavioral checks below
 apply when the story changes executable behavior.
 
-CAH-007 and every unit completed going forward include a linked visual lesson deck under
-`docs/lessons/assets/`, named for the story ID and topic. This prospective rule does not retroactively
-change the evidence contract of units that were already Done. Render the PowerPoint slide by slide,
-inspect every rendered image, and run the presentation overflow test before treating the deck as
-evidence. Use visual storytelling, small moments of tasteful fun, and memorable flair where they
-improve learning, but never let a joke, metaphor, or decorative choice weaken technical accuracy,
-status honesty, legibility, or caveats.
+All committed presentation files under `docs/lessons/assets/` are frozen historical artifacts.
+They may diverge from later design corrections and are not authoritative evidence. Starting with
+CAH-025, units include only the Markdown lesson and its compact text diagram. Do not add, revise, or
+retrofit presentation files unless the user explicitly reverses the presentation freeze.
 
 A behavioral story is complete only when:
 
@@ -166,14 +164,14 @@ link them to their source files, and explain each sample line-by-line or in smal
 junior engineer can connect syntax to behavior. Planned lessons may use clearly labeled pseudocode,
 but must not present it as shipped code.
 
-CAH-007 and lessons completed going forward link a visual PPTX companion and record the
-rendered-slide and overflow validation evidence in the story note. The deck should introduce the
-same junior-level foundations before the deeper architecture.
+Existing linked PPTX companions retain their historical validation evidence, but all committed
+presentations are frozen and may differ from later design corrections. CAH-025 and later require
+only the Markdown lesson. The written lesson is the authoritative learning artifact.
 
 Starting with CAH-022, keep new lessons concise and centered on system design, agentic-loop design,
-and harness ownership. Every new written lesson and visual companion includes a compact architecture
-diagram that locates the unit in the relevant TUI, Python harness, provider, tool, and evidence
-boundaries. This requirement is prospective; do not retrofit older completed lessons.
+and harness ownership. Every new written lesson includes a compact architecture diagram that
+locates the unit in the relevant TUI, Python harness, provider, tool, and evidence boundaries. This
+requirement is prospective; do not retrofit older completed lessons or presentations.
 
 Production-tool examples are illustrative rather than approved dependencies. Include three to five
 representative tools with official references, describe the capability being compared, and discuss
@@ -201,6 +199,12 @@ architecture`. Keep each commit to one logical change and, where practical, one 
 names should be descriptive, such as `agent/add-tool-registry`. Pull requests explain what changed,
 why it changed, and developer impact; list validation commands and link relevant stories or issues.
 Include screenshots only for visible UI changes.
+
+Whenever a review comment is addressed, mark its inline review thread as resolved. Reply with the
+fix or decision evidence when that context will help the reviewer, and resolve the thread only after
+the change or documented disposition has been validated. Leave a thread open while work, a blocker,
+or an unresolved design conflict remains. Before review handoff, fetch thread-aware state and verify
+that no unresolved actionable review thread remains.
 
 When a unit reaches **Done** and its required validation passes, complete the publish workflow in the
 same unit: create or switch to a descriptive branch, commit only the intended changes, push the
