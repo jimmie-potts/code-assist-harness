@@ -24,6 +24,42 @@ library.
 Evaluation starts with deterministic M0 scenarios. M4 expands evaluation rather than introducing
 it for the first time.
 
+## Delivery timeline
+
+**Last updated:** 2026-08-03 after PR #24 completed M1.
+
+This is the authoritative delivery timeline. It tracks dependency and outcome checkpoints, not a
+calendar forecast. Add target dates only when the remaining work in a milestone has been decomposed
+enough to estimate; until then, `TBD` is more honest than extrapolating from differently sized
+stories.
+
+| Order | Milestone | Status | Actual or target | Implementation-ready coverage | Next checkpoint |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | M0 - Walking skeleton | Done | Completed 2026-07-30 | 9 of 9 stories Done | Complete |
+| 2 | M1 - Conversational core | Done | Completed 2026-08-03 | 6 of 6 stories Done | Complete |
+| 3 | M2 - Read-only coding assistant | Current / Planned | TBD after decomposition | [CAH-024](cah-024-establish-workspace-boundary.md) Planned; later M2 units are not yet refined | Implement CAH-024, then refine instruction discovery |
+| 4 | M3 - Controlled coding agent | Not decomposed | TBD | No implementation-ready M3 story | Complete M2, then refine tool, approval, edit, and validation slices |
+| 5 | M4 - Reliability layer | Not decomposed | TBD | No implementation-ready M4 story; deterministic evaluation and transcript foundations already exist | Complete the controlled workflow, then refine reliability expansion |
+| 6 | M5 - Reusable harness | Not decomposed | TBD | No implementation-ready M5 story | Complete the reliability exit, then refine packaging and isolation |
+
+### Progress and planning coverage
+
+These ratios count checkpoints, not elapsed time, effort, or remaining complexity.
+
+| Measure | Current state | Interpretation |
+| --- | --- | --- |
+| Full roadmap progress | 2 of 6 milestone outcomes complete (33%) | The project is entering M2, milestone 3 of 6. |
+| MVP capability progress | 2 of 4 milestones through the M3 controlled-coding outcome complete (50%) | This is a capability-checkpoint count, not a release forecast. |
+| Outcome-level planning | 6 of 6 milestones and 10 of 10 epics have defined outcomes | The product direction is mapped at a useful high level. |
+| Story-level planning | 16 implementation-ready stories: 15 Done and CAH-024 Planned | 94% of the currently refined inventory is Done, but the eventual story total is unknown. |
+| Ready-story runway | One story | No dependency-ordered story is implementation-ready after CAH-024. |
+
+E0 through E2 are decomposed and complete. E3 is partially refined through CAH-024. E4 through E9
+remain outcome-level, so there is no defensible product-completion percentage or calendar ETA beyond
+the milestone checkpoint counts above. Update this section when a story changes status, a milestone
+meets its exit outcome, or the next unit is refined; move completion dates from `TBD` only when there
+is corresponding delivery evidence.
+
 CAH-005 completes the first task-to-response M0 slice: Ink sends a validated task through the real
 Node-to-`uv`-to-Python boundary, Python emits a fixed three-delta response, and the TUI renders each
 validated event while preserving correlation and session-local order. CAH-006 makes that same path

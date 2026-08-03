@@ -568,11 +568,15 @@ artifacts. No presentation is added or revised unless the user explicitly revers
 
 The architecture is delivered as vertical slices rather than as disconnected subsystems:
 
+The [product backlog delivery timeline](../user-stories/backlog.md#delivery-timeline) is the
+authoritative source for current status, dates, story coverage, and the next dependency checkpoint.
+The table below records the stable architectural sequence only.
+
 | Milestone | Slice | Observable result |
 | --- | --- | --- |
 | M0 | Mock runtime through the real Node–Python boundary | Tasks stream, cancel, and terminate authoritatively across the protocol. |
 | M1 | Explicit loop with fake and OpenAI providers | One bounded model conversation can complete or cancel. |
-| M2 | Repository context and native read tools | CAH-024 is planned as the first boundary unit; the completed milestone lets the agent inspect, explain, and form grounded plans. |
+| M2 | Repository context and native read tools | The completed milestone lets the agent inspect, explain, and form grounded plans. |
 | M3 | Approval, edit, subprocess, and diff workflow | Approved changes and validation are controlled and auditable. |
 | M4 | Evaluation, replay, and failure hardening | Behavioral regressions are measurable and reproducible. |
 | M5 | Packaging and executor/provider extension points | The core can support other interfaces and isolation models. |
