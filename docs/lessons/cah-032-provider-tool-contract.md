@@ -1,0 +1,230 @@
+# CAH-032 lesson: Define the provider-neutral tool contract
+
+- **Unit:** CAH-032
+- **Milestone:** M2 - Read-only coding assistant
+- **Lesson status:** Planned
+- **Implementation status:** Planned; tool-aware provider requests are not implemented
+- **Story:** [CAH-032](../../user-stories/cah-032-define-provider-tool-contract.md)
+- **Learning emphasis:** Core learning unit
+- **Review focus:** Provider-neutral LLM context, definitions, calls, and results plus the strict
+  schema intersection that adapters can map without owning the loop
+- **Visual companion:** None; the Markdown diagram is authoritative
+- **Related architecture:** [Architecture](../architecture.md),
+  [Agent loop](../agent-loop.md), and [Tool system](../tool-system.md)
+
+> This lesson describes an accepted contract plan. All code is labeled pseudocode and is not
+> implementation evidence.
+
+## Quick summary
+
+CAH-032 defines immutable, provider-neutral context, canonical tool schemas, calls, and exact result
+envelopes and teaches the strict fake to compare them. The important design idea is an
+anti-corruption boundary: provider integrations translate to harness values rather than exporting
+their own types into the loop.
+
+## Learning objectives
+
+After this unit, you should be able to:
+
+- separate a tool definition, a requested call, and a returned result;
+- project selected context without sending its local inclusion report;
+- explain why arguments remain unparsed at the provider boundary;
+- validate the exact call-ID grammar and strict Unicode-scalar/UTF-8 boundaries;
+- distinguish CAH-031's canonical success envelope from the canonical error envelope;
+- validate ordered call/result history independently of an SDK; and
+- locate function calling and MCP on opposite sides of the same provider-neutral seam.
+
+## Why this unit matters
+
+The agent loop cannot safely reason over raw SDK events. A small domain contract lets the fake prove
+tool-shaped conversations before either dispatch or OpenAI mapping is allowed.
+
+## Junior engineer foundation
+
+A model tool exchange has three different values:
+
+```text
+definition: read_file accepts {path: string}
+call:       call_1 asks for read_file with raw JSON arguments
+result:     call_1 receives bounded text or a bounded error
+```
+
+The call ID pairs the result with the request. A common misconception is that JSON text is already a
+validated tool input. CAH-032 preserves argument bytes; CAH-034 will parse and validate them after
+CAH-033 admits the complete provider response. A
+second misconception is that any valid JSON Schema is portable. The reviewed M2 subset is flat and
+requires every property plus `additionalProperties: false`, matching strict function-tool rules.
+Python callers may still use native request defaults; the model-facing schema requires explicit
+values so an adapter never invents default behavior. The bridge that performs this conversion is a
+separate harness function—not a `ProviderToolDefinition.from_descriptor` method—so neither the
+registry nor provider-domain class imports and reshapes the other boundary.
+
+## Key concepts
+
+- **Provider-neutral value:** harness type containing no SDK object.
+- **Definition:** name, description, and strict object schema offered to a model.
+- **Call:** provider observation carrying an ID, registered name, and unparsed JSON.
+- **Result:** bounded success/error output paired to one call ID.
+- **Canonical envelope:** sorted-key compact UTF-8 JSON; success is exactly
+  `{"result":...}`, error exactly `{"error":{"code":...,"message":...}}`.
+- **History grammar:** rules preventing orphan, duplicate, or unresolved call/result items.
+- **Context projection:** the exact admitted CAH-030 items, without its local omission report.
+
+## Architecture and design
+
+```text
+Ink TUI                 Python harness domain                    Adapters
+task/events      context -> [CAH-032 neutral contract]   OpenAI function calling
+    |              context / definition / call / result <-> future provider adapter
+    |                           ^
+    |                           |
+    |                    strict fake provider
+    |                    exact request scripts
+    |                           |
+    +--------------- final text later                    Tool dispatch: absent
+                                                        Evidence: absent
+
+Future MCP: catalog snapshot + re-admission -> generalized registry port -> neutral envelopes
+            (not direct plug compatibility; transport/auth/timeouts/cancellation remain future)
+```
+
+Definitions use a closed schema table: the root has exactly `type`, `properties`, `required`, and
+`additionalProperties`; flat properties are only string, integer, or boolean with their reviewed
+type-specific constraints. Calls use
+`[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}` and preserve raw arguments. Every owned string must round-trip
+strict UTF-8 after JSON parsing; lone surrogates and literal NUL fail without normalization. Result
+status must match its sole top-level envelope key. Ordered history rejects orphan results and
+unresolved calls. New context preserves CAH-030 order/content while omitting its report.
+
+## Practical walkthrough
+
+1. Add immutable definition, call, and result values to the provider domain.
+2. Extend request history with legal user/assistant/call/result items.
+3. Project one CAH-030 package without its inclusion report.
+4. Call the separate pure bridge to filter Pydantic `title`/`default`, reject every other unsupported
+   keyword, require all fields, and canonicalize all definitions atomically.
+5. Make the strict fake compare context, definitions, and history exactly.
+6. Prove every byte/item bound and that mismatch messages reveal structure, never content.
+
+## Implementation code samples
+
+### Planned pseudocode: complete neutral history
+
+```python
+context = project_context(context_package)
+definitions = build_provider_tool_definitions(read_file_registry)
+definition = definitions[0]
+call = ProviderToolCall("call_1", "read_file", '{"path":"src/app.py"}')
+result = ProviderToolResult(
+    "call_1", status="success", output_json='{"result":{"text":"..."}}'
+)
+request = ProviderRequest(context=context, input=(user, call, result), tools=(definition,))
+```
+
+The bridge—not the provider value—converts a registry descriptor. The call preserves untrusted
+arguments. The result reuses CAH-031's exact canonical success envelope and is admitted only after
+the matching call.
+
+### Exact schema subset
+
+| Type | Allowed property keywords |
+| --- | --- |
+| string | `type`, `description`, `enum`, `pattern`, `minLength`, `maxLength` |
+| integer | `type`, `description`, `enum`, `minimum`, `maximum` |
+| boolean | `type`, `description`, `enum` |
+
+The root has no optional keywords. Property names are lower snake case, all properties are required,
+and `additionalProperties` is false. Canonicalization orders properties/required by UTF-8 label,
+then uses `ensure_ascii=False`, compact separators, sorted keys, and `allow_nan=False`. References,
+nested values, arrays, unions/combinators, formats, defaults, floats, and unknown keywords fail.
+
+### Planned pseudocode: orphan-result failure
+
+```python
+with raises(ValueError):
+    ProviderRequest(input=(user, result), tools=(definition,))
+```
+
+The constructor rejects impossible history before an adapter or model sees it.
+
+## Failure scenarios to study
+
+| Scenario | Owner | Safe result | Planned evidence |
+| --- | --- | --- | --- |
+| mutable/malformed schema | definition constructor | reject before request | schema-boundary tests |
+| non-strict or unsupported schema keyword | definition bridge | reject the catalog atomically | portable-subset table |
+| orphan or duplicate call ID | history grammar | reject request | table-driven grammar tests |
+| legacy and new context both supplied | request constructor | reject duplicate priority models | compatibility test |
+| request projection above 512 KiB | request constructor | reject without truncation | byte-bound test |
+| raw malformed arguments | later dispatcher, not CAH-032 | preserve bytes without execution | constructor test |
+| oversized result | result constructor | fixed bounded failure | byte-bound test |
+| status/envelope mismatch | result constructor | reject before history | exact success/error snapshots |
+| lone surrogate or invalid call ID | string/identifier admission | reject before fake/provider work | scalar and grammar boundary tests |
+| fake mismatch with secret-like content | strict fake | structural path only | leak-sentinel test |
+
+## Production expansion
+
+### Example enterprise scenario
+
+A multi-provider harness may translate the same internal definitions to OpenAI function tools and
+an on-prem provider. MCP requires a future generalized registry port, not direct compatibility: it
+must snapshot and re-admit catalogs, filter names/schemas, classify remote/network capability, map
+`structuredContent`, `outputSchema`, and `isError`, and own auth, timeouts, cancellation, and catalog
+revocation.
+
+### Typical production capabilities and tools
+
+- [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12) defines a portable schema
+  vocabulary, with compatibility and validator-version cost.
+- [Pydantic JSON Schema](https://docs.pydantic.dev/latest/concepts/json_schema/) can derive schemas
+  from Python models, but emitted schemas still need review and canonicalization.
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) is one
+  provider mapping, not the core contract.
+- [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture) offers a standard
+  client/server capability boundary with additional remote trust and operations.
+
+### Local design versus production design
+
+| Dimension | This repository | Production expansion |
+| --- | --- | --- |
+| Contract | small immutable Python values | versioned cross-service schemas |
+| Providers | strict fake first | multiple adapters and compatibility suites |
+| History | sequential call/result pairs | durable resumable conversations |
+| Security | bounded local values | schema governance and remote trust |
+| Cost | explicit, narrow seam | migration and interoperability ownership |
+
+### Trade-offs and graduation signals
+
+Canonical immutable values cost some mapping code but keep orchestration testable. Add broader schema
+features or MCP only when a real reviewed capability requires them and compatibility tests exist.
+
+## Practical exercises
+
+1. Explain why `arguments_json` must not be parsed inside a provider adapter.
+2. Add one history mutation that creates an orphan result and predict the failure.
+3. Teach back how function calling differs from tool execution.
+4. Draw the snapshot, re-admission, remote execution, and result-mapping stages a future MCP port
+   needs without owning the loop.
+5. Explain why the inclusion report stays local even though admitted context goes to the model.
+6. Explain why status plus `{"error":...}` is valid but status plus `{"result":...}` is not.
+
+## Key takeaways
+
+- The harness contract, not an SDK, defines tool meaning inside the loop.
+- Calls and results pair exactly; raw arguments are not validated inputs.
+- OpenAI maps this neutral seam directly; MCP needs a future generalized registry port with explicit
+  re-admission and remote-operation ownership.
+
+## Glossary
+
+- **Anti-corruption boundary:** translation layer that prevents external types from shaping core APIs.
+- **Canonical schema:** one stable immutable representation of a reviewed schema.
+- **Call ID:** bounded identifier correlating a call with its result.
+- **History grammar:** allowed ordering and pairing of model input items.
+
+## Further reading
+
+- [CAH-032 delivery contract](../../user-stories/cah-032-define-provider-tool-contract.md)
+- [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12)
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)
+- [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture)

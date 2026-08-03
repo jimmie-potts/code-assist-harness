@@ -100,6 +100,13 @@ Use one explicit `asyncio` event loop in the Python runtime. Preserve ordered ev
 active work as cancellable tasks, and check cancellation and limits before starting another costly
 operation. Move blocking work to a worker thread only when it cannot remain small and bounded.
 
+Treat a tool-aware provider response as one atomic admission transaction. Buffer and validate its
+complete closed grammar before publishing assistant text or dispatching a requested tool; an
+invalid, incomplete, mixed, multiple-call, or failed response must cause neither effect. Native M2
+read handlers are synchronous and bounded rather than preemptively cancellable: check cancellation
+and deadlines before and after execution, discard a late result when cancellation wins, and do not
+claim an in-flight synchronous handler was reaped.
+
 ## Tool and Safety Conventions
 
 Implement safe repository reads as native Python tools, not subprocess wrappers. Validate tool
@@ -175,6 +182,13 @@ and harness ownership. Every new written lesson includes a compact architecture 
 locates the unit in the relevant TUI, Python harness, provider, tool, and evidence boundaries. This
 requirement is prospective; do not retrofit older completed lessons or presentations.
 
+Every planned story identifies its learning emphasis. Give **core learning units** the strongest
+review prompts, exercises, and teach-back questions when they cover the explicit agent loop, context
+selection, provider-response handling, tool contracts and dispatch, future MCP extension and trust
+boundaries, safety ownership, or evaluation. Keep **supporting implementation units** concise when
+they mainly connect or implement an already-taught contract. Dependency order still wins; the label
+changes review emphasis, not delivery truth.
+
 Production-tool examples are illustrative rather than approved dependencies. Include three to five
 representative tools with official references, describe the capability being compared, and discuss
 operational cost as well as benefit. Keep lesson status honest: planned stories use `Planned`, work
@@ -188,6 +202,15 @@ Use the story identifiers and dependency order in `user-stories/`. A story state
 dependencies, scope, acceptance criteria, validation, documentation impact, and exclusions, and
 links to its lesson. Keep status accurate: documentation of a future capability is not evidence
 that the capability works.
+
+Use `user-stories/story-template.md` for new implementation-ready stories. Target roughly 600 or
+fewer changed production lines per story, counted as additions plus deletions under
+`src/code_assist_harness/` and `tui/src/`. Tests, documentation, fixtures, lockfiles, and generated
+artifacts do not count toward that reviewability target. Record the planned range and delivered
+production churn in the story. Split the unit before review when it gains a second responsibility or
+is likely to exceed the target; do not pad a smaller coherent unit to reach the number. Every story
+maps acceptance criteria to deterministic tests and carries an explicit story-specific definition of
+done in addition to the repository-wide checklist.
 
 Record durable implementation discoveries under `user-stories/notes/`. Capture decisions,
 unexpected constraints, failure causes, validation evidence, and follow-up work without turning the
@@ -220,6 +243,11 @@ Never commit API keys or `.env`. Copy `.env.example` locally and provide `OPENAI
 the environment only when an explicitly live-provider workflow requires it. Keep sample values
 blank or unmistakably fake. Do not log credentials, environment values, raw provider responses, or
 unbounded tool output.
+
+Explicit OpenAI-provider selection authorizes bounded, policy-admitted repository context and tool
+results to leave the local machine for that session. Warn users that path deny and ignore rules are
+not content-level secret scanning: an otherwise allowed source file may contain sensitive text. The
+mock path remains local and network-free.
 
 Store validated, redacted transcripts under the WSL XDG state directory with restrictive local
 permissions. Do not add harness state to target repositories. Support `--no-transcript` before the

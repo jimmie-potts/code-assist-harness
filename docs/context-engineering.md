@@ -1,7 +1,8 @@
 # Context Engineering
 
-> Status: proposed design. CAH-024 is the planned first implementation unit; repository discovery,
-> native reads, and context selection are not yet implemented.
+> Status: proposed design refined into CAH-024 through CAH-030, with CAH-037 proving the composed
+> read-only outcome. Repository discovery, native reads, and context selection are not implemented
+> yet.
 
 Context engineering is the process of selecting the smallest useful, attributable view of a
 workspace for a model turn. The MVP will not load the entire repository, create embeddings, or use
@@ -58,6 +59,12 @@ boundary around the already selected canonical root plus contained, workspace-re
 resolution. It will not read content or expose any of the tools above. Later read tools remain
 responsible for rechecking the target when they perform filesystem access.
 
+For an ordinary runtime task, the context request defaults to repository scope `.` with empty
+`focus_paths` and `search_queries`. Those empty values are explicit rather than model-inferred.
+Deterministic evaluation may inject non-empty values through a test-only composition seam so that
+selection behavior can be proven without changing the user command or granting the model context
+policy authority.
+
 ## Provenance and attribution
 
 A repository context item should record:
@@ -72,6 +79,12 @@ A repository context item should record:
 Workspace-relative paths avoid leaking unnecessary personal paths into provider requests and
 transcripts. Line ranges let the final answer point back to evidence and let evaluations determine
 whether the correct region was retrieved.
+
+Workspace-relative labeling does not make repository content non-sensitive. Explicitly selecting
+OpenAI authorizes bounded, policy-admitted context and read-tool results to leave the machine for
+that session, and the user-facing configuration must warn that deny/ignore policy does not inspect
+ordinary allowed files for embedded secrets. The deterministic mock path sends nothing over the
+network.
 
 ## Budgeting policy
 
@@ -132,25 +145,52 @@ relative-path, missing-target, symlink-containment, and workspace-relative repor
 meaningful tests. Instruction discovery, file reads, model tool schemas, and execution-time race
 protection remain later work.
 
-### Future story — Discover repository instructions
+### Planned CAH-025 — Discover scoped repository instructions
 
 > As a contributor, I want applicable workspace instructions included with their scope so that the
 > agent follows repository-specific rules while preserving harness safety.
 
-Complete this story when root and nested instruction precedence is documented and tested.
+The [implementation-ready story](../user-stories/cah-025-discover-repository-instructions.md)
+discovers only applicable root-to-nearest `AGENTS.md` files on one canonical ancestor chain. It
+locks exact source/byte limits, strict UTF-8, canonical labels, and non-leaking failures without
+provider, registry, or loop behavior.
 
-### Future story — Add bounded read tools
+### Planned CAH-026 — Define repository read contracts and policy
+
+> As a user, I want every native read to reuse one containment, ignore, deny, and limit policy so
+> that handlers cannot disagree about what repository content is available.
+
+The [implementation-ready story](../user-stories/cah-026-define-repository-read-contracts.md) owns
+nested Git-compatible ignore evaluation through PathSpec, a non-overridable credential/VCS denylist,
+shared text rules, and fixed safe failures. It performs no user-requested read operation itself.
+
+### Planned CAH-027 through CAH-029 — Add bounded native read operations
 
 > As an agent, I want safe native file listing, reading, searching, and metadata tools so that I can
 > investigate without using subprocesses.
 
-Complete this story when every tool enforces path and output bounds and exposes attributable
-results.
+The implementation-ready stories separate
+[listing and metadata](../user-stories/cah-027-list-files-and-stat-path.md),
+[one bounded text read](../user-stories/cah-028-read-bounded-text-file.md), and
+[literal text search](../user-stories/cah-029-search-repository-text.md). All reuse CAH-026, resolve
+again before access, return deterministic workspace-relative evidence, and stay independent of
+provider/tool registration.
 
-### Future story — Build and explain budgeted context
+### Planned CAH-030 — Build and explain budgeted context
 
 > As a learner, I want a report of selected and omitted context so that I can understand and improve
 > the model input.
 
-Complete this story when deterministic tests cover selection priority, omission, truncation, and
-budget exhaustion.
+The [implementation-ready story](../user-stories/cah-030-build-budgeted-context.md) selects required
+instructions and focus files before optional search excerpts under fixed item/UTF-8-byte budgets.
+Its inclusion report preserves admitted provenance and aggregate omission reasons without exposing
+denied labels.
+
+### Planned CAH-037 — Evaluate the composed read-only outcome
+
+> As a learner, I want deterministic explain and plan cases so that context usefulness is tested
+> through the actual loop rather than inferred from isolated handlers.
+
+The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) composes the
+strict fake, fixture workspaces, context, registry, and bounded loop. It checks exact retrieval and
+small grounded answer facts; broad semantic ranking and live-model quality remain later work.

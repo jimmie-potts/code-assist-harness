@@ -40,10 +40,13 @@ validated hard limits, per-session accounting, deterministic deadline and cleanu
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
 an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
-protocol v1 is unchanged. CAH-024 is implementation-ready but still planned; it will add the first
-M2 primitive, an immutable Python workspace boundary, without file reads or protocol changes. Tool
-execution, workspace discovery and reads, policy, and broader agent behavior remain target
-architecture.
+protocol v1 is unchanged. CAH-024 through CAH-037 are implementation-ready but still planned as the
+M2 read-only vertical slice. They proceed from workspace and instruction boundaries through native
+reads, attributable context, a typed read registry, provider-neutral function calling, atomic
+tool-aware response admission, a bounded iterative loop, strict OpenAI mapping, and deterministic
+evaluation. CAH-024 remains the first
+dependency checkpoint. Approval, writes, subprocesses, remote MCP, and richer tool UI remain target
+architecture for later milestones.
 
 ## Product boundary
 
@@ -187,6 +190,13 @@ the launcher and `main()` through the concrete adapter. Runtime shutdown, stdin 
 cancellation tear down active provider work without fabricating a user-cancellation terminal when
 teardown wins.
 
+For M2, a plain task enters context selection with scope `.` and empty `focus_paths` and
+`search_queries`; deterministic evaluations may inject explicit values through their composition
+seam. Explicit OpenAI selection also authorizes bounded, policy-admitted repository context and tool
+results to leave the local machine for that session. Path admission is not content-level secret
+scanning, so the configuration and CLI must warn that an allowed source file may still contain
+sensitive text. The mock path remains local.
+
 CAH-010 keeps one-session lifecycle meaning separate from process effects and conversation history.
 `task.submitted`, `cancel.requested`, `approval.requested`, and `approval.resolved` are trusted domain
 facts; the latter two do not expand protocol v1. Wire events reach the cores only after Pydantic or
@@ -207,8 +217,8 @@ dependency-resolution changes commit `uv.lock`.
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
 | Workspace path containment | Python workspace boundary | Planned in CAH-024: one immutable canonical root resolves contained, workspace-relative targets; later tools recheck at access time. |
-| Context selection | Python context subsystem | Context items retain their source path, line range, and inclusion reason. |
-| Tool validation and execution policy | Python tool and safety subsystems | The model and TUI cannot authorize a tool. |
+| Context selection | Python context subsystem | Planned in CAH-025 through CAH-030: context items retain source, scope, inclusion reason, and deterministic budget cost. |
+| Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
 | Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs and explicitly typed non-lifecycle evidence are persisted after admission. |
 | Visible conversation, plan, tools, errors, and diffs | Ink TUI | Visible state is reduced from runtime events. |
@@ -478,10 +488,28 @@ documentation, respects ignored paths and size limits, and preserves provenance 
 item. The context builder must be able to explain why an item was included and enforce a total
 budget before calling a provider.
 
-CAH-024 is the planned foundation for that subsystem. The Python harness will own an immutable
-boundary around the canonical launch root and return only contained targets with workspace-relative
-labels. Instruction discovery, content reads, ignored-path policy, context budgeting, and
-execution-time race protection remain outside that unit.
+CAH-024 through CAH-030 refine that subsystem into single-responsibility units. The sequence owns the
+canonical workspace boundary, scoped `AGENTS.md` discovery, shared read policy, native listing,
+bounded text reads, literal search, and atomic context selection with inclusion and omission
+evidence. Each filesystem operation re-resolves immediately before access and reports only
+workspace-relative provenance. CAH-031 then exposes those handlers through the smallest generic,
+typed read registry needed by the M2 loop; later E4 work extends that seam for side effects.
+
+CAH-032 through CAH-036 refine the provider-neutral tool exchange, atomic full-response admission,
+one request/call/result/response round trip, bounded iteration, and strict OpenAI Responses
+translation. A response is fully buffered and validated before final text is published or a tool is
+dispatched. Synchronous native handlers are bounded and non-preemptive, with cancellation/deadline
+checks before and after execution; each provider-facing result is one canonical compact JSON
+success-or-error envelope capped at 65,536 bytes inclusive, with oversize output rejected rather
+than truncated. OpenAI stateless replay under `store=false` preserves bounded canonical full
+reasoning-item envelopes—including required IDs and item fields, not only encrypted content—even with
+`current_turn` reasoning context.
+
+This is function calling, not an MCP implementation or a claim of direct registry compatibility. A
+future generalized registry port may snapshot and re-admit remote catalogs only after server trust,
+authentication, network policy, broader schema/result mapping, dynamic catalogs, and cancellation
+semantics are designed explicitly. CAH-037 composes and evaluates the complete deterministic
+read-only slice.
 
 Evaluation scenarios will check whether known relevant files were selected, how much context was
 used, and whether unnecessary reads occurred. These mechanisms are target behavior for the

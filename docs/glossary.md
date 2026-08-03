@@ -115,6 +115,14 @@ exact harness-owned requests and explicit emit, logical-delay, or cancellation-c
 It is strict rather than permissive: omitted requests, unexpected requests, unfinished operations,
 and unconsumed steps fail the test without exposing request contents in the diagnostic.
 
+## Function calling
+
+The model-facing conversation pattern in which the harness advertises typed tool definitions, a
+provider reports a requested call, the harness validates and executes that call, and a later model
+request includes the correlated tool result. Function calling does not give the provider permission
+to execute a tool. The project-owned agent loop remains responsible for dispatch, policy, limits,
+and deciding whether another model turn is admitted.
+
 ## Harness core
 
 The provider-neutral Python domain and orchestration logic: session state, agent loop, context,
@@ -159,14 +167,34 @@ The learning companion for one implementation-ready user story. It explains the 
 architecture, practical exercises, failure modes, production alternatives, trade-offs, and local
 glossary. A lesson is educational context, not evidence that planned behavior has shipped.
 
+## Model Context Protocol (MCP)
+
+A transport and discovery protocol through which a client can list and invoke tools exposed by an
+MCP server. MCP is distinct from the model-facing function-calling grammar. M2's narrow local read
+registry is not directly MCP-compatible. A future generalized registry port may snapshot and
+re-admit discovered tools only after it defines broader schema/result mapping, remote capability
+classification, server trust, authentication, network access, changing catalogs, cancellation, and
+evidence rules. An MCP server never owns harness policy, approval, workspace containment, limits,
+or transcript semantics.
+
 ## Model turn
 
-One provider request and its complete streamed response. A model turn may produce assistant text,
-one or more tool-call requests, usage information, or a provider failure, and may end early through
-operation cancellation. Cancellation closes the provider stream rather than appearing as a
-provider stream event. CAH-021 implements exactly one provider-neutral turn, and CAH-023 runs that
-same turn when the user explicitly selects OpenAI and the exact supported model; the default remains
-mock. Another turn, tool continuation, and automatic multi-turn behavior remain planned.
+One provider request and its complete streamed response. A model turn may produce assistant text, a
+tool-call request, usage information, or a provider failure, and may end early through operation
+cancellation. Cancellation closes the provider stream rather than appearing as a provider stream
+event. CAH-021 implements exactly one provider-neutral turn, and CAH-023 runs that same turn when the
+user explicitly selects OpenAI and the exact supported model; the default remains mock. Planned M2
+admits final text or exactly one sequential call per turn and fails closed on mixed, multiple, or
+parallel call shapes. CAH-033 makes that admission atomic: the complete turn is buffered and its
+closed grammar is validated before final text can be published or a tool call can be dispatched.
+
+## Opaque reasoning item
+
+Bounded provider continuation state that the harness preserves byte-for-byte but never interprets
+as instructions, assistant text, or policy. Planned CAH-036 stores each accepted OpenAI reasoning
+item as one canonical full replay envelope—including its required ID and item fields, not only the
+encrypted content—and reconstructs it on later stateless `store=false` requests even while the
+configured reasoning context remains `current_turn`. SDK objects still stop at the adapter boundary.
 
 ## NDJSON
 
@@ -218,9 +246,13 @@ and closes the stream logically without claiming remote resources were released.
 ## Provider request
 
 The immutable harness-owned input for exactly one model turn. CAH-020 represents a non-empty ordered
-conversation plus ordered caller-supplied repository instructions. The request deliberately excludes
-provider credentials, SDK values, provider-specific response objects, instruction discovery, and
-context-selection policy.
+conversation plus ordered caller-supplied repository instructions. Planned CAH-032 adds already
+selected repository context, strict local tool definitions, and matched call/result history under a
+fixed canonical byte bound. The request deliberately excludes provider credentials, SDK values,
+provider-specific response objects, instruction discovery, context-selection policy, and inclusion
+reports. A plain runtime task defaults context scope to `.` with empty focus and search inputs.
+Explicit OpenAI selection authorizes the bounded, policy-admitted repository content in that request
+to leave the machine; path admission does not content-secret-scan ordinary allowed files.
 
 ## Provider stream event
 
@@ -230,7 +262,8 @@ normalized failure. These are Python domain values, not protocol-v1 session even
 translates accepted text and terminal observations into the existing lifecycle and stores optional
 bounded usage through a transcript-only `model.usage_observed` evidence record. CAH-022 may add one
 `loop.limits_observed` record to a provider-backed version-3 tape. Neither record changes protocol v1
-or the shared lifecycle reducers.
+or the shared lifecycle reducers. Planned M2 retains optional usage as session-aggregate evidence
+only when final assistant text is accepted; tool-only turns do not create per-turn usage records.
 
 ## Provider session
 
@@ -240,9 +273,11 @@ strict stream grammar, and admits each lifecycle publication as an ordered, non-
 cancellation-shielded wire/reducer/observer transaction. It selects one outcome and joins the
 session's one supervised cleanup task. This protects admission against competing cancellation,
 deadline, or terminal selection; an ordinary later sink or observer failure does not roll back an
-earlier accepted view. The
-session is distinct from the default `MockSession`, provider adapter, multi-turn loop, and TUI
-projection.
+earlier accepted view. The session is distinct from the default `MockSession`, provider adapter,
+multi-turn loop, and TUI projection. CAH-033 first makes one tool-aware response an atomic admission
+transaction. CAH-034
+then adds the explicit two-turn teaching path, and CAH-035 replaces it with the bounded sequential
+loop while preserving provider-session ownership and cleanup.
 
 ## Reducer
 
@@ -308,6 +343,24 @@ cancellation, expected failures, and security assumptions.
 A provider-requested invocation of a named tool with structured arguments. It is validated before
 policy evaluation and may be rejected, require approval, or execute automatically according to
 its capability and effective policy.
+
+## Tool registry
+
+The harness-owned mapping from a unique model-facing tool name to its validated definition and
+executor. The planned M2 kernel admits only native read capabilities and rejects unknown names,
+duplicate definitions, malformed arguments, and invalid results. Later milestones extend the same
+seam with side-effect policy and approvals rather than bypassing it. A future MCP client requires a
+generalized registry port and separate remote-trust design rather than direct registration in this
+M2 kernel.
+
+## Tool result
+
+An immutable, bounded, provider-neutral outcome correlated to one tool-call ID. It contains only
+validated success data or a stable safe failure. Planned M2 serializes every provider-facing result
+as compact, sorted-key UTF-8 JSON: exactly `{"result":<projected>}` or
+`{"error":{"code":"<code>","message":"<fixed message>"}}`, capped at 65,536 bytes inclusive. Oversize output
+fails instead of being truncated. Provider adapters translate the result into their wire or SDK
+representation; they do not execute the tool or reinterpret harness policy.
 
 ## Transcript
 

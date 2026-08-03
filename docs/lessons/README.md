@@ -5,7 +5,7 @@ A user story is the delivery contract; a lesson is the learning companion that e
 concepts, architecture, design choices, practical failure modes, and how the same problem is often
 handled in a production organization.
 
-The lesson set maps one-to-one to the 16 implementation-ready stories. Outcome-level epics do
+The lesson set maps one-to-one to the 29 implementation-ready stories. Outcome-level epics do
 not receive lesson files until they are refined into a story with acceptance criteria. This keeps a
 lesson attached to work that can actually be built and verified.
 
@@ -22,6 +22,11 @@ slice. Each lesson deliberately separates three kinds of information:
 - **Accepted design:** decisions already locked by an ADR or the architecture baseline.
 - **Planned implementation:** the smallest approach intended for this learning-first repository.
 - **Production expansion:** examples of additional controls and tools an enterprise might add.
+
+Core learning units deserve the closest review when they teach context selection, the explicit
+agent loop, LLM response grammar, tool calling and dispatch, future MCP extension boundaries, safety
+ownership, or evaluation. Supporting implementation units retain the same correctness bar but keep
+their explanation and exercises tighter when they mainly realize an already-taught contract.
 
 Production tools are examples, not dependencies or blanket recommendations. Tool choice depends on
 scale, risk, regulations, existing platform capabilities, operational maturity, and total cost of
@@ -53,10 +58,26 @@ not add or revise presentations unless the user explicitly reverses this freeze.
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Verified against implementation |
 | 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Verified against implementation |
 | 16 | CAH-024 | [Workspace boundary](cah-024-workspace-boundary.md) | Planned |
+| 17 | CAH-025 | [Scoped repository instructions](cah-025-repository-instructions.md) | Planned |
+| 18 | CAH-026 | [Repository read policy](cah-026-repository-read-policy.md) | Planned |
+| 19 | CAH-027 | [Repository listing and metadata](cah-027-list-files-and-stat-path.md) | Planned |
+| 20 | CAH-028 | [Bounded repository reads](cah-028-bounded-text-file.md) | Planned |
+| 21 | CAH-029 | [Literal repository search](cah-029-literal-text-search.md) | Planned |
+| 22 | CAH-030 | [Budgeted repository context](cah-030-budgeted-context.md) | Planned |
+| 23 | CAH-031 | [Read-tool registry](cah-031-read-tool-registry.md) | Planned |
+| 24 | CAH-032 | [Provider-neutral tool contract](cah-032-provider-tool-contract.md) | Planned |
+| 25 | CAH-033 | [Tool-aware response admission](cah-033-tool-aware-response-admission.md) | Planned |
+| 26 | CAH-034 | [One read-tool round trip](cah-034-one-read-tool-round-trip.md) | Planned |
+| 27 | CAH-035 | [Bounded agent loop](cah-035-bounded-agent-loop.md) | Planned |
+| 28 | CAH-036 | [OpenAI tool-call mapping](cah-036-openai-tool-calls.md) | Planned |
+| 29 | CAH-037 | [Read-only assistant evaluation](cah-037-read-only-assistant-evaluation.md) | Planned |
 
 CAH-023 completes the M1 learning sequence by locating the first real-provider adapter behind the
-harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024 is
-the planned first M2 boundary unit. Both use Markdown-only lessons with compact text diagrams.
+harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024
+through CAH-037 form the planned M2 sequence. The strongest review emphasis falls on context
+ownership in CAH-025/026/030 and especially the registry, provider tool exchange, atomic response
+admission, round trip, bounded loop, OpenAI mapping, and evaluation in CAH-031 through CAH-037. All
+M2 lessons are Markdown-only and use compact text diagrams.
 
 ## Required lesson structure
 

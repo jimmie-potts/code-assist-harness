@@ -2,9 +2,9 @@
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
 > provider-session path, and CAH-023 makes that path available only through explicit, validated OpenAI
-> selection. CAH-024 plans a Python workspace path boundary but has not implemented it. The launch
-> still defaults to `MockSession`; this is not a sandbox or a claim that untrusted code can be
-> executed safely.
+> selection. CAH-024 through CAH-037 refine the read-only M2 boundaries but have not implemented
+> them. The launch still defaults to `MockSession`; this is not a sandbox or a claim that untrusted
+> code can be executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
 repository content are untrusted inputs. Safety therefore comes from defense in depth: bounded
@@ -68,9 +68,10 @@ report an accepted target with a workspace-relative label and will not itself re
 That planned snapshot check is necessary but not execution-time authorization. Path checks must be
 repeated when a later tool accesses a target because files and symlinks can change after validation
 or a proposal. Edit operations also use content-hash or exact-content preconditions. A stale
-proposal returns a conflict and never overwrites newer content. Later execution tests must cover
-missing descendants under symlinks and replacement races in addition to the CAH-024 containment
-matrix.
+proposal returns a conflict and never overwrites newer content. CAH-026 plans the non-overridable
+deny/ignore policy, and CAH-027 through CAH-029 require access-time re-admission for listing, reads,
+and search. Their tests cover missing descendants under symlinks and observable replacement races in
+addition to the CAH-024 containment matrix.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -131,8 +132,9 @@ barrier task is cancelled and reaped, and the required provider force-reap hook 
 every provider-owned local cleanup or SDK task without shielding. `provider_cleanup_failed` is emitted
 at most once without replacing the selected terminal outcome. No local provider task remains after
 force-reap, but resource release stays unconfirmed: this requires cancellation-responsive provider
-code and does not prove remote cleanup succeeded. File-size, search-result,
-command-duration, whole-session, and later tool-execution limits remain future controls.
+code and does not prove remote cleanup succeeded. File-size, search-result, provider-request, and
+multi-turn bounds are refined in CAH-026 through CAH-036 but remain unimplemented; command-duration
+and side-effecting tool limits remain later controls.
 
 CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
 validate the explicit `openai` provider plus exact `gpt-5.6-luna` model, while Python
@@ -146,6 +148,20 @@ mode, and sets `store=false` for the request. Its closed failure table never exp
 bodies, headers, request IDs, model candidates, or credentials. Assistant text preserves TAB/LF
 layout but rejects every other C0/C1 control at the provider-domain boundary; the Python and
 TypeScript wire validators repeat that check before text can enter terminal state.
+
+M2 keeps tool-aware provider turns atomic: the harness buffers and validates the entire closed
+response grammar before publishing text or dispatching a tool. Invalid or incomplete grammar has
+no partial effect. Local native read handlers remain bounded synchronous calls, so cancellation and
+deadline checks bracket execution rather than pretending to preempt and reap a running handler; a
+result is discarded when cancellation wins. Provider-facing tool outcomes are canonical compact
+JSON success-or-error envelopes capped at 65,536 bytes inclusive; oversize output is rejected rather
+than truncated.
+
+Explicit OpenAI selection authorizes bounded, policy-admitted repository context and read-tool
+results to leave the local machine for that session. Deny/ignore policy is path-oriented, not
+content-level secret scanning, so an otherwise admitted source file may contain sensitive text. The
+user-facing selection path must state that residual risk; the mock path remains local and
+network-free.
 
 Each OpenAI operation lazily owns one client and stream. Natural termination and cancellation share
 one shielded adapter cleanup task that attempts both closes, beneath the harness's five-second local
@@ -235,10 +251,29 @@ into secure execution of arbitrary untrusted code.
 CAH-024 introduces the immutable Python boundary and deterministic containment tests. It does not
 perform filesystem access or eliminate time-of-check-to-time-of-use races.
 
-### Future story — Recheck workspace targets at execution
+### Planned CAH-026 through CAH-029 — Recheck workspace targets at read execution
 
-> As a user, I want traversal, symlinks, and stale edit targets checked at execution time so that
-> tools cannot escape or overwrite newer content.
+> As a user, I want containment, symlinks, deny/ignore policy, type, and bounds rechecked at read time
+> so that a prior path snapshot cannot silently authorize changed content.
+
+[CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) owns the shared admission
+policy. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
+[CAH-028](../user-stories/cah-028-read-bounded-text-file.md), and
+[CAH-029](../user-stories/cah-029-search-repository-text.md) reuse it immediately before access and
+return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
+remain M3 work.
+
+### Planned CAH-031 through CAH-035 — Keep tool authority in the harness
+
+> As a user, I want model tool requests admitted through one typed registry and explicit bounded loop
+> so that neither the provider nor an MCP transport can execute or continue work directly.
+
+CAH-031 limits registration to four read capabilities. CAH-032 defines strict context/tool exchange
+values without dispatch. CAH-033 admits a complete response before either publication or dispatch,
+CAH-034 proves one validation-and-result round trip, and CAH-035 generalizes it only to four model
+turns and three sequential calls with cumulative limits. A future MCP client must enter through a
+generalized registry and separate remote-trust design; the local M2 registry is not a direct MCP
+compatibility claim.
 
 ### Implemented in CAH-011 — Persist redacted lifecycle evidence
 
@@ -248,5 +283,5 @@ perform filesystem access or eliminate time-of-check-to-time-of-use races.
 The current implementation is described in [Transcripts and privacy](#transcripts-and-privacy).
 Search, export, automated retention, tamper evidence, and centralized governance remain future work.
 
-Each story is complete only with a no-side-effect failure test, actionable user-facing errors, and
-validated transcript events for decisions and outcomes.
+Each story is complete only with a meaningful no-side-effect failure test, actionable fixed errors,
+and the bounded event or transcript evidence required by the boundary it actually changes.

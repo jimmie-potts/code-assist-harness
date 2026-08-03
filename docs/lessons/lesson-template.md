@@ -1,7 +1,10 @@
 # CAH-XXX lesson: Unit title
 
 - **Unit:** CAH-XXX
-- **Milestone:** M0 or M1
+- **Milestone:** M0, M1, M2, M3, M4, or M5
+- **Learning emphasis:** Core learning unit or Supporting implementation unit
+- **Review focus:** Name the system-design, agent-loop, provider, tool, MCP, safety, or evidence
+  concept that deserves the learner's closest attention
 - **Lesson status:** Planned, Implementation companion, Implementation companion - blocked, or
   Verified against implementation
 - **Implementation status:** Match the linked user story

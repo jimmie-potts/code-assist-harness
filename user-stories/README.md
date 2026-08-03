@@ -10,8 +10,18 @@ harness library.
   incomplete.
 - Treat acceptance criteria as the behavioral contract and the validation section as the minimum
   evidence required for completion.
+- Use [story-template.md](story-template.md) when refining a new unit. Map acceptance criteria to
+  deterministic tests and carry an explicit story-specific definition of done.
 - Read the linked lesson before implementation and update it with concrete paths, tests, and
   observed trade-offs before marking the story done.
+- Prioritize review of core learning units about context selection, the explicit agent loop, LLM
+  response handling, tool contracts and dispatch, future MCP extension boundaries, safety, and
+  evaluation.
+  Supporting units remain independently tested but keep their lessons tighter.
+- Target roughly 600 or fewer changed production lines per story, counting additions plus deletions
+  under `src/code_assist_harness/` and `tui/src/`. Exclude tests, documentation, fixtures,
+  lockfiles, and generated artifacts; split a unit that gains another responsibility instead of
+  treating the target as a quota.
 - Update a story's documentation-impact section whenever its behavior changes.
 - Keep provider-backed smoke tests outside default validation. Unit and contract tests must not use
   the network or a live model.
@@ -39,11 +49,12 @@ CAH-021 adds the first injected fake-backed turn, strict stream grammar, termina
 serialization, and bounded usage evidence. CAH-022 adds four validated hard limits, fresh per-session
 tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop evidence with
 v1/v2/v3 replay. CAH-023 adds the strict OpenAI Responses adapter plus explicit cross-language
-provider/model configuration while preserving the mock default. M0 and M1 are complete. Workspace
-reads, tool execution, policy, and broader multi-turn loop behavior remain unimplemented. CAH-024 is
-the first implementation-ready M2 unit and remains **Planned**: it will introduce an immutable
-Python workspace boundary for contained, workspace-relative path resolution without yet reading
-files or exposing a model tool.
+provider/model configuration while preserving the mock default. M0 and M1 are complete. CAH-024
+through CAH-037 are the 14 implementation-ready M2 units and all remain **Planned**. CAH-024 is the
+next dependency checkpoint; the sequence then adds scoped instructions, read policy and handlers,
+attributable context, a typed registry, provider-neutral tool exchange, atomic response admission,
+one explicit round trip, the bounded agent loop, strict OpenAI tool mapping, and deterministic
+vertical-slice evaluation.
 
 ## Dependency-ordered implementation sequence
 
@@ -65,8 +76,35 @@ files or exposing a model tool.
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Done | CAH-021 |
 | 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Done | CAH-022 |
 | 16 | [CAH-024: Establish the workspace boundary](cah-024-establish-workspace-boundary.md) | [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md) | M2 | Planned | CAH-023 |
+| 17 | [CAH-025: Discover scoped repository instructions](cah-025-discover-repository-instructions.md) | [Scoped repository instructions](../docs/lessons/cah-025-repository-instructions.md) | M2 | Planned | CAH-024 |
+| 18 | [CAH-026: Define repository read contracts and policy](cah-026-define-repository-read-contracts.md) | [Repository read policy](../docs/lessons/cah-026-repository-read-policy.md) | M2 | Planned | CAH-024 |
+| 19 | [CAH-027: List files and inspect path metadata](cah-027-list-files-and-stat-path.md) | [Repository listing and metadata](../docs/lessons/cah-027-list-files-and-stat-path.md) | M2 | Planned | CAH-026 |
+| 20 | [CAH-028: Read one bounded text file](cah-028-read-bounded-text-file.md) | [Bounded repository reads](../docs/lessons/cah-028-bounded-text-file.md) | M2 | Planned | CAH-026 |
+| 21 | [CAH-029: Search repository text literally](cah-029-search-repository-text.md) | [Literal repository search](../docs/lessons/cah-029-literal-text-search.md) | M2 | Planned | CAH-027, CAH-028 |
+| 22 | [CAH-030: Build budgeted repository context](cah-030-build-budgeted-context.md) | [Budgeted repository context](../docs/lessons/cah-030-budgeted-context.md) | M2 | Planned | CAH-025, CAH-027, CAH-028, CAH-029 |
+| 23 | [CAH-031: Register and dispatch read-only tools](cah-031-register-read-tools.md) | [Read-tool registry](../docs/lessons/cah-031-read-tool-registry.md) | M2 | Planned | CAH-027, CAH-028, CAH-029 |
+| 24 | [CAH-032: Define the provider-neutral tool contract](cah-032-define-provider-tool-contract.md) | [Provider-neutral tool contract](../docs/lessons/cah-032-provider-tool-contract.md) | M2 | Planned | CAH-030, CAH-031 |
+| 25 | [CAH-033: Stage and validate one tool-aware response](cah-033-stage-and-validate-tool-aware-response.md) | [Tool-aware response admission](../docs/lessons/cah-033-tool-aware-response-admission.md) | M2 | Planned | CAH-032 |
+| 26 | [CAH-034: Run one read-tool round trip](cah-034-run-one-read-tool-round-trip.md) | [One read-tool round trip](../docs/lessons/cah-034-one-read-tool-round-trip.md) | M2 | Planned | CAH-030, CAH-031, CAH-032, CAH-033 |
+| 27 | [CAH-035: Run the bounded agent loop](cah-035-run-bounded-agent-loop.md) | [Bounded agent loop](../docs/lessons/cah-035-bounded-agent-loop.md) | M2 | Planned | CAH-034 |
+| 28 | [CAH-036: Map OpenAI Responses tool calls](cah-036-map-openai-tool-calls.md) | [OpenAI tool-call mapping](../docs/lessons/cah-036-openai-tool-calls.md) | M2 | Planned | CAH-035 |
+| 29 | [CAH-037: Prove the read-only assistant](cah-037-prove-read-only-assistant.md) | [Read-only assistant evaluation](../docs/lessons/cah-037-read-only-assistant-evaluation.md) | M2 | Planned | CAH-025 through CAH-036 |
 
 See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
+
+## M2 learning emphasis
+
+CAH-024 through CAH-026 and CAH-030 through CAH-037 are core learning units. Give the closest review
+attention to CAH-031 through CAH-036: they expose the registry boundary, provider-neutral LLM/tool
+grammar, atomic response admission, one complete function-calling exchange, the bounded
+harness-owned loop, and strict OpenAI response mapping. CAH-037 then tests whether those parts
+produce grounded behavior rather than merely
+type-checking in isolation.
+
+CAH-027 through CAH-029 are supporting implementation units. Their correctness and failure tests are
+still required, but their lessons stay shorter because they implement the filesystem primitives
+consumed by the higher-value agentic design units. MCP remains a later transport/discovery adapter to
+the registry; M2 teaches the seam and trust boundary without adding a remote server or network path.
 
 ## Planning notes
 
@@ -129,3 +167,6 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 - [2026-08-02 CAH-024 workspace-boundary planning](notes/2026-08-02-cah-024-workspace-boundary-planning.md)
   records the E3 story split, the decisions already fixed by the architecture, and the boundary
   between planned path containment and later filesystem access.
+- [2026-08-03 M2 read-only assistant planning](notes/2026-08-03-m2-read-only-assistant-planning.md)
+  records the 14-story vertical slice, learning priorities, exact loop and tool-exchange defaults,
+  review-size policy, and the distinction between local function calling and a future MCP adapter.

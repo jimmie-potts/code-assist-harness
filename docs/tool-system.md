@@ -1,6 +1,7 @@
 # Tool System
 
-> Status: proposed design. No model-callable workspace or subprocess tools are implemented yet.
+> Status: proposed design with the read-only M2 seam refined through CAH-026 to CAH-036. No
+> model-callable workspace or subprocess tool is implemented yet.
 
 Tools are typed capabilities exposed by the Python harness. The model may request a tool, but the
 harness validates, authorizes, executes, bounds, and records it. This separation keeps model output
@@ -53,6 +54,24 @@ return to the model; it does not crash the session.
 classified as reads and may execute automatically after policy validation. They never invoke a
 shell, access the network, or escape the workspace. Their outputs are bounded and carry source
 provenance. More detail appears in [Context Engineering](context-engineering.md).
+
+## Function calling and MCP
+
+Function calling is the model-facing loop grammar: advertise tool definitions, receive a typed call,
+run harness-owned dispatch, return one correlated result, and ask the model to continue. The
+provider adapter translates this exchange but never executes the tool or decides whether it is safe.
+M2 keeps the first grammar deliberately serial: a model turn may request exactly one tool, and the
+next admitted turn receives that one result. Multiple, parallel, or mixed text-and-tool responses
+fail closed until a later unit defines their ordering and accounting.
+
+The Model Context Protocol (MCP) solves a related but different problem: discovering and invoking
+tools offered by another process or service. The deliberately narrow M2 registry is not directly
+MCP-compatible: it admits four local synchronous read handlers, a strict schema subset, and one
+canonical JSON result envelope. A later generalized registry port may let an MCP client snapshot
+and re-admit a trusted server catalog, filter or translate broader schemas and result shapes, and
+classify remote network authority. M2 does not connect to an MCP server. Server trust,
+authentication, network policy, dynamic catalogs, structured or multimodal result validation, and
+remote cancellation require their own threat model and implementation stories.
 
 ## Edit proposals
 
@@ -111,13 +130,53 @@ validated, redacted events.
 
 ## Implementation stories
 
-### Future story — Register typed tools
+### Planned CAH-031 — Register typed read tools
 
 > As a harness developer, I want every model-callable tool registered with validated schemas and
 > capability metadata so that dispatch and policy are predictable.
 
-Complete this story when unknown tools, malformed arguments, duplicate names, and result validation
-have deterministic tests.
+The [implementation-ready story](../user-stories/cah-031-register-read-tools.md) admits exactly four
+native read operations through an immutable typed registry. Duplicate or side-effecting candidates,
+unknown names, wrong inputs, and wrong results fail with fixed non-leaking errors. General E4 policy
+and dynamic extension remain M3 or later.
+
+### Planned CAH-032 — Define the provider-neutral tool contract
+
+> As an agent-loop developer, I want selected context, definitions, calls, and results represented
+> without provider or MCP types so that adapters cannot become the orchestrator.
+
+The [implementation-ready story](../user-stories/cah-032-define-provider-tool-contract.md) defines
+the strict portable schema subset, exact call/result history, context projection, request bounds,
+registry-to-definition bridge, and strict-fake behavior. It does not parse or dispatch a call.
+
+### Planned CAH-033 — Admit one complete tool-aware response
+
+The [response-admission story](../user-stories/cah-033-stage-and-validate-tool-aware-response.md)
+buffers a provider turn and validates its complete closed grammar before exposing final text or one
+tool-call request. Provider failure, premature EOF, mixed output, and multiple calls cause neither
+text publication nor tool dispatch.
+
+### Planned CAH-034 and CAH-035 — Prove one exchange, then iterate
+
+The [one-round-trip story](../user-stories/cah-034-run-one-read-tool-round-trip.md) makes the entire
+request/call/validate/dispatch/result/response flow visible using one canonical compact JSON result
+envelope capped at 65,536 bytes inclusive; oversize output fails instead of being truncated. The
+[bounded-loop story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces
+that teaching branch with a sequential four-turn, three-call state machine. Synchronous native tools
+are bounded and non-preemptive: cancellation and deadline checks bracket execution, and a result is
+discarded if cancellation wins while the handler runs.
+
+### Planned CAH-036 — Map OpenAI Responses function calls
+
+The [implementation-ready story](../user-stories/cah-036-map-openai-tool-calls.md) maps the same
+definitions, full stateless history, calls, results, and selected context through the strict OpenAI
+adapter. Full replay under `store=false` reconstructs every required field from each accepted
+canonical reasoning-item envelope—even with `current_turn` reasoning context—and applies the one
+reviewed null-content-to-omitted-input mapping. It disables parallel calls,
+rejects hosted/MCP tool types, and leaves dispatch and continuation decisions in the harness. Explicit
+OpenAI selection authorizes
+bounded admitted repository-content egress for that session; it is not content-level secret
+scanning.
 
 ### Future story — Execute bounded commands
 

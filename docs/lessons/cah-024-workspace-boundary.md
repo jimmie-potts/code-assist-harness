@@ -6,6 +6,9 @@
 - **Implementation status:** Planned; no reusable workspace boundary or native repository read is
   implemented yet
 - **Story:** [CAH-024](../../user-stories/cah-024-establish-workspace-boundary.md)
+- **Learning emphasis:** Core learning unit
+- **Review focus:** Why containment belongs to the harness and why a validated path is only a
+  snapshot, not lasting authorization
 - **Visual companion:** None; the Markdown lesson and compact text diagram are authoritative
 - **Related architecture:** [ADR 0002](../adr/0002-ink-python-process-boundary.md),
   [Context engineering](../context-engineering.md), and [Safety model](../safety-model.md)
@@ -24,6 +27,8 @@ harness—not the model, TUI, provider, or repository—owns what “inside this
 After completing this unit, you should be able to:
 
 - explain canonical paths, filesystem identity, containment, and check/use races;
+- explain why a Python `str` can still contain a lone surrogate and why path admission must reject
+  it before filesystem access;
 - locate workspace-path authority inside the Python harness;
 - distinguish an internal symlink from a symlink escape;
 - test stable, non-leaking boundary failures; and
@@ -58,6 +63,11 @@ A second misconception is that validation makes later access permanently safe. A
 replace a directory or symlink after the check. CAH-024 returns a snapshot; future tools must resolve
 again immediately before access, and stronger designs bind the check to an open descriptor.
 
+A Python `str` is not automatically valid Unicode scalar text: it can contain an isolated surrogate
+such as `"\ud800"`. Before constructing a path, CAH-024 requires a strict UTF-8 encode/decode
+round-trip with exact equality. Valid multibyte text remains unchanged; a lone surrogate fails before
+the filesystem can turn it into a platform-dependent error or existence signal.
+
 ## Key concepts
 
 - **Canonical root:** the resolved absolute directory that anchors every operation.
@@ -71,6 +81,8 @@ again immediately before access, and stronger designs bind the check to an open 
 - **Snapshot:** a best-effort containment result based on filesystem observations during resolution,
   not an open handle or lasting authority.
 - **Fixed failure:** a stable code/message pair that reveals neither a host path nor raw OS text.
+- **Unicode-scalar admission:** strict UTF-8 round-trip validation, without normalization, before
+  any model-facing path reaches a filesystem API.
 
 ## Architecture and design
 
@@ -96,8 +108,9 @@ Evidence boundary: no protocol/transcript record in CAH-024; later evidence uses
 
 The TUI continues to select exactly one workspace and pass its canonical root at process startup.
 Python is authoritative after that handoff. `WorkspaceBoundary.from_path` captures the root;
-`resolve_existing` accepts only a non-empty relative path, rejects every `..`, follows symlinks, and
-returns the canonical target only when it remains inside the same root.
+`resolve_existing` first rejects bytes-valued path-like inputs and strings that do not round-trip
+through strict UTF-8. It then accepts only a non-empty relative path, rejects NUL and every `..`,
+follows symlinks, and returns the canonical target only when it remains inside the same root.
 
 Internal symlinks stay useful, but their aliases do not become durable provenance. Missing leaves
 are rejected because this unit supports future reads, not future creates. Root identity is checked
@@ -113,7 +126,8 @@ stable error codes. It does not create separate exception classes for each files
 1. Move the Python root invariant into top-level `workspace.py` and have runtime startup delegate to
    `WorkspaceBoundary.from_path`.
 2. Capture the root's canonical path and identity in a frozen value.
-3. Validate relative syntax before touching the requested path.
+3. Validate strict Unicode-scalar/UTF-8 round-trip and relative syntax before touching the requested
+   path.
 4. Resolve strictly, verify component-aware containment, and compute the canonical relative label.
 5. Recheck root identity before returning the snapshot.
 6. Test normal paths, internal links, escaping links, missing targets, and observable root
@@ -163,6 +177,7 @@ error content.
 | Scenario | Responsible boundary | Safe planned result | Planned evidence |
 | --- | --- | --- | --- |
 | `/etc/passwd` or `../outside` | input admission | `invalid_workspace_path` before resolution | parameterized syntax tests |
+| lone surrogate or bytes-valued path | string admission | `invalid_workspace_path` with zero filesystem calls | injected filesystem-spy test |
 | internal file/directory symlink | canonical containment | accept and report target-relative path | symlink happy-path tests |
 | symlink to outside | canonical containment | `workspace_path_outside` | file, directory, and missing-descendant tests |
 | missing or dangling in-root target | strict resolution | `workspace_path_not_found` | missing-path tests |
@@ -219,6 +234,8 @@ work.
 3. Replace the workspace directory after constructing the boundary and explain both what the
    identity snapshot detects and how inode reuse can evade it.
 4. Identify the exact future line where a native read tool must resolve again before opening a file.
+5. Explain why Unicode normalization would change path identity and is therefore not part of the
+   UTF-8 round-trip check.
 
 ## Key takeaways
 

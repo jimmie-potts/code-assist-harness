@@ -2,7 +2,9 @@
 
 > Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn,
 > CAH-022 hard-bounds it, and CAH-023 activates it through an explicitly selected OpenAI Responses
-> adapter. The launched `main()` path and TUI still default to `MockSession`.
+> adapter. CAH-032 through CAH-036 now define the implementation-ready M2 tool-exchange and
+> iterative-loop sequence, but none is implemented. The launched `main()` path and TUI still
+> default to `MockSession`.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -42,7 +44,10 @@ The Python runtime will use one `asyncio` event loop. The intended task structur
 - A command-reader task validates NDJSON from stdin and dispatches domain commands.
 - A single event-writer task validates and serializes events from an ordered queue to stdout.
 - At most one active session task runs the agent loop in the MVP.
-- Provider and tool operations are awaited child tasks so cancellation and deadlines can propagate.
+- Provider operations are awaited child tasks so cancellation and deadlines can propagate.
+- M2 native read tools execute synchronously under hard work bounds, with cancellation and deadline
+  checks immediately before and after the call; if cancellation wins while a handler runs, its late
+  result is discarded rather than represented as preemptively reaped.
 - Transcript writing consumes trusted domain facts and validated events without becoming the source
   of session truth.
 
@@ -80,11 +85,12 @@ accept task and emit session.started
 while session is active:
     check cancellation, deadline, and limits
     build bounded context and provider-neutral request
-    call provider and stream response into domain events
-    if response is ordinary assistant text:
-        emit assistant.completed and complete the session
-    if response requests tools:
-        validate each request
+    call provider and stage the complete response privately
+    validate one closed final-text-or-single-call grammar
+    if the admitted outcome is ordinary assistant text:
+        atomically reserve output, publish its staged chunks, and complete the session
+    if the admitted outcome is one tool call:
+        charge the observation, then validate the request
         evaluate policy and obtain approval when required
         execute permitted tools and append structured results
         check limits before beginning another model turn
@@ -412,3 +418,65 @@ text-only stream automaton, fixed failure normalization, cancellation, and share
 cleanup behind the provider port. Deterministic SDK-fake tests run with network denied; the minimal
 credentialed smoke requires separate explicit selection and remains outside the canonical gate and
 default CI.
+
+### CAH-032 — Define the provider-neutral tool contract
+
+> As an agent-loop developer, I want tool definitions, calls, and correlated results represented in
+> harness-owned values so that no provider or transport owns loop semantics.
+
+This [planned story](../user-stories/cah-032-define-provider-tool-contract.md) adds immutable,
+SDK-free selected context, strict function-tool definitions, calls, results, and ordered history to
+the provider port and strict fake. The full canonical request projection is capped at 512 KiB. It
+performs no dispatch and admits no second turn. An MCP adapter may later translate into these values,
+but MCP transport and remote trust are separate work.
+
+### CAH-033 — Stage and validate one tool-aware response
+
+> As a learner, I want the harness to admit a complete tool-aware response atomically so that an
+> invalid provider grammar cannot publish partial text or authorize work.
+
+This [planned story](../user-stories/cah-033-stage-and-validate-tool-aware-response.md) stages every
+observation until the whole response is known to be either final text or exactly one tool call.
+Only an accepted final-text branch may publish text, and only an accepted tool-call branch may be
+returned for later dispatch. Premature EOF, provider failure, mixed text/call output, a second call,
+or invalid terminal ordering produces zero publication and zero dispatch. Optional provider usage
+remains candidate evidence until accepted final text completes the session.
+
+### CAH-034 — Run one read-tool round trip
+
+> As a learner, I want one explicit request, call, dispatch, result, and final response so that each
+> ownership handoff is visible before general iteration.
+
+This [planned story](../user-stories/cah-034-run-one-read-tool-round-trip.md) implements exactly two
+fake-backed model turns around one native read dispatch. It preserves the exact selected context and
+registry-derived catalog, validates lookup and arguments in the harness, dispatches only after
+CAH-033 accepts the complete first response, and replays one canonical correlated result envelope
+into the follow-up request. Synchronous native reads are bounded and non-preemptive; cancellation is
+checked before and after execution, and a late result is discarded when cancellation wins.
+
+### CAH-035 — Run the bounded agent loop
+
+> As a learner, I want the harness to iterate explicitly under small hard limits so that I can prove
+> where agency lives and why the session stops.
+
+This [planned story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces the teaching branch
+with a sequential state machine capped at four model turns and three within-budget tool calls. It
+permits one call per turn, keeps all budgets cumulative, and retains exactly one rejecting fourth
+observation when that limit wins, matching CAH-022 evidence semantics. It fails closed on mixed,
+multiple, or parallel call shapes. Provider usage is optional session-aggregate evidence and is
+admitted only alongside accepted final assistant text, never as a per-tool-turn lifecycle fact.
+
+### CAH-036 — Map OpenAI Responses tool calls
+
+> As an explicitly configured OpenAI user, I want the provider-neutral loop translated to Responses
+> function calling without giving the SDK orchestration authority.
+
+This [planned story](../user-stories/cah-036-map-openai-tool-calls.md) maps exact local function
+definitions, scoped instructions, untrusted repository evidence, streamed calls, and full stateless
+call/result replay behind the existing adapter. With `store=false`, replay includes each bounded
+canonical full reasoning-item envelope from accepted prior turns—even while reasoning context remains
+`current_turn`—so required IDs and item fields are not reduced to encrypted content alone. The core
+harness never interprets those envelopes. The adapter sets `parallel_tool_calls=false`, omits
+`previous_response_id`, and rejects hosted or remote-MCP tools. Explicit OpenAI selection authorizes
+bounded admitted repository-content egress for that session and must warn that allowed files are not
+content-secret-scanned. Default evidence remains SDK-fake and network-free.

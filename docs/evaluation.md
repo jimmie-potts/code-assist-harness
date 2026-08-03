@@ -7,8 +7,9 @@
 > and shared transition/replay fixtures. CAH-020 adds the provider-neutral port and programmable
 > fake. CAH-021 proves one provider-backed turn, CAH-022 proves four hard limits, deadline races,
 > bounded cleanup, and version-3 evidence around it, and CAH-023 adds SDK-fake adapter coverage plus
-> an explicit optional live smoke. Filesystem-backed `evals/` scenarios are not implemented yet, and
-> the launched TUI still defaults to the deterministic mock.
+> an explicit optional live smoke. CAH-037 now refines the first filesystem-backed, deterministic
+> read-only vertical-slice evaluation, but it is not implemented yet. The launched TUI still
+> defaults to the deterministic mock.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -250,12 +251,26 @@ records its result.
 
 ## Implementation stories
 
-### Future story — Define the scenario format and runner
+### Planned CAH-037 — Prove the read-only assistant vertical slice
+
+> As a repository user, I want fixture-backed explain and plan tasks to traverse the composed M2
+> loop so that grounded behavior is proven without a live model.
+
+The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) introduces
+`evals/` only with a small purpose-built runner, one synthetic workspace, deterministic strict-fake
+explain/plan cases, and adversarial mutations. It checks structured retrieval/tool evidence before
+small required or forbidden answer facts. Plain runtime composition defaults context scope to `.`
+with empty focus and search inputs; fixture cases may inject explicit values through their test seam.
+Optional live output remains observational and requires the same explicit OpenAI selection and
+repository-content egress warning as the application path.
+
+### Future story — Generalize the scenario format and runner
 
 > As a harness developer, I want filesystem-based deterministic scenarios so that behavior can be
 > reproduced from inputs, fake-provider events, decisions, and expected effects.
 
-Complete this story when an isolated runner reports event and file-state differences clearly.
+Complete this later story when CAH-037's focused read-only runner has a demonstrated second workflow
+and can become a general isolated format without weakening its deterministic evidence.
 
 ### Future story — Evaluate lifecycle and stopping
 
@@ -267,10 +282,10 @@ Complete this story when an isolated runner reports event and file-state differe
 > As a user, I want denial, approval, stale-edit, traversal, timeout, and cancellation scenarios so
 > that side-effect defenses are continuously verified.
 
-### Future story — Evaluate context selection
+### Future story — Expand context-selection evaluation
 
-> As a learner, I want known relevant files, source ranges, budgets, and unnecessary reads measured
-> so that context-engineering changes can be compared.
+> As a learner, I want a broader corpus of known relevant files, source ranges, budgets, and
+> unnecessary reads so that context-engineering changes can be compared beyond CAH-037's two cases.
 
 ### CAH-023 (Implemented) — Add optional live-provider smoke evaluation
 

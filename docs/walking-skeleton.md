@@ -281,7 +281,10 @@ still absent.
 [CAH-024](../user-stories/cah-024-establish-workspace-boundary.md) is now the
 implementation-ready first E3 unit. It establishes the reusable workspace-containment boundary
 without reading files or changing the protocol. Implementing that contract is the next delivery
-step; repository-instruction discovery and bounded native reads remain subsequent units.
+step. The [refined M2 plan](../user-stories/notes/2026-08-03-m2-read-only-assistant-planning.md)
+now defines the subsequent instruction, native-read, context, registry, LLM/tool exchange, atomic
+response admission, round trip, loop, OpenAI mapping, and deterministic-evaluation units through
+CAH-037.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

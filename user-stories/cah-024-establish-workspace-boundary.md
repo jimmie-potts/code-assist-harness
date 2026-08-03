@@ -5,6 +5,9 @@
   tools
 - **Dependencies:** CAH-023
 - **Lesson:** [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md)
+- **Learning emphasis:** Core learning unit
+- **Review focus:** Harness ownership of containment and the residual risk between checking and
+  using a path
 - **Planning note:**
   [CAH-024 workspace-boundary planning](notes/2026-08-02-cah-024-workspace-boundary-planning.md)
 
@@ -29,6 +32,8 @@ instructions, expose a tool, or add another agent-loop step.
 - Resolve existing model-facing relative paths through `resolve_existing(...)`, following symlinks
   and returning a best-effort containment snapshot when the observed canonical target is beneath
   the captured root.
+- Admit every model-facing path string only after it survives a strict UTF-8 encode/decode
+  round-trip; reject lone surrogates before constructing a `Path` or making any filesystem call.
 - Return both the canonical absolute path for later local use and its canonical, workspace-relative
   POSIX label for later provider and evidence use.
 - Move or delegate the Python runtime's existing root validation to this boundary without changing
@@ -37,7 +42,7 @@ instructions, expose a tool, or add another agent-loop step.
   missing paths, and observable stale or replaced roots with deterministic temporary-workspace
   tests.
 
-## Locked boundary contract
+## Locked contract
 
 ### Ownership and public API
 
@@ -76,9 +81,14 @@ instructions, expose a tool, or add another agent-loop step.
 
 ### Relative-path admission and canonical reporting
 
-- Model-facing inputs are non-empty relative Linux paths. Absolute paths and any `..` component are
-  rejected before filesystem resolution, including a traversal that would normalize back inside the
-  root. `.` components may be normalized; `.` alone names the root.
+- Model-facing inputs are non-empty relative Linux paths. `resolve_existing` first obtains a `str`
+  value (a bytes-valued `PathLike` is invalid), encodes it with strict UTF-8, decodes those bytes
+  with strict UTF-8, and requires exact equality with the original string. This admits Unicode
+  scalar values without normalization and rejects every lone surrogate before `Path` construction,
+  `stat`, `resolve`, existence checks, or any other filesystem access.
+- NUL, absolute paths, and any `..` component are rejected in the same pre-filesystem admission
+  stage, including a traversal that would normalize back inside the root. `.` components may be
+  normalized; `.` alone names the root.
 - Resolution is strict: the requested object and every traversed component must exist. This unit
   does not admit a missing leaf or use a closest-existing-ancestor rule because it performs no create
   or edit operation.
@@ -102,13 +112,23 @@ diagnostic, or transcript content.
 | --- | --- | --- |
 | `invalid_workspace_root` | `Workspace root must be an existing directory.` | construction cannot resolve an accessible directory |
 | `stale_workspace_root` | `The selected workspace is no longer available.` | a snapshot check observes that the captured root is missing, redirected, replaced, or no longer a directory |
-| `invalid_workspace_path` | `Workspace path must be a non-empty relative path.` | input is empty, absolute, contains `..`, or is otherwise not a valid path value |
+| `invalid_workspace_path` | `Workspace path must be a non-empty relative path.` | input is empty, bytes-valued, not a strict Unicode-scalar/UTF-8 round-trip, contains NUL, is absolute, contains `..`, or is otherwise not a valid path value |
 | `workspace_path_not_found` | `Workspace path does not exist.` | strict target resolution fails without establishing an escape |
 | `workspace_path_outside` | `Workspace path is outside the selected workspace.` | a resolved component or target leaves the canonical root |
 
 Escape takes precedence when the boundary can establish that a symlink resolves outside; otherwise
 an inaccessible or dangling target uses the bounded not-found result. Raw filesystem distinctions
 are intentionally not exposed.
+
+## Reviewability budget
+
+- **Estimated production-code churn:** 250-400 changed lines.
+- **Delivered production-code churn:** Not started.
+- **Counted paths:** additions plus deletions under `src/code_assist_harness/` and `tui/src/`.
+- **Excluded from count:** tests, documentation, fixtures, lockfiles, and generated artifacts.
+- **Split rule:** stop and refine another story before review if the unit gains filesystem-read,
+  instruction-discovery, tool-registration, or agent-loop responsibility, or is likely to exceed
+  roughly 600 changed production lines. Do not pad a smaller coherent implementation.
 
 ## Acceptance criteria
 
@@ -118,8 +138,9 @@ are intentionally not exposed.
    single-root CLI, protocol v1, readiness handshake, or TUI behavior.
 3. `resolve_existing` accepts `.`, regular descendants, and internal file or directory symlinks and
    returns canonical absolute and target-relative paths.
-4. Empty, NUL-containing, and absolute inputs plus every path containing a `..` component fail
-   before access with `invalid_workspace_path`.
+4. Empty, bytes-valued, lone-surrogate, NUL-containing, and absolute inputs plus every path
+   containing a `..` component fail before any filesystem access with `invalid_workspace_path`;
+   valid multibyte scalar paths round-trip unchanged and are not normalized.
 5. Component-aware containment rejects symlinked files and directories that resolve outside the
    root, including missing descendants beneath an escaping directory symlink.
 6. Missing and dangling in-workspace paths fail with `workspace_path_not_found`; no create-target or
@@ -135,12 +156,26 @@ are intentionally not exposed.
     path, at least one failure test, and the full repository gate. No presentation is part of
     CAH-024; the Markdown lesson and compact text diagram are the only learning artifacts.
 
+## Acceptance-to-test matrix
+
+| Contract or risk | Planned test | Layer | Expected evidence |
+| --- | --- | --- | --- |
+| Canonical contained path | construct a boundary and resolve `.`, a file, and an internal symlink | unit | immutable values report canonical relative labels without host paths |
+| String and syntax admission | try bytes-valued, lone-surrogate, empty, NUL, absolute, `..`, and sibling-prefix paths; include a valid multibyte scalar path | unit | exact fixed code, zero filesystem calls for invalid strings, and unchanged UTF-8 round-trip for valid text |
+| Symlink escape | resolve file, directory, and missing-descendant escapes | unit | `workspace_path_outside` without requested or canonical path leakage |
+| Missing target | resolve missing and dangling in-workspace paths | unit | `workspace_path_not_found` with no raw `OSError` |
+| Root staleness | remove, rename, replace, redirect, and type-change the root | unit | observable replacement produces `stale_workspace_root` |
+| Runtime delegation | start with valid and invalid selected roots | integration | current argv, readiness, protocol, and TUI behavior remain unchanged |
+
 ## Validation
 
 - Add focused `tests/test_workspace.py` coverage for construction, canonical reporting, `.` root
-  reporting, normal descendants, internal file and directory symlinks, empty, NUL, absolute and
-  traversal inputs, sibling-prefix escapes, dangling links, missing targets, escaping missing
-  descendants, root removal, observable root replacement, and root type changes.
+  reporting, normal and multibyte-scalar descendants, internal file and directory symlinks,
+  bytes-valued and lone-surrogate strings, empty, NUL, absolute and traversal inputs, sibling-prefix
+  escapes, dangling links, missing targets, escaping missing descendants, root removal, observable
+  root replacement, and root type changes.
+- For lone-surrogate and other pre-admission failures, inject filesystem spies and assert that path
+  construction/resolution, existence checks, and stat operations are never reached.
 - Update runtime tests to prove the existing CLI accepts one canonical workspace and maps invalid
   root construction to its bounded startup failure without leaking the supplied path.
 - For observable replacement coverage, rename the original root so it remains referenced, create a
@@ -162,7 +197,7 @@ its canonical-reporting rule, fixed failures, and residual check/use risk. Recon
 lesson to the exact modules and tests. Do not add a presentation; the Markdown diagram carries the
 architecture position.
 
-## Out of scope
+## Exclusions
 
 - Repository-instruction discovery, precedence, `AGENTS.md` parsing, context selection, context
   budgeting, provenance records, or provider-request construction.
@@ -175,6 +210,26 @@ architecture position.
   that path-resolution snapshots eliminate time-of-check/time-of-use races.
 - Multiple workspace roots, native Windows or macOS paths, remote repositories, archives, or virtual
   filesystems.
+
+## Definition of done
+
+1. All ten acceptance criteria map to deterministic happy-path, boundary, or meaningful failure
+   evidence in the matrix and focused tests.
+2. Construction and resolution are typed, documented, immutable, expose only the intentional
+   public API, and prove strict Unicode-scalar/UTF-8 admission before filesystem access.
+3. Stable error codes, messages, and ordinary representations reveal no supplied path, host path,
+   raw OS error, device, or inode.
+4. Runtime delegation preserves the existing one-root CLI, readiness, protocol, provider, TUI, and
+   transcript contracts.
+5. Focused tests and the canonical offline `./scripts/check` pass without a model, network,
+   subprocess, or timing dependency.
+6. The story, planning note, conceptual docs, indexes, and Markdown lesson agree with the delivered
+   boundary and its residual check/use risk.
+7. The completed lesson replaces pseudocode with focused repository-backed implementation and
+   failure-test excerpts; no presentation is added or changed.
+8. Delivered production-source churn is recorded and remains within the reviewability target, or
+   the work is split before review.
+9. The PR is ready for review and every addressed inline review thread is resolved.
 
 ## Planned evidence
 

@@ -395,6 +395,107 @@ def test_review_follow_up_requires_thread_resolution() -> None:
     assert "verify that no unresolved actionable review thread remains" in agents_compact
 
 
+def test_m2_plans_are_reviewable_learning_units() -> None:
+    story_lessons = {
+        "cah-024-establish-workspace-boundary.md": "cah-024-workspace-boundary.md",
+        "cah-025-discover-repository-instructions.md": "cah-025-repository-instructions.md",
+        "cah-026-define-repository-read-contracts.md": "cah-026-repository-read-policy.md",
+        "cah-027-list-files-and-stat-path.md": "cah-027-list-files-and-stat-path.md",
+        "cah-028-read-bounded-text-file.md": "cah-028-bounded-text-file.md",
+        "cah-029-search-repository-text.md": "cah-029-literal-text-search.md",
+        "cah-030-build-budgeted-context.md": "cah-030-budgeted-context.md",
+        "cah-031-register-read-tools.md": "cah-031-read-tool-registry.md",
+        "cah-032-define-provider-tool-contract.md": "cah-032-provider-tool-contract.md",
+        "cah-033-stage-and-validate-tool-aware-response.md": (
+            "cah-033-tool-aware-response-admission.md"
+        ),
+        "cah-034-run-one-read-tool-round-trip.md": "cah-034-one-read-tool-round-trip.md",
+        "cah-035-run-bounded-agent-loop.md": "cah-035-bounded-agent-loop.md",
+        "cah-036-map-openai-tool-calls.md": "cah-036-openai-tool-calls.md",
+        "cah-037-prove-read-only-assistant.md": "cah-037-read-only-assistant-evaluation.md",
+    }
+    story_headings = (
+        "## Single responsibility",
+        "## Scope",
+        "## Locked contract",
+        "## Reviewability budget",
+        "## Acceptance criteria",
+        "## Acceptance-to-test matrix",
+        "## Validation",
+        "## Documentation impact",
+        "## Exclusions",
+        "## Definition of done",
+        "## Planned evidence",
+        "## Deferred work",
+    )
+    lesson_headings = (
+        "## Quick summary",
+        "## Learning objectives",
+        "## Why this unit matters",
+        "## Junior engineer foundation",
+        "## Key concepts",
+        "## Architecture and design",
+        "## Practical walkthrough",
+        "## Implementation code samples",
+        "## Failure scenarios to study",
+        "## Production expansion",
+        "### Local design versus production design",
+        "### Trade-offs and graduation signals",
+        "## Practical exercises",
+        "## Key takeaways",
+        "## Glossary",
+        "## Further reading",
+    )
+
+    for story_name, lesson_name in story_lessons.items():
+        story = (REPOSITORY_ROOT / "user-stories" / story_name).read_text(encoding="utf-8")
+        lesson = (REPOSITORY_ROOT / "docs" / "lessons" / lesson_name).read_text(encoding="utf-8")
+
+        story_status_match = re.search(r"^- \*\*Status:\*\* (.+)$", story, re.MULTILINE)
+        lesson_status_match = re.search(r"^- \*\*Lesson status:\*\* (.+)$", lesson, re.MULTILINE)
+        implementation_status_match = re.search(
+            r"^- \*\*Implementation status:\*\* (.+)$", lesson, re.MULTILINE
+        )
+        assert story_status_match is not None
+        assert lesson_status_match is not None
+        assert implementation_status_match is not None
+
+        story_status = story_status_match.group(1)
+        lesson_status = lesson_status_match.group(1)
+        implementation_status = implementation_status_match.group(1)
+        expected_statuses = {
+            "Planned": ("Planned", ("Planned",)),
+            "In progress": ("Implementation companion", ("In progress", "Partially implemented")),
+            "Blocked": ("Implementation companion - blocked", ("Blocked", "In progress")),
+            "Done": ("Verified against implementation", ("Done", "Implemented")),
+        }
+        assert story_status in expected_statuses
+        expected_lesson_status, implementation_prefixes = expected_statuses[story_status]
+        assert lesson_status == expected_lesson_status
+        assert implementation_status.startswith(implementation_prefixes)
+
+        assert "**Learning emphasis:**" in story
+        assert "**Review focus:**" in story
+        assert "**Estimated production-code churn:**" in story
+        assert "**Delivered production-code churn:**" in story
+        assert "600" in story
+        assert all(heading in story for heading in story_headings)
+
+        assert "**Learning emphasis:**" in lesson
+        assert "**Review focus:**" in lesson
+        assert "**Visual companion:** None" in lesson
+        assert "```text" in lesson
+        assert all(heading in lesson for heading in lesson_headings)
+
+    agents = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    template = (REPOSITORY_ROOT / "user-stories" / "story-template.md").read_text(encoding="utf-8")
+    agents_compact = " ".join(agents.split())
+    assert "core learning units" in agents_compact
+    assert "roughly 600 or fewer changed production lines per story" in agents_compact
+    assert "## Acceptance-to-test matrix" in template
+    assert "## Definition of done" in template
+
+
 def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:
     violations: list[str] = []
     for path in _repository_files(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):
