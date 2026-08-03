@@ -104,7 +104,7 @@ Current focused evidence:
   placement, compact warning/failure evidence, and reduced-decoration output;
 - combined `app.test.tsx` plus `magical-mission.test.tsx`: 54 of 54 cases pass;
 - TUI type checking and the complete TUI lint stage pass;
-- the complete TUI suite passes 316 of 316;
+- the complete TUI suite passes 317 of 317;
 - one live `xterm-256color` tmux PTY kept the exact pending draft while the same Ink process resized
   from 110 by 30 to 76 by 24 and then 44 by 20; its wide, stacked, and compact compositions retained
   authoritative status and showed aligned Unicode borders and mascot text in the inspected WSL
@@ -112,18 +112,21 @@ Current focused evidence:
 - the 23 repository-policy tests pass with the new story, lesson, note, indexes, and internal links.
 
 The canonical `./scripts/check` gate also passes: 940 Python tests, 32 Python protocol-fixture tests,
-35 repository check/policy tests, 281 core TUI tests, 31 TypeScript protocol-fixture tests, and 4
+35 repository check/policy tests, 281 core TUI tests, 31 TypeScript protocol-fixture tests, and 5
 Node-Python boundary tests. `git diff --check` passes. The App-level Ink resize test independently
 types and preserves the pending draft across 110, 76, and 44 columns without invoking submission or
 cancellation callbacks. Automated coverage also verifies `NO_COLOR` and `TERM=dumb`.
 
 The first GitHub Actions handoff exposed one presentation-sensitive assertion in the real
-Node-to-Python boundary test: it searched a raw bordered frame for one uninterrupted cumulative
-delta, so legitimate Ink wrapping could make the second delta appear absent. The test now removes
-layout-only vertical/box-drawing borders and folds whitespace before checking the same exact delta
-content, running status, completion, second task, and frame ordering. Production code and the
-process-boundary contract are unchanged; the focused boundary test and canonical repository gate
-pass with the hardened evidence path.
+Node-to-Python boundary test. GitHub enables ANSI styling, and Ink serializes a wide two-column frame
+row by row. When cumulative assistant text wrapped in the conversation column, the adjacent familiar
+face appeared between two visible text fragments in the serialized frame; the delta was present, but
+an uninterrupted whole-sentence substring was not. The test now removes terminal control sequences
+and layout-only borders, folds whitespace, and identifies the three ordered render states with unique
+visible fragments plus running/completion status. A focused regression reproduces the colored,
+bordered, side-by-side wrap. Production code and the process-boundary contract are unchanged; the
+focused boundary test passes with GitHub-style forced color and CI mode, and the canonical repository
+gate passes with the hardened evidence path.
 
 ## Publication evidence
 

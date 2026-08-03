@@ -14,6 +14,7 @@ import {
 import {tmpdir} from 'node:os';
 import {basename, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {stripVTControlCharacters} from 'node:util';
 
 import {render as renderInk} from 'ink-testing-library';
 import {describe, expect, it} from 'vitest';
@@ -53,6 +54,7 @@ const cancellationScenarioEvents = readScenarioFixture<SessionEvent>(
 // A broken cancellation path would finish the three 500 ms mock checkpoints inside this window.
 const POST_CANCELLATION_OBSERVATION_MS = 2000;
 const FAKE_RUNTIME_SECRET = 'FAKE_CAH_RUNTIME_BOUNDARY_SECRET_011';
+const MOCK_STREAMED_PREFIX = 'the task crossed the process';
 
 interface IsolatedRuntimeEnvironment {
   readonly directory: string;
@@ -546,24 +548,27 @@ describe('real Node to uv to Python boundary', () => {
         'first rendered session did not complete',
       );
       const semanticFrames = frames.map(semanticTerminalText);
-
+      // A wide Ink frame is serialized row by row, so the adjacent familiar panel can appear
+      // between words that wrapped inside the conversation panel. Match the unique streamed prefix
+      // as a visible fragment instead of pretending the whole terminal is one prose paragraph.
       const firstDelta = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Mock response:') &&
-          !frame.includes('the task crossed the process boundary') &&
+          !frame.includes(MOCK_STREAMED_PREFIX) &&
           frame.includes('Session status: running'),
       );
       const secondDelta = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Mock response:') &&
-          frame.includes('the task crossed the process boundary') &&
+          hasStreamedBoundaryFragment(frame) &&
+          !frame.includes('streamed') &&
           !frame.includes('successfully.') &&
           frame.includes('Session status: running'),
       );
       const thirdDelta = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Mock response:') &&
-          frame.includes('the task crossed the process boundary') &&
+          hasStreamedBoundaryFragment(frame) &&
           frame.includes('streamed') &&
           frame.includes('successfully.') &&
           frame.includes('Session status: running'),
@@ -571,6 +576,7 @@ describe('real Node to uv to Python boundary', () => {
       const firstCompletion = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Explain the rendered boundary.') &&
+          hasStreamedBoundaryFragment(frame) &&
           frame.includes('streamed') &&
           frame.includes('successfully.') &&
           frame.includes('Session status: completed'),
@@ -612,10 +618,38 @@ describe('real Node to uv to Python boundary', () => {
   }, 15_000);
 });
 
+describe('terminal frame semantics', () => {
+  it('keeps wrapped column fragments searchable without ANSI styles or border cells', () => {
+    const coloredWrap =
+      '\u001B[95m│the task crossed the process\u001B[39m│ │FAMILIAR│\n' +
+      '\u001B[95m│\u001B[39m boundary │ │POWERING UP│';
+    const semanticText = semanticTerminalText(coloredWrap);
+
+    expect(semanticText).toContain('the task crossed the process');
+    expect(semanticText).toContain('boundary');
+    expect(semanticText).not.toContain('\u001B');
+    expect(hasStreamedBoundaryFragment(semanticText)).toBe(true);
+    expect(
+      hasStreamedBoundaryFragment('Explain boundary first. the task crossed the process'),
+    ).toBe(false);
+  });
+});
+
 function semanticTerminalText(frame: string): string {
-  // Responsive Ink panels may wrap one sentence between vertical border cells. Boundary evidence
-  // compares the visible text and its frame order rather than treating layout glyphs as content.
-  return frame.replace(/[|\u2500-\u257f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+  // Responsive Ink panels may wrap one sentence between styled border cells. Boundary evidence
+  // compares visible text and frame order rather than treating layout/control glyphs as content.
+  return stripVTControlCharacters(frame)
+    .replace(/[|\u2500-\u257f]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function hasStreamedBoundaryFragment(frame: string): boolean {
+  const prefixIndex = frame.indexOf(MOCK_STREAMED_PREFIX);
+  return (
+    prefixIndex >= 0 &&
+    frame.indexOf('boundary', prefixIndex + MOCK_STREAMED_PREFIX.length) >= 0
+  );
 }
 
 function readScenarioFixture<T>(filename: string): readonly T[] {

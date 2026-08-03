@@ -262,9 +262,9 @@ visible through `App`.
 | Styled approval implies authority | View boundary | Existing waiting status only; no decision key or command exists | Source audit and canonical gate pass |
 
 Current focused evidence is 41 of 41 Magical Mission cases and 54 of 54 combined application/view
-cases, with TUI type checking and lint passing. The complete TUI suite passes 316 of 316. The
+cases, with TUI type checking and lint passing. The complete TUI suite passes 317 of 317. The
 canonical `./scripts/check` gate passes 940 Python tests, 32 Python protocol-fixture tests, 35
-repository check/policy tests, 281 core TUI tests, 31 TypeScript protocol-fixture tests, and 4
+repository check/policy tests, 281 core TUI tests, 31 TypeScript protocol-fixture tests, and 5
 Node-Python boundary tests. One live `xterm-256color` tmux PTY kept the exact pending draft while the
 same Ink process resized from 110 by 30 to 76 by 24 and then 44 by 20; all three compositions retained
 authoritative status and showed aligned Unicode borders and mascot text in the inspected WSL

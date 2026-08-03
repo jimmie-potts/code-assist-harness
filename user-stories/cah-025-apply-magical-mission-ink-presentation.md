@@ -144,10 +144,10 @@ projections, wide power/celebration truth, responsive and non-roomy-wide renders
 headings, App-owned draft preservation without callbacks, the 30-by-16 emergency projection, alert
 ordering, compact warning/failure evidence, and reduced-decoration semantics. The combined
 application and Magical Mission tests pass 54 of 54, TUI type checking and lint pass, and 23
-repository-policy tests pass. The complete TUI suite passes 316 of 316. The canonical
+repository-policy tests pass. The complete TUI suite passes 317 of 317. The canonical
 `./scripts/check` gate passes 940 Python tests, 32 Python protocol-fixture tests, 35 repository
 check/policy tests, 281 core TUI tests, 31
-TypeScript protocol-fixture tests, and 4 Node-Python boundary tests. One live `xterm-256color` tmux
+TypeScript protocol-fixture tests, and 5 Node-Python boundary tests. One live `xterm-256color` tmux
 PTY kept the exact pending draft while the same Ink process resized from 110 by 30 to 76 by 24 and
 then 44 by 20. The observed wide, stacked, and compact compositions retained authoritative status
 and showed aligned Unicode borders and mascot text in the inspected WSL terminal. The App-level Ink
