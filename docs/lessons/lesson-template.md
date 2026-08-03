@@ -6,21 +6,17 @@
   Verified against implementation
 - **Implementation status:** Match the linked user story
 - **Story:** Replace this text with a link to the CAH-XXX delivery contract
-- **Visual companion:** Optional starting with CAH-025; link a requested deck when one exists
+- **Visual companion:** None; do not add or revise presentation files while the freeze is active
 - **Related architecture:** Link the most relevant ADR and conceptual document
 
 > State clearly whether the lesson describes accepted design, planned behavior, or observed
 > implementation. Never present a future component as shipped.
 
-When a visual companion is explicitly requested, render it slide by slide, inspect every render,
-and run the presentation overflow test before treating it as evidence. Visual flair should make the
-concept memorable without weakening technical accuracy, status honesty, legibility, or caveats.
-
 Keep the lesson tight. Prioritize system design, agent-loop design, and harness ownership over a
 long inventory of implementation details. The written lesson includes a compact architecture
 diagram that shows where this unit sits in the TUI, Python harness, provider, tool, and evidence
-boundaries that are relevant to it. Any explicitly requested visual companion shows the same
-placement.
+boundaries that are relevant to it. Do not add or revise a presentation unless the user explicitly
+reverses the presentation freeze.
 
 ## Quick summary
 

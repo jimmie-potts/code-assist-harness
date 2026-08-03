@@ -27,13 +27,15 @@ instructions, expose a tool, or add another agent-loop step.
 - Construct the boundary through `WorkspaceBoundary.from_path(...)`, canonicalizing one existing
   directory and capturing its filesystem identity.
 - Resolve existing model-facing relative paths through `resolve_existing(...)`, following symlinks
-  and proving the canonical target remains beneath the captured root.
+  and returning a best-effort containment snapshot when the observed canonical target is beneath
+  the captured root.
 - Return both the canonical absolute path for later local use and its canonical, workspace-relative
   POSIX label for later provider and evidence use.
 - Move or delegate the Python runtime's existing root validation to this boundary without changing
   launch arguments, readiness behavior, protocol fields, or the TUI's workspace selection.
 - Cover canonical roots, normal descendants, root reporting, internal symlinks, escape attempts,
-  missing paths, and stale or replaced roots with deterministic temporary-workspace tests.
+  missing paths, and observable stale or replaced roots with deterministic temporary-workspace
+  tests.
 
 ## Locked boundary contract
 
@@ -63,12 +65,14 @@ instructions, expose a tool, or add another agent-loop step.
 - Construction records `st_dev` and `st_ino` from the canonical root. Resolution checks that the
   stored root path still resolves to itself, is a directory, and has the same identity before and
   after target resolution.
-- A missing, moved, replaced, type-changed, or newly redirected root is stale. The boundary never
-  silently adopts the new object at the old pathname; the runtime must create a new boundary through
-  an explicit new workspace selection.
-- Two identity checks narrow ordinary replacement races but do not create a race-free capability.
-  An attacker able to swap paths between checks can still exploit a check/use gap. Descriptor-based
-  traversal and access remain a later hardening unit.
+- If either snapshot check observes a missing, moved, replaced, type-changed, or newly redirected
+  root, the boundary reports it as stale. The runtime creates a new boundary only through an
+  explicit new workspace selection.
+- Device and inode identity is a best-effort replacement signal, not a non-reusable anchor. Once the
+  original directory is no longer held open, the filesystem may recycle its inode for a replacement
+  at the same pathname. Two identity checks narrow ordinary replacement races but cannot guarantee
+  that every replacement or swap is detected. Descriptor-based traversal and access remain a later
+  hardening unit.
 
 ### Relative-path admission and canonical reporting
 
@@ -97,7 +101,7 @@ diagnostic, or transcript content.
 | Code | Fixed message | Used when |
 | --- | --- | --- |
 | `invalid_workspace_root` | `Workspace root must be an existing directory.` | construction cannot resolve an accessible directory |
-| `stale_workspace_root` | `The selected workspace is no longer available.` | the captured root is missing, redirected, replaced, or no longer a directory |
+| `stale_workspace_root` | `The selected workspace is no longer available.` | a snapshot check observes that the captured root is missing, redirected, replaced, or no longer a directory |
 | `invalid_workspace_path` | `Workspace path must be a non-empty relative path.` | input is empty, absolute, contains `..`, or is otherwise not a valid path value |
 | `workspace_path_not_found` | `Workspace path does not exist.` | strict target resolution fails without establishing an escape |
 | `workspace_path_outside` | `Workspace path is outside the selected workspace.` | a resolved component or target leaves the canonical root |
@@ -120,24 +124,28 @@ are intentionally not exposed.
    root, including missing descendants beneath an escaping directory symlink.
 6. Missing and dangling in-workspace paths fail with `workspace_path_not_found`; no create-target or
    closest-existing-ancestor behavior is introduced.
-7. A missing, renamed, replaced, redirected, or type-changed root fails with
-   `stale_workspace_root` rather than adopting another filesystem object.
+7. A snapshot check that observes a missing, renamed, replaced, redirected, or type-changed root
+   fails with `stale_workspace_root`; the contract documents that inode reuse or a swap between
+   checks may evade this best-effort detection.
 8. Every public value and exception is typed and documented; exception strings and value
    representations contain no supplied or canonical host path or raw OS failure.
 9. Focused tests include a happy path and meaningful traversal, symlink-escape, missing-target, and
    stale-root failures without network, provider, subprocess, or timing dependence.
-10. The lesson and visual companion remain explicitly planned until implementation, then trace the
-    concrete path, at least one failure test, rendered-slide inspection, overflow validation, and
-    the full repository gate.
+10. The Markdown lesson remains explicitly planned until implementation, then traces the concrete
+    path, at least one failure test, and the full repository gate. The frozen visual companion
+    remains unchanged and is not implementation or completion evidence.
 
 ## Validation
 
 - Add focused `tests/test_workspace.py` coverage for construction, canonical reporting, `.` root
   reporting, normal descendants, internal file and directory symlinks, empty, NUL, absolute and
   traversal inputs, sibling-prefix escapes, dangling links, missing targets, escaping missing
-  descendants, root removal, root replacement, and root type changes.
+  descendants, root removal, observable root replacement, and root type changes.
 - Update runtime tests to prove the existing CLI accepts one canonical workspace and maps invalid
   root construction to its bounded startup failure without leaking the supplied path.
+- For observable replacement coverage, rename the original root so it remains referenced, create a
+  replacement at the captured pathname, assert that its device/inode differs, and then resolve. This
+  keeps the test independent of inode-reuse behavior.
 - Assert the exact failure-code/message table and check messages plus value representations against
   distinctive temporary path names and raw OS text.
 - Use temporary directories and local filesystem operations only; no subprocess, provider, network,
@@ -150,10 +158,10 @@ are intentionally not exposed.
 
 Update `README.md`, `docs/architecture.md`, `docs/context-engineering.md`, `docs/safety-model.md`,
 `docs/glossary.md`, the story and lesson indexes, and the backlog with the implemented boundary,
-its canonical-reporting rule, fixed failures, and residual check/use risk. Reconcile this lesson to
-the exact modules and tests, and complete
-`docs/lessons/assets/cah-024-workspace-boundary.pptx` with slide-by-slide render inspection and
-overflow evidence in the implementation note.
+its canonical-reporting rule, fixed failures, and residual check/use risk. Reconcile the Markdown
+lesson to the exact modules and tests. Retain the frozen
+`docs/lessons/assets/cah-024-workspace-boundary.pptx` unchanged and record its known divergence from
+the authoritative contract.
 
 ## Out of scope
 
@@ -175,8 +183,9 @@ overflow evidence in the implementation note.
   narrow boundary.
 - Runtime tests prove delegation preserves the current one-root launch contract and removes raw-path
   startup errors.
-- The written and visual lessons locate CAH-024 between runtime workspace selection and future
-  context/read tools while keeping provider, tool, and evidence changes absent.
+- The Markdown lesson locates CAH-024 between runtime workspace selection and future context/read
+  tools while keeping provider, tool, and evidence changes absent. The frozen deck is not planned
+  evidence.
 - Focused tests and the repository-wide non-live gate pass before the story moves to Done.
 
 ## Deferred work

@@ -13,6 +13,11 @@
 > This lesson describes an accepted implementation plan. Every code block is explicitly labeled
 > pseudocode and is not evidence of shipped behavior.
 
+> **Frozen-deck warning:** The historical deck is not authoritative evidence and will not be
+> revised. Slides 4-6 use the obsolete names `WorkspacePathError`, `WorkspacePath`, and “5 fixed
+> error classes.” The contract below governs: one `WorkspaceBoundaryError`, one
+> `ResolvedWorkspacePath`, and five stable error codes.
+
 ## Quick summary
 
 CAH-024 plans one immutable Python boundary that converts a selected workspace into safe,
@@ -61,13 +66,15 @@ again immediately before access, and stronger designs bind the check to an open 
 ## Key concepts
 
 - **Canonical root:** the resolved absolute directory that anchors every operation.
-- **Root identity:** the root's device and inode, captured so an object later installed at the same
-  pathname is not silently adopted.
-- **Containment:** a component-aware proof that a canonical target is the root or its descendant.
+- **Root identity:** the root's device and inode, captured as a best-effort signal for ordinary
+  replacement rather than a non-reusable identity anchor.
+- **Containment:** a component-aware decision over whether the observed canonical target is the root
+  or its descendant.
 - **Canonical relative label:** the target's provider-safe path below the root; an accepted symlink
   reports its target rather than its alias.
 - **Safe representation:** ordinary value and error representations omit canonical host paths.
-- **Snapshot:** a true statement at the time of resolution, not an open handle or lasting authority.
+- **Snapshot:** a best-effort containment result based on filesystem observations during resolution,
+  not an open handle or lasting authority.
 - **Fixed failure:** a stable code/message pair that reveals neither a host path nor raw OS text.
 
 ## Architecture and design
@@ -78,7 +85,7 @@ select one root -- child argv --> runtime composition
 render validated events                |
                                        v
                           [CAH-024 WorkspaceBoundary]
-                          canonical root + identity
+                          canonical root + identity snapshot
                           relative path -> contained snapshot
                               |                    |
                  future instruction/context   future native read tools
@@ -99,7 +106,8 @@ returns the canonical target only when it remains inside the same root.
 
 Internal symlinks stay useful, but their aliases do not become durable provenance. Missing leaves
 are rejected because this unit supports future reads, not future creates. Root identity is checked
-before and after resolution to detect ordinary replacement, while the residual swap race remains
+before and after resolution to detect ordinary replacement. The original directory is not held
+open, so inode reuse or a swap between checks can still evade detection; that residual risk remains
 explicit.
 
 ## Practical walkthrough
@@ -110,8 +118,8 @@ explicit.
 3. Validate relative syntax before touching the requested path.
 4. Resolve strictly, verify component-aware containment, and compute the canonical relative label.
 5. Recheck root identity before returning the snapshot.
-6. Test normal paths, internal links, escaping links, missing targets, and root replacement. Keep
-   provider, protocol, TUI, and repository-content behavior unchanged.
+6. Test normal paths, internal links, escaping links, missing targets, and observable root
+   replacement. Keep provider, protocol, TUI, and repository-content behavior unchanged.
 
 ## Implementation code samples
 
@@ -160,7 +168,8 @@ error content.
 | internal file/directory symlink | canonical containment | accept and report target-relative path | symlink happy-path tests |
 | symlink to outside | canonical containment | `workspace_path_outside` | file, directory, and missing-descendant tests |
 | missing or dangling in-root target | strict resolution | `workspace_path_not_found` | missing-path tests |
-| root removed or replaced | identity check | `stale_workspace_root`; adopt nothing | root-mutation tests |
+| root removal or observable replacement | identity snapshot | `stale_workspace_root` | root-mutation tests |
+| inode reuse or a swap between checks | snapshot limitation | may evade detection; later tools re-resolve | threat-model review |
 | path changes after return | future caller | re-resolve before access; snapshot makes no guarantee | documented residual-risk test boundary |
 
 ## Production expansion
@@ -209,22 +218,25 @@ work.
 
 1. Draw why `/work/repo-copy` is not a child of `/work/repo` despite the shared text prefix.
 2. Predict the reported path when `alias/file.py` links to `src/file.py` inside the root.
-3. Replace the workspace directory after constructing the boundary and explain why identity matters.
+3. Replace the workspace directory after constructing the boundary and explain both what the
+   identity snapshot detects and how inode reuse can evade it.
 4. Identify the exact future line where a native read tool must resolve again before opening a file.
 
 ## Key takeaways
 
 - The Python harness owns one workspace-containment rule for every later repository capability.
-- Canonical, component-aware containment plus root identity rejects common escapes and replacement,
-  but the returned path remains only a snapshot.
+- Canonical, component-aware containment rejects escapes and the identity snapshot detects ordinary
+  replacement, but neither result is a lasting filesystem capability.
 - Descriptor-relative or sandboxed access is stronger when the threat model justifies its platform
   and operating cost.
 
 ## Glossary
 
 - **Canonical path:** an absolute path after links and dot components are resolved.
-- **Containment:** proof that one canonical path is a root or one of its descendants.
-- **Device and inode:** filesystem identity values used to distinguish objects at the same pathname.
+- **Containment:** a component-aware decision that an observed canonical path is a root or one of
+  its descendants.
+- **Device and inode:** filesystem identity values that distinguish live objects but may be reused
+  after an object is no longer referenced.
 - **Path alias:** a requested symlink spelling that names another canonical target.
 - **TOCTOU:** time-of-check/time-of-use; a change between validation and access.
 

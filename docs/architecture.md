@@ -547,10 +547,11 @@ default test or evaluation makes a network request; the optional `live_provider`
 explicit flags, the exact model, and a credential. The guards are defense in depth rather than an
 operating-system sandbox for native subprocesses.
 
-CAH-007 and each unit completed going forward link a visual lesson under `docs/lessons/assets/`.
-This prospective rule does not change the evidence contract of units that were already Done. The
-PowerPoint is rendered and inspected slide by slide and overflow-tested; visual flair remains
-subordinate to accurate architecture, status, evidence, legibility, and caveats.
+All committed presentation files are frozen historical artifacts. Existing visual lessons remain
+under `docs/lessons/assets/`, but they may diverge from later design corrections and are not
+authoritative. Starting with CAH-025, the Markdown lesson and its compact architecture diagram are
+the only lesson artifacts. No presentation is added or revised unless the user explicitly reverses
+this freeze.
 
 ## Delivery sequence
 

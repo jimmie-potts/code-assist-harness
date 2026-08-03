@@ -278,8 +278,10 @@ adapter and explicit `--provider openai --model gpt-5.6-luna` launch path. Defau
 default tests, and this guide remain on `MockSession`; workspace discovery, tools, and approvals are
 still absent.
 
-With M1 complete, the next planning step is to refine the first single-responsibility E3 story for
-repository context and bounded native reads before implementing it.
+[CAH-024](../user-stories/cah-024-establish-workspace-boundary.md) is now the
+implementation-ready first E3 unit. It establishes the reusable workspace-containment boundary
+without reading files or changing the protocol. Implementing that contract is the next delivery
+step; repository-instruction discovery and bounded native reads remain subsequent units.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

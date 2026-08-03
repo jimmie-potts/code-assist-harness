@@ -8,7 +8,7 @@ single-responsibility unit. This note describes planned behavior only; it does n
 
 ## Outcome
 
-CAH-024 will add one immutable Python boundary that owns canonical root identity and existing-path
+CAH-024 will add one immutable Python boundary that owns a canonical-root snapshot and existing-path
 containment for every later repository-context capability. The unit stops after returning a
 canonical inside-workspace snapshot or a fixed safe failure.
 
@@ -61,12 +61,15 @@ below so the unit can begin without another design checkpoint.
   descendant beneath an escaping directory link is still an escape when that outside ancestor can
   be established.
 
-### Root replacement fails closed
+### Root replacement detection is best effort
 
 - The root's canonical path and device/inode identity are checked before and after resolving a
   target.
-- Removal, rename, replacement, redirection, or a change away from directory type produces a stale
-  root failure. The boundary never adopts a new object at the old pathname.
+- When either snapshot check observes removal, rename, replacement, redirection, or a change away
+  from directory type, the boundary produces a stale-root failure.
+- The boundary does not retain an open handle to the original root. Once that object is no longer
+  referenced, its inode may be recycled for a replacement at the same pathname, so the snapshot
+  cannot promise that every replacement is detected.
 - A caller selects a new workspace by constructing a new boundary; mutation of the existing value
   is unavailable.
 
@@ -88,9 +91,10 @@ diagnostic, or transcript evidence.
 
 ## Residual risk and ownership handoff
 
-`resolve_existing` proves a snapshot. Checking the root on both sides of target resolution catches
-ordinary replacement but cannot prevent a path from changing after the method returns or being
-swapped away and back between system calls.
+`resolve_existing` returns a best-effort containment snapshot. Checking the root on both sides of
+target resolution catches ordinary observable replacement but cannot prevent a path from changing
+after the method returns, being swapped away and back between system calls, or receiving a recycled
+device/inode pair after the original root is no longer held.
 
 Future native read tools must call the method again immediately before access and then enforce their
 own file-type, ignore, prohibited-location, and output policies. A later security unit can adopt
@@ -127,27 +131,32 @@ outgrows host-path snapshots. CAH-024 must not imply those controls already exis
 
 - Focused temporary-workspace tests cover construction, root reporting, normal descendants,
   internal file and directory symlinks, absolute/traversal input, sibling-prefix and symlink escape,
-  missing and dangling targets, escaping missing descendants, and root removal/replacement/type
-  change.
+  missing and dangling targets, escaping missing descendants, and observable root
+  removal/replacement/type change.
 - Runtime tests prove delegation preserves one-root startup and replaces raw-path errors with the
   fixed boundary surface.
 - Exact error-table assertions and distinctive temporary path values prove messages do not leak.
-- The written lesson and visual companion locate CAH-024 between runtime selection and future
-  context/read tools while showing provider, tool, and evidence boundaries as unchanged.
+- The Markdown lesson locates CAH-024 between runtime selection and future context/read tools while
+  showing provider, tool, and evidence boundaries as unchanged. The frozen deck is not planned
+  evidence.
 - Focused tests and `./scripts/check` must pass before the story moves from Planned to Done.
 
 The six-slide planned visual companion was duplicated from the established CAH-023 lesson pattern
 and edited through artifact-tool. Every source and final slide was inspected individually, the
 template-fidelity check passed with zero issues, and the presentation overflow test reported
-`Test passed. No overflow detected.` These checks validate the planning artifact only; they are not
-evidence that `WorkspaceBoundary` or any read behavior exists.
+`Test passed. No overflow detected.` These checks validate the historical planning artifact only;
+they are not evidence that `WorkspaceBoundary` or any read behavior exists. The deck is now frozen
+and may contradict later design corrections; this note, the story, and the Markdown lesson govern.
+Its known obsolete terms are `WorkspacePathError`, `WorkspacePath`, and “5 fixed error classes”;
+the authoritative contract uses one `WorkspaceBoundaryError`, one `ResolvedWorkspacePath`, and five
+stable error codes.
 
 ## Lesson format handoff
 
-CAH-024 is the final unit that includes a visual lesson by default. Starting with CAH-025, each
-implementation-ready story keeps its concise Markdown learning companion and embedded architecture
-diagram, but no PowerPoint deck is part of the unit unless the user explicitly requests one. The
-historical CAH-007 through CAH-024 decks and their validation evidence remain unchanged.
+CAH-024 is the final unit with a historical visual lesson. All committed presentation files are
+frozen. Starting with CAH-025, each implementation-ready story keeps its concise Markdown learning
+companion and embedded architecture diagram, but no PowerPoint deck is part of the unit. Historical
+decks and their validation evidence remain unchanged even when later design corrections diverge.
 
 ## Implementation handoff
 
