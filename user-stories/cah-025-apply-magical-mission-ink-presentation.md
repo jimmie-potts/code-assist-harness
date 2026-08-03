@@ -1,6 +1,6 @@
 # CAH-025 - Apply the Magical Mission Ink presentation
 
-- **Status:** In progress
+- **Status:** Done
 - **Milestone / epic:** M2 - Read-only coding assistant / E7 - Ink TUI experience
 - **Dependencies:** CAH-023
 - **Lesson:**
@@ -153,12 +153,11 @@ then 44 by 20. The observed wide, stacked, and compact compositions retained aut
 and showed aligned Unicode borders and mascot text in the inspected WSL terminal. The App-level Ink
 resize test independently preserves a typed draft across those widths without invoking submission or
 cancellation callbacks; `NO_COLOR` and `TERM=dumb` fallbacks are verified semantically. `git diff
---check` passes. This story remains **In
-progress** and its lesson remains an **Implementation companion** only until publication evidence is
-recorded.
-
-Final evidence to add before Done is the branch, commit, pull-request, review-readiness, and
-unresolved-thread status.
+--check` passes. The implementation is published from branch `agent/magical-mission-tui` at commit
+`8398d2c` in ready-for-review [pull request
+#26](https://github.com/jimmie-potts/code-assist-harness/pull/26), targeting
+`codex/implement-cah-023`. A thread-aware GitHub audit reported zero review threads at handoff. The
+story is **Done**, and its lesson is **Verified against implementation**.
 
 ## Out of scope
 

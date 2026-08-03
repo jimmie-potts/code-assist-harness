@@ -40,8 +40,8 @@ validated hard limits, per-session accounting, deterministic deadline and cleanu
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
 an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
-protocol v1 is unchanged. CAH-025 is in progress only until publication as a presentation-only E7
-refinement: `app.tsx` retains input ownership while `magical-mission.tsx` selects responsive and
+protocol v1 is unchanged. CAH-025 is complete as a presentation-only E7 refinement: `app.tsx`
+retains input ownership while `magical-mission.tsx` selects responsive and
 reduced-decoration rendering for existing projections. Its complete TUI suite, canonical repository
 gate, automated pending-draft resize, and representative PTY layouts pass. CAH-024 is
 implementation-ready but still planned; it remains the first E3 primitive,
@@ -207,7 +207,7 @@ dependency-resolution changes commit `uv.lock`.
 | Concern | Owner | Notes |
 | --- | --- | --- |
 | Terminal input and keybindings | `app.tsx` | The controller owns the draft, Enter, Escape eligibility, and visible local feedback; it does not decide policy or terminal outcomes. |
-| Current responsive layout and decoration | `magical-mission.tsx` | CAH-025 projects existing runtime/session truth across wide, stacked, compact, no-color, and reduced-decoration variants; implementation and validation are complete, with publication pending. |
+| Current responsive layout and decoration | `magical-mission.tsx` | Completed CAH-025 projects existing runtime/session truth across wide, stacked, compact, no-color, and reduced-decoration variants. |
 | Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |

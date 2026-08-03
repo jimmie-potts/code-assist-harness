@@ -2,9 +2,9 @@
 
 - **Unit:** CAH-025
 - **Milestone:** M2 - Read-only coding assistant
-- **Lesson status:** Implementation companion
-- **Implementation status:** In progress; implementation and validation are complete, while publish
-  evidence is pending
+- **Lesson status:** Verified against implementation
+- **Implementation status:** Done; implementation, validation, publication, and review-readiness
+  evidence are recorded
 - **Story:**
   [CAH-025](../../user-stories/cah-025-apply-magical-mission-ink-presentation.md)
 - **Visual companion:** None; the Markdown lesson and compact text diagram are authoritative
@@ -12,9 +12,8 @@
   [architecture overview](../architecture.md#ownership), and
   [session-state reducer](cah-010-session-state-reducer.md)
 
-> This lesson traces code that is present in the CAH-025 worktree. The unit is not yet Done because
-> publish evidence still needs to be recorded. It does not present future plan, tool, diff,
-> repository-read, edit, or
+> This lesson traces the published CAH-025 implementation and its verified evidence. It does not
+> present future plan, tool, diff, repository-read, edit, or
 > approval-decision interfaces as implemented.
 
 ## Quick summary
@@ -271,8 +270,10 @@ same Ink process resized from 110 by 30 to 76 by 24 and then 44 by 20; all three
 authoritative status and showed aligned Unicode borders and mascot text in the inspected WSL
 terminal. The App-level Ink resize test independently preserves a typed draft across those widths
 without invoking submission or cancellation callbacks; semantic tests cover `NO_COLOR` and
-`TERM=dumb`. `git diff --check` passes. The story remains In progress only until publication
-evidence is recorded.
+`TERM=dumb`. `git diff --check` passes. The implementation is published from branch
+`agent/magical-mission-tui` at implementation commit `8398d2c` in ready-for-review
+[pull request #26](https://github.com/jimmie-potts/code-assist-harness/pull/26), targeting
+`codex/implement-cah-023`. A thread-aware GitHub audit reported zero review threads at handoff.
 
 ## Production expansion
 

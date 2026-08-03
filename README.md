@@ -57,8 +57,8 @@ network-free fake, CAH-021 completes the first injected provider-neutral turn, a
 [written lesson](docs/lessons/cah-022-loop-limits.md) and
 [visual companion](docs/lessons/assets/cah-022-loop-limits.pptx). CAH-023 adds the strict OpenAI
 Responses adapter and explicit launch selection without changing protocol v1. CAH-025 presentation
-work is **In progress** only until its reviewed publication is recorded: `App` retains its existing
-input and supervised callbacks while a responsive Magical Mission view decorates current
+work is **Done**: `App` retains its existing input and supervised callbacks while a responsive
+Magical Mission view decorates current
 conversation, runtime, session, warning, and failure projections. The complete TUI suite, canonical
 repository gate, automated pending-draft resize, and representative wide/stacked/compact PTY renders
 pass. Workspace discovery and reads, tool execution, policy, future plan/tool/diff/approval

@@ -117,8 +117,14 @@ Node-Python boundary tests. `git diff --check` passes. The App-level Ink resize 
 types and preserves the pending draft across 110, 76, and 44 columns without invoking submission or
 cancellation callbacks. Automated coverage also verifies `NO_COLOR` and `TERM=dumb`.
 
-Before changing the story to Done, record the published branch, commit, pull request, review
-readiness, and unresolved-thread audit.
+## Publication evidence
 
-Until those items are supplied, CAH-025 remains **In progress** and its lesson remains an
-**Implementation companion**. No retained presentation file is added or revised.
+- Branch: `agent/magical-mission-tui`
+- Implementation commit: `8398d2c` (`Apply Magical Mission TUI`)
+- Review handoff: ready-for-review [pull request
+  #26](https://github.com/jimmie-potts/code-assist-harness/pull/26), targeting
+  `codex/implement-cah-023`
+- Thread-aware audit at handoff: zero review threads, therefore zero unresolved actionable threads
+
+CAH-025 is **Done**, and its lesson is **Verified against implementation**. No retained presentation
+file is added or revised.

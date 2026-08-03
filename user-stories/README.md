@@ -40,7 +40,7 @@ serialization, and bounded usage evidence. CAH-022 adds four validated hard limi
 tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop evidence with
 v1/v2/v3 replay. CAH-023 adds the strict OpenAI Responses adapter plus explicit cross-language
 provider/model configuration while preserving the mock default. M0 and M1 are complete. CAH-025 is
-**In progress** only until publication as an independent E7 presentation refinement: its Magical
+**Done** as an independent E7 presentation refinement: its Magical
 Mission view decorates only existing runtime/session truth and adds responsive, reduced-decoration
 fallbacks without changing the protocol, loop, or input authority. The complete TUI suite,
 canonical repository gate, automated pending-draft resize, and representative PTY layouts pass.
@@ -68,7 +68,7 @@ contained, workspace-relative path resolution without yet reading files or expos
 | 13 | [CAH-021: Run one provider-neutral turn](cah-021-complete-one-model-turn.md) | [One provider-neutral turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Done | CAH-020 |
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Done | CAH-021 |
 | 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Done | CAH-022 |
-| 16 | [CAH-025: Apply the Magical Mission Ink presentation](cah-025-apply-magical-mission-ink-presentation.md) | [Magical Mission Ink presentation](../docs/lessons/cah-025-magical-mission-ink-presentation.md) | M2 | In progress | CAH-023 |
+| 16 | [CAH-025: Apply the Magical Mission Ink presentation](cah-025-apply-magical-mission-ink-presentation.md) | [Magical Mission Ink presentation](../docs/lessons/cah-025-magical-mission-ink-presentation.md) | M2 | Done | CAH-023 |
 | 17 | [CAH-024: Establish the workspace boundary](cah-024-establish-workspace-boundary.md) | [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md) | M2 | Planned | CAH-023 |
 
 See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
