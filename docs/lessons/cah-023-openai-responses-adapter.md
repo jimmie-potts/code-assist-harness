@@ -65,7 +65,8 @@ safe --init -> ignored mode-0600 dev.env -> explicit reader
 User provider/model flags --------------------+
    |
    v
-TypeScript TUI launcher ---- NDJSON UI commands/events ---- Python runtime
+TypeScript TUI launcher -- validated NDJSON commands/events -- Python runtime
+   |                 session task: Unicode scalars only            |
    |                                                     composition root
    |                                                            |
    |                                                            v
@@ -94,6 +95,8 @@ Three invariants hold the boundary together:
    rejected before SDK import or client construction. The normal child also starts Python with `-E`.
 2. **Validation before meaning.** Sequence, response identity, item identity, indices, text snapshots,
    message statuses, model, reasoning mode, and usage must reconcile before completion is trusted.
+   A `session.start` task must contain only Unicode scalar values at both wire schemas, so a JSON lone
+   surrogate cannot reach provider-session construction.
    Assistant text admits TAB/LF layout but rejects every other C0/C1 terminal control before it can
    become a provider-neutral event.
 3. **Cleanup before terminal release.** A natural terminal is buffered until stream and client close
@@ -215,6 +218,7 @@ not timing against a network service.
 | Scenario | Responsible boundary | Safe result | Evidence |
 | --- | --- | --- | --- |
 | Non-string/unsupported provider, model, or ambient SDK/TLS logging | Composition root | Fixed startup error before SDK import | configuration and runtime tests |
+| Escaped lone surrogate in `session.start.task` | TUI and Python wire schemas | local rejection, or recoverable `invalid_payload`; no session or HTTP | shared fixture and supervisor/runtime tests |
 | Out-of-order, mismatched, tool, or reasoning-text event | Adapter automaton | `invalid_response`; no raw payload | parameterized malformed-stream tests |
 | OSC, CSI, carriage return, or another unsupported text control | Provider value plus adapter automaton | `invalid_response`; unsafe fragment never reaches protocol/TUI | domain and hostile-delta tests |
 | Provider exception after partial text | Adapter failure table | One fixed provider failure | closed-table exception tests |

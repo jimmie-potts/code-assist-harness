@@ -52,10 +52,7 @@ def _validate_safe_message(value: str) -> str:
 
 def _validate_assistant_text(value: str) -> str:
     """Admit normal text layout without allowing terminal state-changing controls."""
-    try:
-        value.encode("utf-8")
-    except UnicodeEncodeError:
-        raise ValueError("assistant text must be valid UTF-8") from None
+    _validate_unicode_scalar_text(value)
     if any(
         (ord(character) < 32 and character not in {"\t", "\n"}) or 127 <= ord(character) <= 159
         for character in value
@@ -64,8 +61,24 @@ def _validate_assistant_text(value: str) -> str:
     return value
 
 
+def _validate_unicode_scalar_text(value: str) -> str:
+    """Reject lone surrogates that JSON can represent but UTF-8 cannot encode."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("text must contain only Unicode scalar values") from None
+    return value
+
+
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 """A semantic wire string that must contain at least one character."""
+
+_SessionTask = Annotated[
+    str,
+    StringConstraints(min_length=1),
+    AfterValidator(_validate_unicode_scalar_text),
+]
+"""A non-empty user task that can be encoded as UTF-8 after JSON decoding."""
 
 ErrorCode = Annotated[
     str,
@@ -141,7 +154,7 @@ class RuntimeInitializePayload(_WireModel):
 class SessionStartPayload(_WireModel):
     """Wire payload carrying the user task for a future session implementation."""
 
-    task: NonEmptyString
+    task: _SessionTask
 
 
 class SessionCancelPayload(_WireModel):

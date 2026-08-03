@@ -219,6 +219,20 @@ def test_assistant_text_accepts_supported_layout_and_unicode() -> None:
     )
 
 
+def test_session_task_accepts_unicode_scalar_text() -> None:
+    task = "Explain café 👩‍💻"
+
+    command = validate_command(_command("session.start", {"task": task}))
+
+    assert command.payload.task == task
+
+
+@pytest.mark.parametrize("task", ["unsafe\ud800text", "unsafe\udffftext"])
+def test_session_task_rejects_lone_surrogates(task: str) -> None:
+    with pytest.raises(ValidationError):
+        validate_command(_command("session.start", {"task": task}))
+
+
 @pytest.mark.parametrize("code_point", [*range(0x20), *range(0x7F, 0xA0)])
 @pytest.mark.parametrize("event_type", ["assistant.delta", "assistant.completed"])
 def test_assistant_text_rejects_unsupported_terminal_controls(

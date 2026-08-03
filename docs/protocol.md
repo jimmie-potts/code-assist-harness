@@ -140,7 +140,7 @@ All objects are strict: undeclared envelope or payload fields are invalid.
 | Command | Payload | Implemented behavior through CAH-006 |
 | --- | --- | --- |
 | `runtime.initialize` | `workspace: non-empty string` | Compare with the supervised canonical workspace and emit readiness or a terminal initialization error. |
-| `session.start` | `task: non-empty string` | After readiness, start the deterministic mock when trimmed task text is non-empty and no session is active. |
+| `session.start` | `task: non-empty Unicode-scalar string` | After readiness, start the selected session when trimmed task text is non-empty and no session is active. |
 | `session.cancel` | `session_id: ses_…` | Request cooperative cancellation for the matching active mock; repeated or recent-terminal requests are harmless. |
 | `runtime.shutdown` | Empty object | End cleanly; an accepted mock session is drained before exit. |
 
@@ -178,7 +178,9 @@ contract drift becomes a demonstrated maintenance problem.
 An unsupported version is rejected before interpreting its version-specific fields. Malformed JSON,
 numeric overflow, an invalid envelope, an unknown command type, or an invalid known payload becomes
 a safe `runtime.error`; the Python reader continues at the next physical line. The error never
-copies the raw line or validator internals. After readiness, Python also returns recoverable
+copies the raw line or validator internals. Although a JSON escape can spell a lone surrogate, both
+wire schemas reject it from `session.start.task` before the TUI writes the command or Python creates
+a session; only Unicode scalar values can become provider input. After readiness, Python also returns recoverable
 `invalid_task` for a whitespace-only task and recoverable `session_active` for an overlapping task,
 both correlated to the rejected command. The Ink submission path blocks these two cases locally,
 so those runtime errors protect direct or future protocol callers rather than define normal UI

@@ -149,6 +149,14 @@
       "path": "invalid/invalid-payload.ndjson"
     },
     {
+      "id": "invalid-task-unicode",
+      "direction": "command",
+      "classification": "invalid_payload",
+      "reason": "The session.start task contains an escaped lone surrogate that is not a Unicode scalar value.",
+      "format": "ndjson_line",
+      "path": "invalid/invalid-task-unicode.ndjson"
+    },
+    {
       "id": "unsafe-error-message",
       "direction": "event",
       "classification": "invalid_payload",

@@ -28,6 +28,11 @@ terminal-text invariant at the untrusted process boundary.
 - An SDK create or stream-read awaitable that independently raises `CancelledError` now enters the
   bounded provider-failure path and starts cleanup. It cannot silently end the iterator or leave
   `wait_closed()` pending; only harness-selected cancellation retains that control-flow meaning.
+- The TypeScript and Python command schemas now state the Unicode-scalar invariant for
+  `session.start.task` explicitly. A shared escaped-surrogate fixture and an OpenAI-selected child
+  regression prove the TUI rejects invalid input before publication or write and Python returns
+  recoverable `invalid_payload` before session construction; the child processes shutdown normally
+  without HTTP.
 
 ## Architecture position
 
@@ -74,5 +79,9 @@ release, and the harness continues to own limits, cancellation intent, terminal 
 - After the terminal-text and presentation-freeze follow-up, `./scripts/check` passed with 935
   non-live Python tests, 31 Python protocol-fixture tests, 35 repository-policy/check-script tests,
   238 TUI tests, 30 TypeScript protocol-fixture tests, and 4 real Node-to-Python boundary tests.
+- After the session-task Unicode follow-up, `./scripts/check` passed with 940 non-live Python tests,
+  32 Python protocol-fixture tests, 35 repository-policy/check-script tests, 240 TUI tests,
+  31 TypeScript protocol-fixture tests, and 4 real Node-to-Python boundary tests. The selected-OpenAI
+  regression used a fake local key and made no provider request.
 - GitHub Actions runs the same canonical gate on the published commit; remote status is verified
   separately. The credential-gated live smoke remains supplemental and was not run.

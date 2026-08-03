@@ -211,6 +211,18 @@ describe('version 1 protocol schemas', () => {
     ).toBe('malformed_envelope');
   });
 
+  it('accepts Unicode scalar tasks and rejects lone surrogates before encoding', () => {
+    const safe = command('session.start', {task: 'Explain café 👩‍💻'});
+    expect(parseCommandLine(JSON.stringify(safe))).toMatchObject({ok: true});
+    expect(() => encodeCommandLine(safe)).not.toThrow();
+
+    for (const task of ['unsafe\ud800text', 'unsafe\udffftext']) {
+      const unsafe = command('session.start', {task});
+      expect(parseFailureCode(parseCommandLine(JSON.stringify(unsafe)))).toBe('invalid_payload');
+      expect(() => encodeCommandLine(unsafe)).toThrow(ProtocolEncodingError);
+    }
+  });
+
   it('rejects terminal controls in user-visible failure fields', () => {
     const unsafe = runtimeEvent('runtime.error', {
       code: 'unsafe_error',

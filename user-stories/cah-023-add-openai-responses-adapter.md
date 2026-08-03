@@ -284,6 +284,10 @@
     `follow_redirects=false`, null account arguments after construction-time environment revalidation,
     `max_retries=0`, and no Python TLS key log under isolated mode; recognized ambient routing, header,
     log, proxy, and TLS key-log settings cannot redirect, duplicate, or expose the request.
+16. TypeScript rejects a `session.start` task containing a lone surrogate before local publication or
+    writing; Python classifies the escaped JSON form as recoverable `invalid_payload` before creating
+    a provider session. Shared fixture and explicitly selected OpenAI runtime tests prove the child
+    remains available without HTTP.
 
 ## Validation
 
@@ -296,6 +300,10 @@
 - Exercise TAB/LF success plus carriage-return, OSC-52, and C1 failure paths. Prove unsafe fragments
   become the fixed `invalid_response` before publication, both wire validators reject a shared hostile
   fixture as `invalid_payload`, and stream/client cleanup still runs.
+- Exercise an escaped lone surrogate in `session.start.task` through both wire contracts and an
+  explicitly selected OpenAI child. Prove local submission is rejected before publication or write,
+  direct Python input becomes recoverable `invalid_payload` before session construction, and a later
+  shutdown is processed without network access.
 - Use distinct sentinels for the API key, model/task/instruction text, function arguments, raw
   headers/request IDs, and exception bodies. Failure diagnostics and public evidence must contain
   none of them; intentionally mapped assistant text remains subject to the existing transcript
@@ -333,6 +341,9 @@ presentation is part of the unit.
   ambient TLS key logging, and start Python with `-E`, while Python independently revalidates provider
   configuration at the authoritative composition root. A shared fixture locks cross-language
   allowlist parity.
+- The TypeScript and Python command schemas admit only Unicode scalar values for session task text;
+  TypeScript rejects lone surrogates before writing, while Python classifies their escaped JSON form
+  as `invalid_payload` before a provider session can be constructed.
 - `scripts/with-openai-dev-key` safely initializes or imports only the ignored root development key
   into one explicitly selected command and rejects pre-existing OpenAI or TLS key-logging environment
   configuration; normal runtime and validation paths never auto-load the file.

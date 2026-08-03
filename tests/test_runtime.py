@@ -916,6 +916,49 @@ def test_runtime_contains_bad_lines_and_processes_later_valid_commands(tmp_path:
     )
 
 
+def test_openai_runtime_rejects_invalid_unicode_task_before_session_activation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    unsafe_task = "FAKE_UNICODE_TASK_BEFORE\ud800AFTER"
+    input_bytes = b"".join(
+        [
+            _command(
+                "runtime.initialize",
+                "cmd_initialize",
+                {"workspace": str(workspace.resolve())},
+            ),
+            _command("session.start", "cmd_unsafe", {"task": unsafe_task}),
+            _command("runtime.shutdown", "cmd_shutdown", {}),
+        ]
+    )
+
+    completed = _run_runtime(
+        "--workspace",
+        str(workspace),
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.6-luna",
+        input_bytes=input_bytes,
+        environment=_isolated_runtime_environment(
+            tmp_path,
+            OPENAI_API_KEY=FAKE_RUNTIME_SECRET,
+        ),
+    )
+    events = _stdout_events(completed)
+
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    assert [event.type for event in events] == ["runtime.ready", "runtime.error"]
+    error = events[1]
+    assert error.payload.code == "invalid_payload"
+    assert error.payload.recoverable is True
+    assert error.correlation_id is None
+    assert b"FAKE_UNICODE_TASK" not in completed.stdout
+
+
 def test_runtime_reports_unterminated_input_as_one_safe_protocol_error(tmp_path: Path) -> None:
     unterminated = _command("runtime.shutdown", "cmd_shutdown", {}).removesuffix(b"\n")
 
