@@ -865,6 +865,14 @@ class ProviderSession:
                 pass
             except Exception:
                 pass
+            try:
+                await operation.force_cancel_cleanup()
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+            except Exception:
+                pass
             return True
         finally:
             if not grace.done():

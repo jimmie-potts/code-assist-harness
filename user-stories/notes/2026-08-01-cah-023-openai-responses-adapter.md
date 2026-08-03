@@ -68,7 +68,10 @@ failure and later reports cleanup uncertainty through one bounded adapter except
 
 Cleanup joiners are independently cancellable. The shared owner is shielded and records logical
 closure itself when cancellation selected cleanup; this prevents a cancelled first joiner from
-leaving a later `wait_closed()` blocked forever.
+leaving a later `wait_closed()` blocked forever. Ordinary joins retain that shield. A later review
+added the provider port's required `force_cancel_cleanup()` escalation: after the harness grace
+expires, the session bypasses the shield and reaps the actual local owner while keeping remote release
+explicitly unconfirmed.
 
 The official SDK interprets null organization/project constructor arguments as permission to read
 environment defaults. The adapter therefore rejects other `OPENAI_*` names at startup and rechecks at

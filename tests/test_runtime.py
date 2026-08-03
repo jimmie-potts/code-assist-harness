@@ -105,6 +105,9 @@ class _EarlyReturningOperation:
     async def wait_closed(self) -> None:
         raise AssertionError("teardown must request cancellation")
 
+    async def force_cancel_cleanup(self) -> None:
+        return
+
 
 class _SingleOperationProvider:
     """Return one controlled provider operation for runtime-boundary tests."""

@@ -20,7 +20,7 @@ openai_state=\"$openai_state,${OPENAI_ORG_ID-unset},${OPENAI_PROJECT_ID-unset}\"
 openai_state=\"$openai_state,${OPENAI_CUSTOM_HEADERS-unset},${OPENAI_LOG-unset}\"
 openai_state=\"$openai_state,${OPENAI_API_TYPE-unset},${OPENAI_API_VERSION-unset}\"
 openai_state=\"$openai_state,${OPENAI_AD_TOKEN-unset},${OPENAI_ENDPOINT-unset}\"
-printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \\
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \\
     \"$(basename \"$0\")\" \\
     \"$*\" \\
     \"${OPENAI_API_KEY-unset}\" \\
@@ -35,6 +35,7 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \\
     \"${UV_NO_PROJECT-unset}\" \\
     \"${UV_ISOLATED-unset}\" \\
     \"$openai_state\" \\
+    \"${SSLKEYLOGFILE-unset}\" \\
     \"$PWD\" >> \"$CHECK_LOG\"
 if [ \"${FAIL_COMMAND-}\" = \"$(basename \"$0\") $*\" ]; then
     exit 23
@@ -71,6 +72,7 @@ def _run_check_with_stubs(
             "OPENAI_ORG_ID": "must-not-reach-checks",
             "OPENAI_PROJECT_ID": "must-not-reach-checks",
             "OPENAI_WEBHOOK_SECRET": "must-not-reach-checks",
+            "SSLKEYLOGFILE": "must-not-reach-checks",
             "PATH": f"{bin_directory}:{environment['PATH']}",
             "UV_NO_PROJECT": "true",
             "UV_ISOLATED": "true",
@@ -97,7 +99,7 @@ def _run_check_with_stubs(
 
 def test_check_runs_every_layer_without_credentials_or_runtime_selectors(tmp_path: Path) -> None:
     result, commands = _run_check_with_stubs(tmp_path)
-    command_fields = [command.split("|", maxsplit=14) for command in commands]
+    command_fields = [command.split("|", maxsplit=15) for command in commands]
 
     assert result.returncode == 0
     assert ["|".join(fields[:4]) for fields in command_fields] == [
@@ -137,8 +139,9 @@ def test_check_runs_every_layer_without_credentials_or_runtime_selectors(tmp_pat
         ("unset", "unset", "unset", "unset", "unset", "unset")
     }
     assert {fields[13] for fields in command_fields} == {",".join(["unset"] * 12)}
+    assert {fields[14] for fields in command_fields} == {"unset"}
     node_command = next(fields for fields in command_fields if fields[0] == "node")
-    assert node_command[14] == str(REPOSITORY_ROOT / "tui")
+    assert node_command[15] == str(REPOSITORY_ROOT / "tui")
     assert "==> Python lockfile and environment" in result.stdout
     assert "==> Python lint and docstrings" in result.stdout
     assert "==> Node runtime compatibility" in result.stdout
@@ -222,7 +225,9 @@ def _run_live_test_options(
     environment_updates: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = {
-        name: value for name, value in os.environ.items() if not name.startswith("OPENAI_")
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("OPENAI_") and name != "SSLKEYLOGFILE"
     }
     if environment_updates is not None:
         environment.update(environment_updates)
@@ -286,6 +291,19 @@ def test_live_provider_marker_skips_without_explicit_opt_in() -> None:
             },
             "Unsupported OpenAI or TLS key-logging configuration is present.",
             "https://unsafe-endpoint.invalid/sentinel",
+        ),
+        (
+            (
+                "--run-live-provider",
+                "--live-provider-model",
+                "gpt-5.6-luna",
+            ),
+            {
+                "OPENAI_API_KEY": "syntactically-valid-key",
+                "SSLKEYLOGFILE": "/tmp/unsafe-tls-keys-sentinel.log",
+            },
+            "Unsupported OpenAI or TLS key-logging configuration is present.",
+            "/tmp/unsafe-tls-keys-sentinel.log",
         ),
     ],
 )

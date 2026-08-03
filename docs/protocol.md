@@ -201,8 +201,11 @@ cleanup barrier or subsequent local read reaping raises or exceeds its local gra
 has one shared loop-owned task per session; a deadline watcher may start it in cancellation mode and
 the finalizer joins that same task rather than invoking cleanup concurrently. Every `cancel()` or
 `wait_closed()` await is supervised by a fixed five-second grace. Cleanup completion wins an exact
-cleanup/grace tie; otherwise the local cleanup awaitable is cancelled and reaped. This requires the
-provider to propagate task cancellation and does not claim remote cleanup succeeded.
+cleanup/grace tie. Otherwise the local barrier awaitable is cancelled and reaped, then the required
+`ProviderOperation.force_cancel_cleanup()` hook cancels and awaits the provider's actual local cleanup
+and SDK tasks without shielding. Returning from that hook means no provider-owned local task remains;
+it does not claim remote cleanup succeeded. This requires the provider to propagate task
+cancellation.
 
 The fixed, payload-free warning is correlated to the originating `session.start`, emitted at most
 once after the cleanup attempt, and precedes any already-selected session terminal. If runtime

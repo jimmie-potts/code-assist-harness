@@ -36,7 +36,7 @@ from code_assist_harness.provider.openai_responses import (
     OpenAIAdapterCleanupError,
     OpenAIResponsesProvider,
 )
-from code_assist_harness.provider_session import ProviderSession
+from code_assist_harness.provider_session import PROVIDER_CLEANUP_GRACE_SECONDS, ProviderSession
 
 MODEL = "gpt-5.6-luna"
 API_KEY = "fake-openai-key-for-adapter-tests"
@@ -166,6 +166,44 @@ class _FakeClient:
                 raise self._close_error
         finally:
             self.close_finished.set()
+
+
+class _MutableMonotonicClock:
+    """Advance session deadlines explicitly without wall-clock cleanup sleeps."""
+
+    def __init__(self) -> None:
+        self._value = 0.0
+        self._waiters: list[tuple[float, asyncio.Future[None]]] = []
+        self._waiter_changed = asyncio.Event()
+
+    def now(self) -> float:
+        return self._value
+
+    async def wait_until(self, deadline: float) -> None:
+        if self._value >= deadline:
+            return
+        future = asyncio.get_running_loop().create_future()
+        entry = (deadline, future)
+        self._waiters.append(entry)
+        self._waiter_changed.set()
+        try:
+            await future
+        finally:
+            if entry in self._waiters:
+                self._waiters.remove(entry)
+
+    async def wait_for_waiter(self, deadline: float) -> None:
+        while not any(value == deadline for value, _future in self._waiters):
+            self._waiter_changed.clear()
+            if any(value == deadline for value, _future in self._waiters):
+                return
+            await self._waiter_changed.wait()
+
+    def advance_to(self, value: float) -> None:
+        self._value = value
+        for deadline, future in tuple(self._waiters):
+            if deadline <= value and not future.done():
+                future.set_result(None)
 
 
 def _configuration() -> OpenAIProviderConfiguration:
@@ -609,6 +647,38 @@ def test_empty_repository_instructions_omit_request_field_and_usage() -> None:
     assert "instructions" not in arguments
     assert events[-1] == ProviderCompleted()
     assert not any(isinstance(event, ProviderUsageReported) for event in events)
+
+
+def test_completed_usage_accepts_the_configured_output_token_cap() -> None:
+    async def scenario():
+        stream = _FakeStream(_success_events(usage=(11, OPENAI_MAX_OUTPUT_TOKENS)))
+        provider, _responses, _client, _created = _provider_with(stream)
+        return await _collect(provider.start(_request()))
+
+    observations = asyncio.run(scenario())
+
+    assert ProviderUsageReported(11, OPENAI_MAX_OUTPUT_TOKENS) in observations
+    assert observations[-1] == ProviderCompleted()
+
+
+def test_completed_usage_above_the_output_token_cap_fails_without_terminal_evidence() -> None:
+    async def scenario():
+        stream = _FakeStream(_success_events(usage=(11, OPENAI_MAX_OUTPUT_TOKENS + 1)))
+        provider, _responses, _client, _created = _provider_with(stream)
+        return await _collect(provider.start(_request()))
+
+    observations = asyncio.run(scenario())
+
+    assert observations[-1] == ProviderFailed(
+        ProviderFailure(
+            code="invalid_response",
+            message="OpenAI returned an invalid response.",
+            retryable=False,
+        )
+    )
+    assert not any(
+        isinstance(event, (ProviderUsageReported, ProviderCompleted)) for event in observations
+    )
 
 
 @pytest.mark.parametrize("representation", ["omitted", "none", "empty"])
@@ -1355,6 +1425,160 @@ def test_cancelling_one_cleanup_joiner_does_not_cancel_shared_cleanup(
         assert stream.close_calls == 1
     assert client.close_calls == 1
     assert client.close_finished.is_set()
+
+
+@pytest.mark.parametrize("pending_stage", ["create", "stream_close", "client_close"])
+def test_force_cleanup_reaps_the_actual_owner_and_bounds_later_joiners(
+    pending_stage: str,
+) -> None:
+    async def scenario():
+        stage_gate = asyncio.Event()
+        create_gate = asyncio.Event() if pending_stage == "create" else None
+        stream = _FakeStream(
+            _success_events(),
+            block_before_index=None if pending_stage == "create" else 0,
+            close_gate=stage_gate if pending_stage == "stream_close" else None,
+        )
+        provider, responses, client, _created = _provider_with(
+            stream,
+            create_gate=create_gate,
+            create_cancel_gate=stage_gate if pending_stage == "create" else None,
+            client_close_gate=stage_gate if pending_stage == "client_close" else None,
+        )
+        operation = provider.start(_request())
+        iterator = operation.events()
+        pending = asyncio.create_task(anext(iterator))
+        if pending_stage == "create":
+            await responses.started.wait()
+        else:
+            await stream.blocked_next_started.wait()
+
+        ordinary_joiner = asyncio.create_task(operation.cancel())
+        if pending_stage == "create":
+            await responses.cancelled.wait()
+        elif pending_stage == "stream_close":
+            await stream.close_started.wait()
+        else:
+            await client.close_started.wait()
+        cleanup_owner = getattr(operation, "_cleanup_task")
+        assert isinstance(cleanup_owner, asyncio.Task)
+        assert not cleanup_owner.done()
+
+        await operation.force_cancel_cleanup()
+        await operation.force_cancel_cleanup()
+        with pytest.raises(OpenAIAdapterCleanupError):
+            await ordinary_joiner
+        with pytest.raises(OpenAIAdapterCleanupError):
+            await operation.cancel()
+        with pytest.raises(OpenAIAdapterCleanupError):
+            await operation.wait_closed()
+        with pytest.raises(StopAsyncIteration):
+            await pending
+        with pytest.raises(StopAsyncIteration):
+            await anext(iterator)
+        return cleanup_owner, responses, stream, client
+
+    cleanup_owner, responses, stream, client = asyncio.run(scenario())
+
+    assert cleanup_owner.done()
+    if pending_stage == "create":
+        assert responses.cancelled.is_set()
+        assert stream.close_calls == 0
+        assert client.close_calls == 0
+    elif pending_stage == "stream_close":
+        assert stream.close_calls == 1
+        assert stream.close_finished.is_set()
+        assert client.close_calls == 0
+    else:
+        assert stream.close_calls == 1
+        assert stream.close_finished.is_set()
+        assert client.close_calls == 1
+        assert client.close_finished.is_set()
+
+
+def test_force_cleanup_after_confirmed_close_preserves_clean_idempotent_state() -> None:
+    async def scenario():
+        stream = _FakeStream(_success_events())
+        provider, _responses, client, _created = _provider_with(stream)
+        operation = provider.start(_request())
+        observations = await _collect(operation)
+        await operation.wait_closed()
+        await operation.force_cancel_cleanup()
+        await operation.force_cancel_cleanup()
+        await operation.wait_closed()
+        cancellation = await operation.cancel()
+        return observations, cancellation, stream, client
+
+    observations, cancellation, stream, client = asyncio.run(scenario())
+
+    assert observations[-1] == ProviderCompleted()
+    assert cancellation == "already_closed"
+    assert stream.close_calls == 1
+    assert client.close_calls == 1
+
+
+def test_session_cleanup_grace_force_reaps_blocked_openai_cleanup_owner() -> None:
+    async def scenario():
+        lines: list[bytes] = []
+        clock = _MutableMonotonicClock()
+        stream_close_gate = asyncio.Event()
+        client_close_gate = asyncio.Event()
+        stream = _FakeStream(_success_events(), close_gate=stream_close_gate)
+        provider, _responses, client, _created = _provider_with(
+            stream,
+            client_close_gate=client_close_gate,
+        )
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        command = SessionStartCommand.model_validate(
+            {
+                "protocol_version": 1,
+                "type": "session.start",
+                "command_id": "cmd_cleanup_grace",
+                "timestamp": "2026-08-01T12:34:56.789Z",
+                "payload": {"task": "Bound cleanup."},
+            }
+        )
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: "2026-08-01T12:34:56.789Z"),
+            provider,
+            command,
+            "ses_openai_cleanup_grace",
+            limits=LoopLimits(provider_work_timeout_seconds=10),
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(stream.close_started.wait(), timeout=1)
+        await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
+        clock.advance_to(10.0)
+        grace_deadline = 10.0 + PROVIDER_CLEANUP_GRACE_SECONDS
+        await asyncio.wait_for(clock.wait_for_waiter(grace_deadline), timeout=1)
+        clock.advance_to(grace_deadline)
+        await asyncio.wait_for(running, timeout=1)
+        operation = getattr(session, "_operation")
+        cleanup_owner = getattr(operation, "_cleanup_task")
+        return lines, stream, client, cleanup_owner
+
+    lines, stream, client, cleanup_owner = asyncio.run(scenario())
+    wire = [json.loads(line) for line in lines]
+
+    assert isinstance(cleanup_owner, asyncio.Task)
+    assert cleanup_owner.done()
+    assert stream.close_calls == 1
+    assert stream.close_finished.is_set()
+    assert client.close_calls == 0
+    assert [event["type"] for event in wire] == [
+        "session.started",
+        "assistant.delta",
+        "assistant.delta",
+        "runtime.error",
+        "session.failed",
+    ]
+    assert wire[-2]["payload"]["code"] == "provider_cleanup_failed"
+    assert wire[-1]["payload"]["code"] == "provider_work_deadline_exceeded"
 
 
 def test_official_client_construction_fixes_endpoint_routing_and_retry_policy(

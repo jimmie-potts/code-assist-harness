@@ -265,6 +265,13 @@ class _ScriptedProviderOperation:
         """Wait until completion, failure, cancellation, or consumer abort closes the stream."""
         await self._closed_event.wait()
 
+    async def force_cancel_cleanup(self) -> None:
+        """Close logically after the session exhausts its ordinary cleanup grace."""
+        async with self._state_lock:
+            self._cancel_requested.set()
+            if not self._closed:
+                self._finish_idle_cancellation_locked()
+
     async def wait_for_checkpoint(self, checkpoint: str) -> None:
         """Wait until event consumption reaches a named delay or cancellation checkpoint.
 

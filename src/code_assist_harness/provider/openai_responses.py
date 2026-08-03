@@ -239,6 +239,52 @@ class OpenAIResponsesOperation:
                 "OpenAI adapter resource cleanup could not be confirmed."
             )
 
+    async def force_cancel_cleanup(self) -> None:
+        """Cancel and reap adapter-owned work after the harness cleanup grace expires.
+
+        This authoritative path deliberately does not shield a pending shared cleanup owner. It
+        closes the operation logically and records interrupted cleanup as unconfirmed, so later
+        ordinary joiners fail with the bounded adapter error rather than hanging or observing raw
+        task cancellation. Already-confirmed clean closure remains clean.
+        """
+        async with self._state_lock:
+            cleanup = self._cleanup_task
+            owned = self._owned_task
+            cleanup_confirmed = (
+                cleanup is None and owned is None and self._client is None and self._stream is None
+            )
+            if cleanup is not None and cleanup.done() and not cleanup.cancelled():
+                try:
+                    cleanup_confirmed = cleanup.result() is False
+                except Exception:
+                    cleanup_confirmed = False
+            force_unconfirmed = self._cleanup_failed or not cleanup_confirmed
+            self._cleanup_failed = force_unconfirmed
+            self._cancel_selected = True
+            self._terminal_queue.clear()
+            self._state = "closed"
+            self._closed.set()
+
+        current = asyncio.current_task()
+        tasks = tuple(task for task in (cleanup, owned) if task is not None and task is not current)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                if _current_task_is_cancelling():
+                    raise
+            except Exception:
+                pass
+
+        async with self._state_lock:
+            self._cleanup_failed = self._cleanup_failed or force_unconfirmed
+            self._terminal_queue.clear()
+            self._state = "closed"
+            self._closed.set()
+
     async def _next_event(self) -> ProviderStreamEvent:
         while True:
             async with self._state_lock:
@@ -407,7 +453,7 @@ class OpenAIResponsesOperation:
                 except Exception:
                     failed = True
         finally:
-            if client is not None:
+            if client is not None and not _current_task_is_cancelling():
                 try:
                     await client.close()
                 except asyncio.CancelledError:
@@ -418,7 +464,7 @@ class OpenAIResponsesOperation:
                     failed = True
 
         async with self._state_lock:
-            self._cleanup_failed = failed
+            self._cleanup_failed = self._cleanup_failed or failed
             if self._cancel_selected and self._state == "resources_closing":
                 self._terminal_queue.clear()
                 self._state = "closed"
@@ -682,7 +728,11 @@ class _ResponsesAutomaton:
             input_tokens = _safe_integer(_field(usage, "input_tokens"))
             output_tokens = _safe_integer(_field(usage, "output_tokens"))
             total_tokens = _safe_integer(_field(usage, "total_tokens"))
-            if input_tokens + output_tokens != total_tokens or total_tokens > MAX_SAFE_INTEGER:
+            if (
+                input_tokens + output_tokens != total_tokens
+                or total_tokens > MAX_SAFE_INTEGER
+                or output_tokens > OPENAI_MAX_OUTPUT_TOKENS
+            ):
                 raise InvalidSDKObservation
             output_details = _optional_field(usage, "output_tokens_details")
             if output_details is not None:
@@ -962,7 +1012,12 @@ def _current_task_is_cancelling() -> bool:
 
 async def _join_cleanup(task: asyncio.Task[bool]) -> bool:
     """Shield the shared cleanup owner from cancellation of any one joiner."""
-    return await asyncio.shield(task)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if _current_task_is_cancelling():
+            raise
+        return False
 
 
 async def _settle_state_transition(task: asyncio.Task[None]) -> None:

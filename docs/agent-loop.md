@@ -114,7 +114,10 @@ ends normally with `ProviderCompleted` or `ProviderFailed`. `cancel()` is idempo
 cleanup; after it returns, the operation cannot emit another event. Cancellation ends iteration
 without inventing a provider failure because the session layer already owns the user's cancellation
 intent. `wait_closed()` lets the caller await natural completion, failure, or cancellation cleanup
-without requesting cancellation.
+without requesting cancellation. `force_cancel_cleanup()` is a required session-only fallback after
+the five-second cleanup grace: it cancels and reaps all operation-owned local work without shielding,
+closes the stream logically, and prevents later events. It confirms local task termination, not remote
+resource release.
 
 The deterministic `FakeProvider` is the first implementation. It consumes an ordered tuple of
 `FakeProviderExchange` values. Each exchange pairs one exact `ProviderRequest` with explicit emit,
@@ -184,11 +187,13 @@ attempts both stream and client close. A cleanup failure becomes one safe adapte
 by the existing `ProviderSession` cleanup boundary; it never changes the already selected session
 failure. A close coroutine that independently raises `CancelledError` is treated as a bounded cleanup
 failure so the other resource is still attempted; only cancellation of the cleanup owner remains task
-control flow. SDK objects, exceptions, request IDs, headers, and raw response bodies remain inside
-the adapter. The credential is confined to the provider-specific validation, composition, and
-adapter boundary and never enters a provider-neutral or protocol value. Deterministic SDK fakes cover
-this path by default; the separately selected live smoke remains outside the canonical gate and
-default CI.
+control flow and stops the remaining sequential closes. Ordinary `cancel()` and `wait_closed()`
+joiners shield the owner. Only `ProviderSession`, after its cleanup grace expires, calls the
+provider-neutral force-reap hook to cancel and await the owner directly. SDK objects, exceptions,
+request IDs, headers, and raw response bodies remain inside the adapter. The credential is confined
+to the provider-specific validation, composition, and adapter boundary and never enters a
+provider-neutral or protocol value. Deterministic SDK fakes cover this path by default; the separately
+selected live smoke remains outside the canonical gate and default CI.
 
 ## Implemented one-turn grammar
 
@@ -218,7 +223,10 @@ request is counted before any handling; the first admitted request still becomes
 triggers operation cancellation, and never exposes or parses its arguments.
 
 Optional usage is bounded to non-negative JavaScript-safe integers and recorded outside lifecycle
-state as `model.usage_observed`. It consumes neither a protocol-v1 sequence number nor a reducer
+state as `model.usage_observed`. For a completed OpenAI response, input plus output must equal total,
+reasoning tokens cannot exceed output tokens, and output tokens cannot exceed the same fixed 8,192
+generation cap sent in the request. A violation becomes `invalid_response` before usage or completion
+evidence is admitted. Valid usage consumes neither a protocol-v1 sequence number nor a reducer
 transition. The version-3 writer stores the observation before the terminal record, and replay of
 versions 1, 2, and 3 exposes it through a separate evidence projection. Usage admission shares the
 decision lock, so an admitted evidence write settles before cancellation competes, while a terminal
@@ -233,12 +241,14 @@ replayable transcript prefix when teardown wins.
 Provider cleanup uses exactly one loop-owned task per session. The deadline watcher may start that
 task in cancellation mode, and the finalizer joins the same task instead of invoking cleanup again.
 Every `cancel()` or `wait_closed()` await is supervised by a fixed five-second local grace. A cleanup
-task already complete when the grace wakes wins the tie; otherwise its local awaitable is cancelled
-and reaped. The loop also cancels and awaits any pending local read. A cleanup failure or grace expiry
-emits at most one start-correlated, payload-free `provider_cleanup_failed` diagnostic before any
-selected terminal and cannot rewrite that outcome. These bounds require cancellation-responsive
-provider awaitables; an implementation that suppresses task cancellation requires stronger process
-isolation.
+task already complete when the grace wakes wins the tie. Otherwise the loop cancels and reaps its
+local barrier task, then invokes required `force_cancel_cleanup()` to cancel and await the actual
+provider-owned cleanup and SDK tasks without shielding. The loop also cancels and awaits any pending
+local read. A cleanup failure or grace expiry emits at most one start-correlated, payload-free
+`provider_cleanup_failed` diagnostic before any selected terminal and cannot rewrite that outcome.
+Force-reap guarantees no provider-owned local task remains; remote release remains unconfirmed. These
+bounds require cancellation-responsive provider awaitables; an implementation that suppresses task
+cancellation requires stronger process isolation.
 
 ## State and terminal outcomes
 

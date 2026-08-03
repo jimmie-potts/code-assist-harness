@@ -52,8 +52,8 @@ streaming limits must also run before each observation reaches wire, reducer, or
   blocked.
 - **First-winner terminal guard:** completion, failure, cancellation, and limits converge on one
   terminal selection.
-- **Single cleanup owner:** the watcher and finalizer join one shared cleanup task rather than calling
-  the provider concurrently.
+- **Single cleanup barrier:** the watcher and finalizer join one loop-owned task; only grace expiry
+  invokes the provider's required authoritative force-reap hook.
 - **Bounded evidence:** transcript v3 records configuration, counters, and the exhausted limit without
   provider payloads or monotonic timestamps.
 
@@ -108,12 +108,14 @@ Three invariants shape the agent loop:
 2. **Publication integrity:** an event transaction admitted before expiry finishes its ordered,
    non-interleaved write/reducer/transcript attempt. The watcher can start provider cancellation
    while that local sink is blocked, and the deadline terminal is selected next.
-3. **One cleanup task:** cancellation or close is invoked once and joined with a fixed five-second
-   grace. A cleanup exception or grace expiry emits the payload-free `provider_cleanup_failed`
-   diagnostic without replacing the selected terminal result.
+3. **One cleanup barrier, then force-reap:** cancellation or close is invoked once and joined with a
+   fixed five-second grace. On expiry, the loop-owned barrier is cancelled and reaped before
+   `force_cancel_cleanup()` cancels and awaits every provider-owned local task without shielding. The
+   payload-free `provider_cleanup_failed` diagnostic does not replace the selected terminal result.
 
-The deadline bounds provider work, not local terminal latency. A provider that suppresses task
-cancellation cannot be forcefully contained by this in-process port; process isolation is deferred.
+The deadline bounds provider work, not local terminal latency. Force-reap confirms local task
+termination, not remote resource release. A provider that suppresses task cancellation cannot be
+contained by this in-process port; process isolation is deferred.
 
 Transcript writer version 3 adds one transcript-only `loop.limits_observed` record immediately before
 the session terminal. Replay accepts versions 1, 2, and 3. A provider-backed terminal path records at
@@ -215,7 +217,7 @@ the test proves watcher-driven cancellation without sleeping or contacting a pro
 | Delta exceeds bytes | Tracker before publication | Reject whole delta | Wire, reducer, and counter assertions |
 | Deadline and event tie | Session coordinator | Deadline wins; event reaped | Exact-tie regression test |
 | Sink blocks after admission | Watcher plus publication lock | Cancellation starts; admitted transaction settles; deadline terminal follows | Blocked-sink race test |
-| Cleanup raises or times out | Shared cleanup supervisor | Keep original terminal; emit safe diagnostic | Exception and grace tests |
+| Cleanup raises or times out | Shared cleanup supervisor | Reap barrier and provider-owned tasks; keep original terminal; emit safe diagnostic | Exception and force-reap grace tests |
 | Transcript terminal append fails | Transcript writer | Preserve replayable limit-record prefix | Persistence rollback/prefix tests |
 
 ## Production expansion
@@ -257,6 +259,8 @@ objectives require upstream deadline propagation.
 1. Change an output limit and predict whether an emoji delta fits by UTF-8 bytes.
 2. Advance the fake clock at the same moment as a final event and confirm the deadline wins.
 3. Seed the tool-call tracker at its maximum and confirm arguments are never inspected.
+4. Trace grace expiry from the loop-owned barrier into `force_cancel_cleanup()` and identify which
+   fact remains unconfirmed afterward.
 
 ## Key takeaways
 
@@ -269,7 +273,8 @@ objectives require upstream deadline propagation.
 - **Admission:** the decision to begin costly work.
 - **Budget reservation:** accounting completed before accepting an observation.
 - **Deadline latch:** first-winner state recording that provider work has expired.
-- **Cleanup grace:** fixed local bound for joining provider cancellation or close.
+- **Cleanup grace:** fixed local bound for an ordinary cancellation/close barrier; expiry triggers
+  authoritative local force-reap without proving remote release.
 
 See the shared [project glossary](../glossary.md) for session, model turn, provider, and tool call.
 

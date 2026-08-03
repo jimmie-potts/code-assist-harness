@@ -82,18 +82,21 @@
   never becomes evidence, and provider-resource cleanup remains explicitly unconfirmed.
 - Every `cancel()` or `wait_closed()` cleanup await is supervised by one fixed, non-configurable
   five-second cleanup grace using the injected monotonic waiter. If the barrier raises or the grace
-  expires, its local awaitable task is cancelled and awaited, the same payload-free
+  expires, its local awaitable task is cancelled and awaited. After expiry, the session then invokes
+  the required `ProviderOperation.force_cancel_cleanup()` hook to cancel and await every
+  provider-owned cleanup or SDK task without shielding and prevent later events. The same payload-free
   `provider_cleanup_failed` diagnostic is emitted, and the selected terminal outcome remains. This
-  local bound requires the provider awaitable to propagate task cancellation, as every conforming
-  in-process implementation must; it does not claim remote/provider cleanup succeeded. An
-  implementation that suppresses `CancelledError` cannot be contained by this port and requires a
-  future process-isolation or escalation policy.
+  local bound requires the provider awaitables to propagate task cancellation, as every conforming
+  in-process implementation must. Returning from force-reap confirms that no provider-owned local
+  task remains; it does not claim remote/provider cleanup succeeded. An implementation that suppresses
+  `CancelledError` cannot be contained by this port and requires process isolation or OS-level
+  escalation.
 - Provider cleanup has exactly one loop-owned task per session. The deadline watcher may create that
   shared task in cancellation mode so cleanup begins without the publication lock; the finalizer
   only joins the same task and never invokes the provider cleanup API concurrently. When cleanup
   completion and the grace wake are observed together, an already-completed cleanup task wins;
-  otherwise the grace expires, the local cleanup task is cancelled, and it is reaped under the
-  cancellation-responsive provider contract above.
+  otherwise the grace expires, the loop-owned barrier task is cancelled and reaped before the
+  authoritative provider force-reap runs under the cancellation-responsive contract above.
 - CAH-022 advances the transcript writer to version 3. A provider-backed session writes at most one
   transcript-only `loop.limits_observed` record. With persistence enabled and healthy through the
   terminal write, it writes exactly one immediately before its terminal session event. A disabled
@@ -131,7 +134,9 @@
    naturally reach.
 7. Every limit winner with an active provider operation requests cancellation and supervises the
    cleanup barrier through success, safe failure, or the fixed cleanup grace before the session task
-   returns; admission failures never call `Provider.start()` or cancellation.
+   returns. Grace expiry cancels and reaps the local barrier, then invokes required authoritative
+   force-reap so no provider-owned local task remains; admission failures never call `Provider.start()`
+   or cancellation.
 8. Each limit emits its distinct safe code and an actionable bounded message.
 9. Exactly one terminal event is emitted when a limit races completion, provider failure, or user
    cancellation.
@@ -153,9 +158,10 @@
 - Expire the deadline during provider-backed session setup before admission and race the dedicated
   deadline-state guard in both orders. Assert latch-first makes zero `Provider.start()` calls, while
   admission-first installs exactly one lazy operation that the watcher then cancels.
-- Cover cleanup success, cleanup exception, and a cancellation-responsive never-finishing cleanup
-  awaitable with the injected five-second grace; assert the local task propagates cancellation and
-  is reaped, while remote resource cleanup is not overclaimed. Document that an awaitable which
+- Cover cleanup success, cleanup exception, and cancellation-responsive shielded cleanup owners under
+  both cancellation and natural-completion barriers with the injected five-second grace. Assert the
+  loop-owned barrier is cancelled and reaped, `force_cancel_cleanup()` runs exactly once, its nested
+  owner is reaped, and remote resource cleanup is not overclaimed. Document that an awaitable which
   suppresses task cancellation is outside the current in-process containment contract.
 - Assert provider-start counts, provider cancellation and cleanup, accepted UTF-8 bytes, observed
   tool calls, terminal event count, reducer state, transcript/summary evidence, and safe messages.
@@ -176,8 +182,8 @@ inspection and presentation-overflow validation evidence.
 - OpenAI or another adapter, provider-specific timeouts, token/cost/rate quotas, retries, backoff, or
   adaptive budget increases.
 - Multiple model turns, tool execution, subprocess timeouts, or approval workflows.
-- Process isolation or forceful escalation for a provider implementation that suppresses task
-  cancellation.
+- Process isolation or OS-level termination for a provider implementation that suppresses task
+  cancellation even through the required local force-reap hook.
 - Protocol-sink, transcript-sink, or whole-session terminal-latency timeouts.
 - An interface that lets an active session weaken its own limits.
 
@@ -187,8 +193,8 @@ inspection and presentation-overflow validation evidence.
   per-session first-exhaustion tracker, bounded counters, and replay-safe evidence snapshot.
 - `src/code_assist_harness/provider_session.py` charges work before provider start or observation
   acceptance, enforces the captured monotonic deadline with an independent watcher, resolves
-  deadline/event and terminal races, owns one supervised cleanup task, and publishes one stable
-  outcome.
+  deadline/event and terminal races, owns one supervised cleanup task, force-reaps provider-owned
+  local work after grace expiry, and publishes one stable outcome.
 - `src/code_assist_harness/runtime.py` composes limits and paired timing seams, allocates fresh session
   accounting, and connects loop evidence to the transcript without changing the launched mock path.
 - `src/code_assist_harness/persistence/transcript.py` writes transcript version 3, records at most one
@@ -196,8 +202,9 @@ inspection and presentation-overflow validation evidence.
   placement and bounds, preserves version-1/version-2 compatibility, and projects evidence into the
   summary.
 - Deterministic tests cover every configuration boundary, all four limit winners, UTF-8 accounting,
-  setup and stream expiry, exact races, blocked publication, shared cleanup and grace behavior,
-  fresh session counters, transcript mutations, append rollback, and replayable incomplete prefixes.
+  setup and stream expiry, exact races, blocked publication, shared cleanup and authoritative
+  force-reap behavior, fresh session counters, transcript mutations, append rollback, and replayable
+  incomplete prefixes.
 - No provider SDK, live network request, credential, tool execution, retry, or additional model turn
   was introduced.
 

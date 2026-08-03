@@ -108,10 +108,15 @@
   joiner propagates cancellation control flow without cancelling the cleanup owner; a later joiner
   observes the same eventual sentinel on every ordinary success or `Exception` path. Direct
   event-loop teardown may cancel the internal owner and remains cancellation control flow, not a
-  fabricated sentinel. CAH-022 may therefore cancel and reap its local join awaitable when the
-  five-second grace expires while the shielded owner may continue and resource release remains
-  explicitly unconfirmed. A later sequential session receives fresh resources, so closing one
-  operation does not make the `Provider` unusable.
+  fabricated sentinel. When CAH-022's five-second grace expires, it first cancels and reaps that local
+  join awaitable, then invokes required `force_cancel_cleanup()`. This session-only authoritative path
+  bypasses the shield, marks cleanup unconfirmed, cancels and awaits the actual cleanup owner plus any
+  other operation-owned task, closes the stream logically, and makes later ordinary joins fail with
+  the bounded adapter cleanup error. No provider-owned local task may remain, although remote resource
+  release remains explicitly unconfirmed. Genuine owner cancellation stops remaining sequential
+  closes; an independently raised close-time `CancelledError` still records failure and attempts the
+  other close. A later sequential session receives fresh resources, so closing one operation does not
+  make the `Provider` unusable.
 - An SDK create or stream-read awaitable that independently raises `CancelledError` is not treated as
   selected harness cancellation. It enters the closed failure table as one bounded provider failure,
   starts resource cleanup, and cannot leave `wait_closed()` pending. Only cancellation selected by the
@@ -162,7 +167,9 @@
   response has status `completed`, the exact allowlisted model, null error and incomplete details,
   exact echoed reasoning effort `none` and context `current_turn`, and optional non-negative
   safe-integer input/output usage. Any present total usage equals their sum; any present
-  reasoning-token detail is already included in output tokens and cannot exceed it.
+  reasoning-token detail is already included in output tokens and cannot exceed it. Reported output
+  tokens also cannot exceed the same fixed `8192` cap sent as `max_output_tokens`; an over-cap report
+  is `invalid_response` and produces no usage or completion observation.
 - Provider text admits TAB and LF as explicit layout characters but rejects every other C0/C1
   terminal control before constructing `ProviderTextDelta` or `ProviderTextCompleted`. An unsafe
   fragment is not retained or published and becomes the same fixed `invalid_response` failure as
@@ -246,7 +253,10 @@
    provider failures without raw values.
 7. `ProviderOperation.cancel()` interrupts pending async creation or iteration, joins the one
    idempotent resource-cleanup task, suppresses pending terminal observations, and guarantees no later
-   event; a cleanup error raises only the bounded adapter exception handled by CAH-021.
+   event; a cleanup error raises only the bounded adapter exception handled by CAH-021. The required
+   `force_cancel_cleanup()` method bypasses ordinary joiner shielding only after CAH-022's grace,
+   cancels and reaps all operation-owned local tasks, and remains idempotent without claiming remote
+   release.
 8. The TypeScript launcher and supervisor plus the Python parser and composition root implement the
    explicit provider/model path as child arguments, and OpenAI work cannot begin until CAH-022 limits
    are valid.
@@ -260,24 +270,29 @@
 10. Local transcript enablement does not alter `store=false`, and transcript redaction/opt-out behavior
     remains unchanged.
 11. SDK-fake tests cover request/model mapping, every transition and reconciliation check in the
-    automaton, usage, exact message statuses and completed reasoning echo, accepted opaque reasoning
-    envelopes, rejected reasoning text/tool events, every failure-table row, premature EOF,
+    automaton, usage including exact 8,192-output-token acceptance and over-cap rejection without
+    usage/completion evidence, exact message statuses and completed reasoning echo, accepted opaque
+    reasoning envelopes, rejected reasoning text/tool events, every failure-table row, premature EOF,
     response-validation and JSON/Unicode decode failures, unexpected SDK exceptions, unknown events,
     cancellation before and between output, cancellation after usage, and terminal races without
     HTTP. Resource tests separately cover stream-close failure,
-    client-close failure, both failures, and CAH-022 grace cancellation while create, stream close,
+    client-close failure, both failures, and CAH-022 grace force-reap while create, stream close,
     or client close is pending. They distinguish resource closure from operation closure, prove both
-    resource closes are attempted, prove cancelling a joiner does not cancel shared cleanup, and
-    prove `wait_closed()` cannot finish while a terminal remains pending. Hostile-close tests prove an
-    independently raised close-time `CancelledError` cannot strand cleanup, while true cleanup-owner
-    cancellation remains control flow. Separate hostile create/read cases prove an independently
-    raised `CancelledError` becomes one bounded failure and cannot strand operation closure.
+    resource closes are attempted on ordinary paths, prove cancelling a joiner does not cancel shared
+    cleanup, and prove `wait_closed()` cannot finish while a terminal remains pending. Force-reap tests
+    prove the actual owner is cancelled and no local provider task remains. Hostile-close tests prove
+    an independently raised close-time `CancelledError` cannot strand cleanup, while true cleanup-owner
+    cancellation stops remaining sequential closes as control flow. Separate hostile create/read
+    cases prove an independently raised `CancelledError` becomes one bounded failure and cannot
+    strand operation closure.
 12. The opt-in `live_provider` smoke test performs one minimal bounded response, requires the named
     run option, exact allowlisted model, and locally valid credentials, normalizes remote rejection
     after the request, and is excluded from `./scripts/check` and default CI even when a credential
     happens to be present.
-13. The default repository gate deselects `live_provider`, unsets provider configuration, and passes
-    with network access denied.
+13. The default repository gate deselects `live_provider`, unsets provider configuration and
+    `SSLKEYLOGFILE`, and passes with network access denied. Its check-script regression seeds TLS key
+    logging and proves every gate layer sees it unset; explicit live opt-in rejects the selector with a
+    fixed message that does not echo its value.
 14. Repository policy permits the SDK/network dependency only inside the concrete adapter and rejects
     it from provider-neutral loop, session, protocol, persistence, and tool modules.
 15. Client-construction tests prove the official endpoint, `trust_env=false`,
@@ -311,7 +326,10 @@
 - Exercise `run-tui` parsing, supervisor argument forwarding, direct Python parsing, client
   construction, pending-create cancellation, blocked-next-event cancellation, terminal-pending
   cancellation, each SDK stream/client close-failure combination, and cleanup-grace cancellation at
-  every pending resource stage.
+  every pending resource stage. Prove ordinary joiners remain shielded, then prove grace expiry
+  invokes authoritative force-reap and leaves no provider-owned local task.
+- Reconcile completed usage at the exact 8,192-output-token cap and one above it; assert the over-cap
+  response becomes `invalid_response` without `ProviderUsageReported` or `ProviderCompleted`.
 - Run a negative source-policy probe that places an SDK/network import in a provider-neutral module
   and proves the canonical gate rejects it.
 - Prove the registered marker plus explicit opt-in are both required, and that the default gate
@@ -335,12 +353,12 @@ presentation is part of the unit.
 - `openai_config.py` validates the provider/model pair and accepted environment before the SDK is
   imported. The mock remains the default; OpenAI requires the one repository-approved Luna model.
 - `openai_responses.py` implements the lazy async adapter, exact request mapper, closed stream
-  automaton, bounded failure table, cancellation, and shared resource-cleanup owner behind the
-  existing provider port.
+  automaton, bounded usage reconciliation, bounded failure table, ordinary shielded cleanup joins,
+  and authoritative force-reap behind the existing provider port.
 - The TypeScript launcher and supervisor forward provider/model as separate child arguments, remove
-  ambient TLS key logging, and start Python with `-E`, while Python independently revalidates provider
-  configuration at the authoritative composition root. A shared fixture locks cross-language
-  allowlist parity.
+  ambient TLS key logging, and start Python with `-E`, while the canonical repository gate also clears
+  TLS key logging and Python independently revalidates provider configuration at the authoritative
+  composition root. A shared fixture locks cross-language allowlist parity.
 - The TypeScript and Python command schemas admit only Unicode scalar values for session task text;
   TypeScript rejects lone surrogates before writing, while Python classifies their escaped JSON form
   as `invalid_payload` before a provider session can be constructed.
@@ -348,8 +366,9 @@ presentation is part of the unit.
   into one explicitly selected command and rejects pre-existing OpenAI or TLS key-logging environment
   configuration; normal runtime and validation paths never auto-load the file.
 - Deterministic SDK fakes cover request mapping, successful and malformed streams, failure
-  normalization, partial output, terminal races, cancellation, and resource-close failures without
-  HTTP. The separately registered live smoke remains explicit and supplemental.
+  normalization, usage-cap reconciliation, partial output, terminal races, cancellation,
+  resource-close failures, and force-reap at each pending resource stage without HTTP. The separately
+  registered live smoke remains explicit and supplemental.
 - The linked Markdown lesson and compact text diagram locate the adapter inside the TUI, harness,
   provider, tool, and evidence boundaries and focus on loop ownership rather than SDK mechanics.
 

@@ -33,6 +33,17 @@ terminal-text invariant at the untrusted process boundary.
   regression prove the TUI rejects invalid input before publication or write and Python returns
   recoverable `invalid_payload` before session construction; the child processes shutdown normally
   without HTTP.
+- The provider operation port now requires `force_cancel_cleanup()`. Ordinary adapter joiners still
+  shield one cleanup owner, but after the five-second harness grace the session cancels/reaps its
+  local barrier and invokes this authoritative hook. The OpenAI operation cancels and awaits its real
+  owner and any other owned task, leaving no local provider work while reporting remote release as
+  unconfirmed. Genuine owner cancellation stops sequential closes; an independently raised close-time
+  `CancelledError` still attempts both.
+- Completed OpenAI usage now rejects `output_tokens` above the request's fixed 8,192-token cap even
+  when totals otherwise reconcile. The invalid response emits neither usage nor completion evidence.
+- The canonical `scripts/check` gate now clears `SSLKEYLOGFILE` alongside provider credentials. Its
+  regression seeds the variable at every gate layer, and explicit live opt-in independently rejects
+  the selector without echoing its value.
 
 ## Architecture position
 
@@ -83,5 +94,9 @@ release, and the harness continues to own limits, cancellation intent, terminal 
   32 Python protocol-fixture tests, 35 repository-policy/check-script tests, 240 TUI tests,
   31 TypeScript protocol-fixture tests, and 4 real Node-to-Python boundary tests. The selected-OpenAI
   regression used a fake local key and made no provider request.
+- After the cleanup-owner, completed-usage-cap, and canonical TLS-key-log follow-up, the focused
+  adapter/session/fake/runtime/check-script suites passed with 266 tests. `./scripts/check` passed with
+  948 non-live Python tests, 32 Python protocol-fixture tests, 36 repository-policy/check-script tests,
+  240 TUI tests, 31 TypeScript protocol-fixture tests, and 4 real Node-to-Python boundary tests.
 - GitHub Actions runs the same canonical gate on the published commit; remote status is verified
   separately. The credential-gated live smoke remains supplemental and was not run.

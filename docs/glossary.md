@@ -34,8 +34,10 @@ closes that operation's stream but does not itself select or emit the session te
 The fixed local time allowed for one provider `cancel()` or `wait_closed()` awaitable to settle.
 CAH-022 supervises the one shared cleanup task per provider session with a non-configurable
 five-second monotonic grace. A cleanup task already complete when the grace wakes wins the tie;
-otherwise its local awaitable is cancelled and reaped and cleanup remains explicitly unconfirmed.
-This bound requires cancellation-responsive provider code and is not proof of remote cleanup.
+otherwise its local barrier awaitable is cancelled and reaped and the required
+`force_cancel_cleanup()` hook cancels and awaits all provider-owned local tasks without shielding.
+Cleanup remains explicitly unconfirmed: local force-reaping is not proof of remote resource release
+and requires cancellation-responsive provider code.
 
 ## Cancellation acknowledgement
 
@@ -209,7 +211,9 @@ One single-consumer asynchronous response stream returned by a provider. Its `ca
 idempotent and waits for cleanup, while `wait_closed()` observes cleanup without requesting it.
 After either natural closure or awaited cancellation, no later provider event may be emitted. The
 OpenAI operation lazily owns one SDK client and stream and routes natural termination and cancellation
-through one shielded adapter cleanup task.
+through one shielded adapter cleanup task. The required session-only `force_cancel_cleanup()` method
+bypasses that shield after cleanup grace expires, cancels and reaps all operation-owned local tasks,
+and closes the stream logically without claiming remote resources were released.
 
 ## Provider request
 

@@ -45,7 +45,9 @@ uses a state machine before emitting a harness event.
 
 A common misconception is that cancelling the task that is waiting for cleanup also cancels cleanup
 itself. CAH-023 creates one shared cleanup owner and shields it from its joiners. A cancelled joiner
-remains cancellation control flow; it does not rewrite resource truth.
+remains cancellation control flow; it does not rewrite resource truth. The exception is the harness's
+explicit escalation after the five-second grace: `force_cancel_cleanup()` bypasses the shield and
+reaps the real owner so no local provider work survives.
 
 ## Key concepts
 
@@ -55,6 +57,8 @@ remains cancellation control flow; it does not rewrite resource truth.
   reasoning, transcript evidence, or a harness event.
 - **Provider-neutral event:** a small domain value such as `ProviderTextDelta`; never an SDK object.
 - **Terminal pending:** cleanup has settled, but usage/completion has not all crossed the port yet.
+- **Authoritative force-reap:** session-only cleanup escalation that ends local work without claiming
+  remote release.
 - **Fail closed:** unsupported observations become a fixed safe failure rather than guessed behavior.
 
 ## Architecture and design
@@ -95,6 +99,8 @@ Three invariants hold the boundary together:
    rejected before SDK import or client construction. The normal child also starts Python with `-E`.
 2. **Validation before meaning.** Sequence, response identity, item identity, indices, text snapshots,
    message statuses, model, reasoning mode, and usage must reconcile before completion is trusted.
+   Completed output tokens cannot exceed the request's fixed 8,192-token cap; an over-cap report
+   becomes `invalid_response` before usage or completion crosses the port.
    A `session.start` task must contain only Unicode scalar values at both wire schemas, so a JSON lone
    surrogate cannot reach provider-session construction.
    Assistant text admits TAB/LF layout but rejects every other C0/C1 terminal control before it can
@@ -102,6 +108,8 @@ Three invariants hold the boundary together:
 3. **Cleanup before terminal release.** A natural terminal is buffered until stream and client close
    have both been attempted. Cancellation and natural completion share the same cleanup task; an
    independently raised close-time `CancelledError` is failure evidence, not owner cancellation.
+   Ordinary joiners shield the owner. If the harness grace expires, it cancels/reaps its barrier and
+   invokes authoritative force-reap; genuine owner cancellation stops later sequential closes.
 
 The same distinction applies before cleanup: if an SDK create or stream-read awaitable independently
 raises `CancelledError`, the adapter emits a bounded provider failure and still closes every resource
@@ -125,7 +133,8 @@ provider storage are separate controls.
 4. Step through `_ResponsesAutomaton.accept()`: structural events change adapter state, text events
    cross the port, and the terminal is buffered for cleanup.
 5. Read the cancellation tests beside the operation state machine. They prove blocked create/read,
-   terminal-pending, cleanup failure, and cancelled-joiner behavior without HTTP.
+   terminal-pending, cleanup failure, cancelled-joiner behavior, and force-reap at all three pending
+   resource stages without HTTP.
 
 ## Implementation code samples
 
@@ -225,6 +234,8 @@ not timing against a network service.
 | Create or stream read independently raises `CancelledError` | Operation lifecycle | fixed provider failure; acquired resources close | hostile SDK-cancellation tests |
 | Cancellation during create or next event | Operation lifecycle | owned task reaped; no later event | blocked-create/read tests |
 | Stream/client close fails or independently raises `CancelledError` | Cleanup owner | both closes attempted; completion replaced or prior failure preserved; bounded cleanup error | hostile close-failure matrix |
+| Cleanup owner exceeds five-second grace | Session plus provider operation | local barrier and real owner reaped; remote release unconfirmed; safe diagnostic | force-reap tests at create/stream/client stages |
+| Completed usage reports more than 8,192 output tokens | Adapter automaton | `invalid_response`; no usage or completion observation | exact-cap and over-cap tests |
 
 ## Production expansion
 
@@ -268,8 +279,9 @@ conformance evidence before allowlisting.
 2. Mutate one response identity in the success fixture and predict the normalized result.
 3. Explain why an independent close-time `CancelledError` is cleanup failure but task cancellation of
    the cleanup owner remains control flow.
-4. Run the adapter tests and identify which ones prove “no HTTP by default.”
-5. Compare TAB/LF with carriage return and OSC-52, then explain why rejection preserves the exact
+4. Explain why force-reap can guarantee no local task remains but cannot confirm remote release.
+5. Run the adapter tests and identify which ones prove “no HTTP by default.”
+6. Compare TAB/LF with carriage return and OSC-52, then explain why rejection preserves the exact
    delta/completion reconciliation rule.
 
 ## Key takeaways
@@ -286,6 +298,8 @@ conformance evidence before allowlisting.
 - **Adapter:** translator between a vendor interface and a repository-owned port.
 - **Automaton:** state machine that accepts only legal event transitions.
 - **Foreground stream:** request whose work follows the active connection.
+- **Force-reap:** authoritative cancellation and awaiting of all operation-owned local tasks after
+  ordinary cleanup exceeds its grace.
 - **Opaque reasoning envelope:** a validated structural item whose encrypted payload is ignored.
 - **Terminal pending:** cleanup is settled while final domain observations remain buffered.
 - **SSE:** server-sent events delivered incrementally over one HTTP response.

@@ -318,9 +318,12 @@ The explicit loop performs these bounded steps:
 
 At most one provider operation is active for a session. CAH-020 implements the structural
 `Provider` and `ProviderOperation` protocols: one harness-owned request starts a single-consumer
-stream with explicit awaited cancellation and cleanup. Its immutable event union covers text
-deltas, completed text, serialized tool requests, usage, normal completion, and normalized failure.
-Cancellation closes iteration instead of fabricating a failure event.
+stream with explicit awaited cancellation and cleanup. Ordinary `cancel()` and `wait_closed()` calls
+remain provider-owned cleanup barriers; the required session-only `force_cancel_cleanup()` escape
+hatch authoritatively cancels and reaps operation-owned local work after that barrier exceeds the
+harness grace. Its immutable event union covers text deltas, completed text, serialized tool requests,
+usage, normal completion, and normalized failure. Cancellation closes iteration instead of
+fabricating a failure event.
 
 The first implementation is a strict deterministic fake. It matches ordered requests, emits
 scripted events, exposes named logical delay and cancellation checkpoints, and fails on mismatches,
@@ -362,9 +365,11 @@ the deadline does not bound local sink latency.
 CAH-023 implements the first real adapter against foreground OpenAI Responses streaming. It maps one
 provider-neutral text request to `background=false` and `store=false`, accepts only the reviewed event
 automaton, rejects terminal state-changing C0/C1 text controls while preserving TAB/LF layout, and
-normalizes SDK failures to fixed provider failures. Python and TypeScript wire schemas mirror the text
-invariant before terminal state changes. Every operation lazily owns one SDK client and stream plus one
-shielded resource-cleanup task. Provider-specific configuration is confined to the SDK-free
+normalizes SDK failures to fixed provider failures. Completed usage must reconcile input plus output
+to total, and output tokens cannot exceed the request's fixed 8,192-token generation cap. Python and
+TypeScript wire schemas mirror the text invariant before terminal state changes. Every operation
+lazily owns one SDK client and stream plus one shielded resource-cleanup task. Provider-specific
+configuration is confined to the SDK-free
 validation, composition, and adapter modules; SDK objects, raw responses, and cleanup state remain
 inside the adapter itself. The default `MockSession` is still a separate runtime fixture rather than a
 provider consumer, and default validation never makes a live model or network request.
@@ -387,14 +392,19 @@ Provider cleanup has exactly one loop-owned task per session. A deadline watcher
 cancellation mode without waiting for the publication lock; the finalizer joins that same task and
 never invokes the provider cleanup API concurrently. Each `cancel()` or `wait_closed()` await is
 raced against one fixed five-second local grace through the injected monotonic waiter. Cleanup
-completion wins an exact tie; otherwise grace expiry cancels and reaps the local cleanup awaitable
-and emits at most one payload-free `provider_cleanup_failed` runtime error without rewriting the
-selected outcome. The loop also cancels and joins any pending local provider read. These in-process
-joins require the provider awaitables to propagate task cancellation; stronger process isolation is
-required for an implementation that suppresses it. The OpenAI adapter supplies its own single-owner
-stream/client cleanup beneath this loop-owned grace; failure remains bounded and cannot rewrite the
-selected session outcome. Later units add tool supervision to the same loop. Small, bounded filesystem
-operations may run directly; blocking work moves to a worker thread when needed.
+completion wins an exact tie. Otherwise grace expiry first cancels and reaps the loop-owned barrier
+task, then invokes the operation's required `force_cancel_cleanup()` method to cancel and await every
+provider-owned local cleanup or SDK task without shielding. No provider-owned task may remain after
+that force-reap returns, but remote resource release stays explicitly unconfirmed and the loop emits
+at most one payload-free `provider_cleanup_failed` runtime error without rewriting the selected
+outcome. The loop also cancels and joins any pending local provider read. These in-process joins
+require provider awaitables to propagate task cancellation; stronger process isolation is required
+for an implementation that suppresses it. The OpenAI adapter supplies its own single-owner
+stream/client cleanup beneath this loop-owned grace. Ordinary joiners shield that owner; force-reap
+cancels it directly. Genuine cleanup-owner cancellation stops the remaining sequential closes,
+whereas a close coroutine that independently raises `CancelledError` is a bounded cleanup failure and
+the other close is still attempted. Later units add tool supervision to the same loop. Small, bounded
+filesystem operations may run directly; blocking work moves to a worker thread when needed.
 
 CAH-006 implements mock cancellation as a lifecycle operation rather than an exception leaked to the
 TUI. Each `MockSession` owns an `asyncio.Event` and a state lock. A matching request selects

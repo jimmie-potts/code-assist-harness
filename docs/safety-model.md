@@ -126,18 +126,21 @@ ordinary later failure does not roll back an earlier accepted view. The deadline
 sink-latency bound.
 
 Every provider cleanup await uses the session's one shared supervised cleanup task and a fixed
-five-second local grace. A completed cleanup wins an exact cleanup/grace tie; otherwise the local
-awaitable is cancelled and reaped and `provider_cleanup_failed` is emitted at most once without
-replacing the selected terminal outcome. This requires provider awaitables to propagate task
-cancellation and does not prove remote cleanup succeeded. File-size, search-result,
+five-second local grace. A completed cleanup wins an exact cleanup/grace tie. Otherwise the local
+barrier task is cancelled and reaped, and the required provider force-reap hook cancels and awaits
+every provider-owned local cleanup or SDK task without shielding. `provider_cleanup_failed` is emitted
+at most once without replacing the selected terminal outcome. No local provider task remains after
+force-reap, but resource release stays unconfirmed: this requires cancellation-responsive provider
+code and does not prove remote cleanup succeeded. File-size, search-result,
 command-duration, whole-session, and later tool-execution limits remain future controls.
 
 CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
 validate the explicit `openai` provider plus exact `gpt-5.6-luna` model, while Python
 remains authoritative before SDK import. `OPENAI_API_KEY` is inspected only after that selection;
 every other `OPENAI_*` setting is rejected so ambient routing, headers, or logging cannot silently
-alter the request. The supervised child removes `SSLKEYLOGFILE` and starts Python with `-E`; direct
-adapter construction also rejects that TLS secret-export selector before client creation. The adapter
+alter the request. Both the supervised child and canonical `scripts/check` gate remove
+`SSLKEYLOGFILE`; the child starts Python with `-E`, and direct adapter construction independently
+rejects that TLS secret-export selector before client creation. The adapter
 fixes the official endpoint, disables environment proxy trust, redirects, SDK retries, and background
 mode, and sets `store=false` for the request. Its closed failure table never exposes SDK exceptions,
 bodies, headers, request IDs, model candidates, or credentials. Assistant text preserves TAB/LF
@@ -149,8 +152,10 @@ one shielded adapter cleanup task that attempts both closes, beneath the harness
 cleanup grace. A bounded cleanup failure records that release is unconfirmed; it does not claim remote
 cleanup succeeded or replace the selected session outcome. An independently raised `CancelledError`
 from a close coroutine is recorded as that bounded failure while both closes are still attempted;
-cancellation of the cleanup owner itself remains control flow. Default validation uses SDK fakes with
-network denied, and the live smoke requires explicit flags, the exact model, and a credential.
+cancellation of the cleanup owner itself remains control flow and stops the remaining sequential
+closes. Ordinary joiners shield this owner, while grace expiry causes the session to cancel and reap it
+through the required authoritative hook. Default validation uses SDK fakes with network denied, and
+the live smoke requires explicit flags, the exact model, and a credential.
 
 ## Transcripts and privacy
 

@@ -106,7 +106,9 @@ boundaries. `tests/test_provider_session.py` uses injected clocks, deadline wait
 gates, and blocked sinks without wall-clock sleeps. It proves admission before provider start,
 cumulative UTF-8 charging, tool observations before unavailable-tool handling, an exact
 event/deadline tie, cancellation beginning while an admitted publication is blocked, one terminal
-winner, and one shared cleanup task supervised by a fixed five-second grace. The ordered,
+winner, and one shared cleanup task supervised by a fixed five-second grace. Grace regressions prove
+the loop-owned barrier is cancelled and reaped before the required authoritative provider hook reaps
+the nested cleanup owner on both cancellation and natural-completion paths. The ordered,
 non-interleaved publication transaction finishes; an ordinary later failure does not roll back an
 earlier accepted view, and the test does not claim to bound local sink latency.
 `tests/test_runtime.py` proves the deadline is captured before transcript setup,
@@ -118,10 +120,15 @@ CAH-023 adds deterministic adapter evidence without making the default suite net
 `tests/provider/test_openai_config.py` and `tests/test_runtime_configuration.py` prove exact
 provider/model parity, SDK-free rejection, credential privacy, mock independence from ambient keys,
 and lazy composition. `tests/provider/test_openai_responses.py` uses SDK-shaped fakes to cover exact
-request mapping, the accepted stream automaton, failure normalization, cancellation races, and every
-stream/client cleanup outcome. TypeScript configuration, launcher, supervisor, and real-boundary tests
-prove separate shell-free arguments and the explicit mock default. Repository policy permits the SDK
-and network surface only in the concrete adapter.
+request mapping, the accepted stream automaton, completed-usage reconciliation including exact 8,192
+output-token acceptance and over-cap rejection, failure normalization, cancellation races, and every
+stream/client cleanup outcome. It also proves force-reap while create, stream close, or client close
+is blocked, ordinary joiner shielding, and the distinction between cleanup-owner cancellation and an
+independently raised close-time `CancelledError`. TypeScript configuration, launcher, supervisor, and
+real-boundary tests prove separate shell-free arguments and the explicit mock default. Check-script
+regressions seed `SSLKEYLOGFILE` and prove the canonical gate clears it at every layer, while explicit
+live opt-in rejects it without echoing its value. Repository policy permits the SDK and network surface
+only in the concrete adapter.
 
 ## Assertion layers
 
