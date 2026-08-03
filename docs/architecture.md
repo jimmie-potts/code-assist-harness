@@ -40,10 +40,14 @@ validated hard limits, per-session accounting, deterministic deadline and cleanu
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
 an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
-protocol v1 is unchanged. CAH-024 is implementation-ready but still planned; it will add the first
-M2 primitive, an immutable Python workspace boundary, without file reads or protocol changes. Tool
-execution, workspace discovery and reads, policy, and broader agent behavior remain target
-architecture.
+protocol v1 is unchanged. CAH-025 is in progress only until publication as a presentation-only E7
+refinement: `app.tsx` retains input ownership while `magical-mission.tsx` selects responsive and
+reduced-decoration rendering for existing projections. Its complete TUI suite, canonical repository
+gate, automated pending-draft resize, and representative PTY layouts pass. CAH-024 is
+implementation-ready but still planned; it remains the first E3 primitive,
+an immutable Python workspace boundary, without file reads or protocol changes. Tool execution,
+workspace discovery and reads, policy, future plan/tool/diff/approval surfaces, and broader agent
+behavior remain target architecture.
 
 ## Product boundary
 
@@ -154,7 +158,7 @@ Ink input -> PythonRuntimeSupervisor.submitTask -> session.start NDJSON
   -> runtime.run_runtime -> MockSessionRunner creates MockSession
   -> OrderedEventWriter returns each validated event -> Python lifecycle reducer
   -> completed six-event tape or shortened cancelled tape -> supervisor lifecycle reducer
-  -> multi-turn conversation adapter -> App conversation and status rendering
+  -> multi-turn conversation adapter -> App input owner -> MagicalMissionView projection
 
 Escape while running -> PythonRuntimeSupervisor.cancelSession -> session.cancel NDJSON
   -> MockSession.request_cancellation -> cooperative checkpoint wake-up
@@ -202,7 +206,8 @@ dependency-resolution changes commit `uv.lock`.
 
 | Concern | Owner | Notes |
 | --- | --- | --- |
-| Terminal input, layout, and keybindings | Ink TUI | The TUI renders state; it does not make policy decisions. |
+| Terminal input and keybindings | `app.tsx` | The controller owns the draft, Enter, Escape eligibility, and visible local feedback; it does not decide policy or terminal outcomes. |
+| Current responsive layout and decoration | `magical-mission.tsx` | CAH-025 projects existing runtime/session truth across wide, stacked, compact, no-color, and reduced-decoration variants; implementation and validation are complete, with publication pending. |
 | Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
@@ -211,7 +216,8 @@ dependency-resolution changes commit `uv.lock`.
 | Tool validation and execution policy | Python tool and safety subsystems | The model and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
 | Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs and explicitly typed non-lifecycle evidence are persisted after admission. |
-| Visible conversation, plan, tools, errors, and diffs | Ink TUI | Visible state is reduced from runtime events. |
+| Visible current conversation, status, warnings, and failures | Ink TUI | Current text is reduced from existing runtime/session projections; decoration is not authoritative. |
+| Future plans, tools, approvals, and diffs | Ink TUI target | Not implemented by CAH-025; later owning behavior stories must supply validated state first. |
 
 This boundary allows a future CLI, web UI, test harness, or library caller to use the same Python
 core without reproducing orchestration and safety behavior.
@@ -274,8 +280,9 @@ tui/
 │   ├── session-lifecycle.ts
 │   ├── session-state.ts
 │   ├── run-application.tsx
-│   └── app.tsx
-└── test/              Render, reducer, protocol, launcher, runtime, and lifecycle tests
+│   ├── app.tsx
+│   └── magical-mission.tsx
+└── test/              Render, responsive-view, reducer, protocol, launcher, runtime, and lifecycle tests
 ```
 
 `scripts/run-tui` resolves and validates both the Node and npm executable paths, rejecting Windows
@@ -292,8 +299,11 @@ Ink unmount, and guarantees cleanup after every exit path. `protocol.ts` validat
 Zod wire shapes and `protocol-stream.ts` owns byte framing. `session-lifecycle.ts` is the pure
 absorbing one-session core; `session-state.ts` adapts accepted inputs into persistent multi-turn
 conversation history. `runtime-supervisor.ts` validates each active tape with the core, writes at
-most one cancellation command, and publishes accepted updates, while `app.tsx` owns only the draft,
-Escape binding, and visible feedback.
+most one cancellation command, and publishes accepted updates. `app.tsx` owns only the draft, input
+bindings, cancellation eligibility, and visible local feedback; it delegates immutable display values
+to `magical-mission.tsx`. That view owns width/height and terminal-capability presentation choices,
+decorative familiar mapping, alert ordering and celebration suppression, truthful input headings,
+and current status rendering without callbacks into the runtime.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. The CAH-010 lifecycle fixtures contain domain facts and

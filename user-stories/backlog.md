@@ -42,9 +42,11 @@ turn through an injected runtime seam, with strict observation grammar and bound
 CAH-022 puts four validated hard limits, fresh per-session accounting, deterministic deadline and
 cleanup supervision, and transcript-v3 loop evidence around that turn. CAH-023 now activates one
 explicitly configured, text-only OpenAI Responses adapter behind that bounded provider port while
-keeping the mock as the default. M1 is complete. CAH-024 is now the first implementation-ready E3
-story: it plans an immutable Python workspace boundary while leaving repository discovery and reads
-to later single-responsibility units.
+keeping the mock as the default. M1 is complete. CAH-025 is a validated E7 presentation unit awaiting
+publication: it applies the responsive Magical Mission view to current conversation/runtime/session
+truth without adding an agent capability. CAH-024 remains the first
+implementation-ready E3 story: it plans an immutable Python workspace boundary while leaving
+repository discovery and reads to later single-responsibility units.
 
 ## Epic backlog
 
@@ -154,6 +156,14 @@ diff.
 - Present focused approval interactions while preserving pending input.
 - Support cancellation, narrow terminals, resize, and child/protocol failures.
 - Test reducers separately and important screens with `ink-testing-library`.
+
+[CAH-025](cah-025-apply-magical-mission-ink-presentation.md) is the first implementation-ready story
+focused on this epic's presentation outcome. Its implementation and validation are complete, with
+publication pending: `App` retains input and callback ownership while the Magical Mission view
+chooses wide, stacked, compact, no-color, and
+reduced-decoration rendering for existing projections. It does not implement the future plan, tool,
+result, diff, or approval-interaction bullets above; those remain dependent on their owning behavior
+stories.
 
 ### E8 - Evaluation and observability
 

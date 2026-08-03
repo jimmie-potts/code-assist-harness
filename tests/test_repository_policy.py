@@ -352,6 +352,12 @@ def test_presentations_are_frozen_and_markdown_is_authoritative() -> None:
     cah_023_lesson = (
         REPOSITORY_ROOT / "docs" / "lessons" / "cah-023-openai-responses-adapter.md"
     ).read_text(encoding="utf-8")
+    cah_025_story = (
+        REPOSITORY_ROOT / "user-stories" / "cah-025-apply-magical-mission-ink-presentation.md"
+    ).read_text(encoding="utf-8")
+    cah_025_lesson = (
+        REPOSITORY_ROOT / "docs" / "lessons" / "cah-025-magical-mission-ink-presentation.md"
+    ).read_text(encoding="utf-8")
     agents_compact = " ".join(agents.split())
     architecture_compact = " ".join(architecture.split())
     lesson_readme_compact = " ".join(lesson_readme.split())
@@ -359,6 +365,8 @@ def test_presentations_are_frozen_and_markdown_is_authoritative() -> None:
     cah_024_lesson_compact = " ".join(cah_024_lesson.split())
     cah_024_note_compact = " ".join(cah_024_note.split())
     cah_023_lesson_compact = " ".join(cah_023_lesson.split())
+    cah_025_story_compact = " ".join(cah_025_story.split())
+    cah_025_lesson_compact = " ".join(cah_025_lesson.split())
 
     assert "Markdown lessons are authoritative" in agents_compact
     assert "Retained presentation files are frozen historical artifacts" in agents_compact
@@ -373,7 +381,9 @@ def test_presentations_are_frozen_and_markdown_is_authoritative() -> None:
     assert "do not add or revise presentation files while the freeze is active" in template
     assert "**Visual companion:** None" in cah_023_lesson_compact
     assert "**Visual companion:** None" in cah_024_lesson_compact
+    assert "**Visual companion:** None" in cah_025_lesson_compact
     assert "No presentation is part of CAH-024" in cah_024_story_compact
+    assert "no presentation is part of CAH-025" in cah_025_story_compact
     assert "one `WorkspaceBoundaryError`" in cah_024_lesson_compact
     assert "`ResolvedWorkspacePath`" in cah_024_lesson_compact
     assert "five stable error codes" in cah_024_lesson_compact

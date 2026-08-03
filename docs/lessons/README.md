@@ -5,7 +5,7 @@ A user story is the delivery contract; a lesson is the learning companion that e
 concepts, architecture, design choices, practical failure modes, and how the same problem is often
 handled in a production organization.
 
-The lesson set maps one-to-one to the 16 implementation-ready stories. Outcome-level epics do
+The lesson set maps one-to-one to the 17 implementation-ready stories. Outcome-level epics do
 not receive lesson files until they are refined into a story with acceptance criteria. This keeps a
 lesson attached to work that can actually be built and verified.
 
@@ -52,11 +52,13 @@ not add or revise presentations unless the user explicitly reverses this freeze.
 | 13 | CAH-021 | [One provider-neutral turn](cah-021-one-model-turn.md) | Verified against implementation |
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Verified against implementation |
 | 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Verified against implementation |
-| 16 | CAH-024 | [Workspace boundary](cah-024-workspace-boundary.md) | Planned |
+| 16 | CAH-025 | [Magical Mission Ink presentation](cah-025-magical-mission-ink-presentation.md) | Implementation companion |
+| 17 | CAH-024 | [Workspace boundary](cah-024-workspace-boundary.md) | Planned |
 
 CAH-023 completes the M1 learning sequence by locating the first real-provider adapter behind the
-harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024 is
-the planned first M2 boundary unit. Both use Markdown-only lessons with compact text diagrams.
+harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-025 is
+the validated presentation-only E7 refinement awaiting publication, while CAH-024 remains the
+planned first E3 boundary unit. All three use Markdown-only lessons with compact text diagrams.
 
 ## Required lesson structure
 

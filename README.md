@@ -56,8 +56,13 @@ network-free fake, CAH-021 completes the first injected provider-neutral turn, a
 [CAH-022](user-stories/cah-022-enforce-loop-limits.md) completes its hard limits with a
 [written lesson](docs/lessons/cah-022-loop-limits.md) and
 [visual companion](docs/lessons/assets/cah-022-loop-limits.pptx). CAH-023 adds the strict OpenAI
-Responses adapter and explicit launch selection without changing protocol v1. Workspace discovery and
-reads, tool execution, policy, and broader multi-turn agent behavior remain unimplemented.
+Responses adapter and explicit launch selection without changing protocol v1. CAH-025 presentation
+work is **In progress** only until its reviewed publication is recorded: `App` retains its existing
+input and supervised callbacks while a responsive Magical Mission view decorates current
+conversation, runtime, session, warning, and failure projections. The complete TUI suite, canonical
+repository gate, automated pending-draft resize, and representative wide/stacked/compact PTY renders
+pass. Workspace discovery and reads, tool execution, policy, future plan/tool/diff/approval
+interfaces, and broader multi-turn agent behavior remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -243,8 +248,16 @@ npm or the TypeScript loader runs. The runtime supervisor separately resolves `u
 `PATH`, follows symlinks, rejects paths under `/mnt` and names ending in `.exe`, and validates the
 prepared project environment before spawn. The TUI then sends a validated `runtime.initialize`
 command, waits for the correctly correlated `runtime.ready` event, and displays the canonical
-workspace and runtime state. With the default provider, type a non-empty task and press Enter to start
-the deterministic mock. The conversation renders these three fragments as they arrive:
+workspace and runtime state. The in-progress Magical Mission presentation uses a Star Command header,
+Mission Log, state-derived familiar, truthful command-input headings, an alert deck immediately below
+the header, and the same authoritative status text. It renders side-by-side panels at 96 columns
+when at least 24 rows are available, stacks them at wider low-height sizes and from 56 through 95
+columns, and uses a compact composition below 56. Familiar output
+requires 40 columns and 18 rows, while optional emoji require 48 columns and 18 rows. `NO_COLOR`
+removes explicit color; `TERM=dumb` selects reduced decoration and classic borders rather than
+guaranteeing fully ASCII output. These choices change presentation only. With the default provider,
+type a non-empty task and press Enter to start the deterministic mock. The conversation renders these
+three fragments as they arrive:
 
 ```text
 Mock response:

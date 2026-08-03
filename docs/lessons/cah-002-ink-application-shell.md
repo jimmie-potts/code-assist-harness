@@ -11,9 +11,10 @@
 - **Visual companion:** [CAH-002 lesson deck](assets/cah-002-ink-application-shell.pptx)
 
 > [!IMPORTANT]
-> This lesson is verified against the implemented TypeScript shell, automated tests, and terminal
-> evidence. It does not claim that a Python child, NDJSON protocol, session, model, workspace, tool,
-> or policy exists.
+> This lesson preserves CAH-002 completion-time evidence for the TypeScript shell, automated tests,
+> and terminal lifecycle. Later units connected Python, protocol, and sessions, and the in-progress
+> [CAH-025 lesson](cah-025-magical-mission-ink-presentation.md) owns the current Magical Mission
+> presentation. Those later changes do not retroactively expand CAH-002's scope.
 
 ![Concept illustration of the implemented terminal application shell](assets/cah-002-terminal-shell-concept.png)
 
@@ -22,12 +23,12 @@ frame remaining deliberately disconnected from Python and protocol behavior.*
 
 ## Quick summary
 
-CAH-002 delivers a launchable conversation-first terminal frame inside Ubuntu WSL. A small shell
+CAH-002 delivered a launchable conversation-first terminal frame inside Ubuntu WSL. A small shell
 launcher rejects missing tooling, Windows Node or npm executables—including symlink-hidden targets—
 and unsupported versions before npm; a pure TypeScript gate repeats Node validation before Ink is
-imported. Ink then renders the title, empty conversation, task input, and idle status. Ctrl+C
-unmounts the application and restores the terminal. The shell deliberately performs no task
-submission or harness work.
+imported. At this unit's completion, Ink rendered the title, empty conversation, disconnected task
+input, and idle status. Ctrl+C unmounted the application and restored the terminal. The unit
+deliberately performed no task submission or harness work.
 
 ### The unit in one view
 
@@ -124,14 +125,16 @@ flowchart LR
 | Missing, Windows, symlink-hidden, or unsupported outer runtime | `scripts/run-tui` | `launcher.test.ts` |
 | Version compatibility defense in depth | `node-version.ts`, `check-node-version.ts` | `node-version.test.ts`, `runtime-metadata.test.ts`, `test_check_script.py` |
 | Pre-render ordering | `bootstrap.ts` | `bootstrap.test.ts` |
-| Initial visible frame | `app.tsx` | `app.test.tsx` |
+| CAH-002 completion-time visible frame | historical `app.tsx` behavior | `app.test.tsx` completion evidence |
 | Ctrl+C and awaited teardown | `run-application.tsx` | `run-application.test.tsx`, manual PTY check |
 | npm scripts and dependency resolution | `package.json`, `.npmrc`, `package-lock.json` | `npm ci`, `npm run check` |
 
-### Verified terminal composition
+### Verified terminal composition at CAH-002 completion
 
-The exact borders and spacing remain Ink rendering details. The labels and their semantic order are
-implemented in `app.tsx` and asserted in `app.test.tsx`.
+The exact borders and spacing were Ink rendering details. The frame below records the semantic
+composition verified when CAH-002 completed; it is not a claim about the current screen. CAH-025 now
+keeps input ownership in `app.tsx` and renders the current responsive composition through
+`magical-mission.tsx`.
 
 ```text
 ╭──────────────────────────────────────────────────────────────────────╮
@@ -157,7 +160,8 @@ The implemented invariants are:
   gate, and before the Ink-owning module loads;
 - missing tooling and raw or symlink-hidden Windows Node/npm paths fail with WSL setup guidance;
 - the repository pin, npm engine range, and TypeScript guard stay aligned;
-- the screen contains the title, conversation empty state, task-input placeholder, and idle status;
+- the CAH-002 completion screen contained the title, conversation empty state, disconnected
+  task-input placeholder, and idle status;
 - Ctrl+C remains an Ink-owned application exit because no active session exists yet;
 - the CLI waits for terminal cleanup before settling;
 - start and test use the Linux `/tmp` directory rather than inherited invalid Windows temp paths;
@@ -186,9 +190,9 @@ flowchart LR
    supplies a dynamic import. An error is written to stderr with exit status 1.
 4. **Study the pure guard.** `assertSupportedNodeVersion` accepts an explicit value, enabling edge
    cases to be tested without replacing the developer's active Node installation.
-5. **Render the shell.** `App` uses a vertical layout with `Code Assist Harness`, `Conversation`,
-   `No messages yet.`, `Task input`, and `Status: idle` regions. Input is visibly disconnected in
-   this unit.
+5. **Render the historical shell.** At CAH-002 completion, `App` used a vertical layout with
+   `Code Assist Harness`, `Conversation`, `No messages yet.`, `Task input`, and `Status: idle`
+   regions. Input was visibly disconnected in this unit; later stories connected and restyled it.
 6. **Trace exit ownership.** `runApplication` asks Ink to handle Ctrl+C and awaits `waitUntilExit`.
    The lifecycle test verifies both arguments; a pseudo-terminal run verified the physical cleanup.
 7. **Run the focused suite.** Six test files contain 17 tests covering the screen, bootstrap order,
@@ -299,6 +303,7 @@ See the shared [project glossary](../glossary.md) for TUI, runtime, event, and p
 
 - [CAH-002 delivery contract](../../user-stories/cah-002-bootstrap-ink-application.md)
 - [CAH-002 completion evidence](../../user-stories/notes/2026-07-15-cah-002-ink-shell.md)
+- [CAH-025 current Magical Mission presentation](cah-025-magical-mission-ink-presentation.md)
 - [CAH-002 visual lesson deck](assets/cah-002-ink-application-shell.pptx)
 - [ADR 0002: Ink and Python process boundary](../adr/0002-ink-python-process-boundary.md)
 - [Architecture process boundary](../architecture.md#process-boundary)
