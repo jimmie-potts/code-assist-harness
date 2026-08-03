@@ -271,16 +271,22 @@ remain M3 work.
 > As a user, I want model tool requests admitted through one typed registry and explicit bounded loop
 > so that neither the provider nor an MCP transport can execute or continue work directly.
 
-CAH-031 limits registration to four read capabilities. CAH-032 defines strict context/tool exchange
+CAH-031 limits registration to four read capabilities and attaches harness-owned target-scope
+metadata to successful reads. CAH-032 defines strict context/tool exchange
 values, including a bounded positional opaque-continuation item type, without dispatch. CAH-033
 admits a complete response before either publication or dispatch,
-CAH-034 proves one validation-and-result round trip, and CAH-035 generalizes it only to four model
+CAH-034 discovers and atomically admits applicable instructions for the successful target before its
+follow-up, and CAH-035 generalizes that monotonic context rule only to four model
 turns and three sequential calls with cumulative limits. CAH-036 requests
 `reasoning.encrypted_content` on every stateless OpenAI turn so replay is available, but keeps that
 opaque payload out of policy and evidence. CAH-037 explicitly composes the four-turn, 120-second,
 4,096-byte, three-call M2 profile instead of inheriting defaults. A future MCP client must enter
 through a generalized registry and separate remote-trust design; the local M2 registry is not a
 direct MCP compatibility claim.
+
+Repository instructions remain untrusted guidance. A discovered `AGENTS.md` can neither broaden read
+policy nor turn a failed target into an admitted scope; discovery or context-budget failure stops
+before result replay and another provider start.
 
 ### Implemented in CAH-011 — Persist redacted lifecycle evidence
 

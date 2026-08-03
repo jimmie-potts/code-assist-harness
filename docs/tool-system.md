@@ -60,6 +60,13 @@ classified as reads and may execute automatically after policy validation. They 
 shell, access the network, or escape the workspace. Their outputs are bounded and carry source
 provenance. More detail appears in [Context Engineering](context-engineering.md).
 
+Each registered M2 read tool also owns one pure, typed `target_scope` extractor. It returns exactly
+the successfully validated requested `path` as harness-only control-plane metadata; it is never added
+to the model-facing result JSON. The loop uses that scope to discover and atomically add applicable
+instructions before the next provider turn. Known tool failures add no scope. Paths merely listed or
+returned as broad search matches do not independently expand instructions in M2; a specific
+path-targeting call is required before relying on a narrower scope.
+
 ## Function calling and MCP
 
 Function calling is the model-facing loop grammar: advertise tool definitions, receive a typed call,

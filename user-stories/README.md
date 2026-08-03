@@ -53,8 +53,8 @@ provider/model configuration while preserving the mock default. M0 and M1 are co
 through CAH-037 are the 14 implementation-ready M2 units and all remain **Planned**. CAH-024 is the
 next dependency checkpoint; the sequence then adds scoped instructions, read policy and handlers,
 attributable context, a typed registry, provider-neutral tool exchange, atomic response admission,
-one explicit round trip, the bounded agent loop, strict OpenAI tool mapping, and deterministic
-vertical-slice evaluation.
+target-scoped instruction propagation through one explicit round trip, the bounded agent loop,
+strict OpenAI tool mapping, and deterministic vertical-slice evaluation.
 
 ## Dependency-ordered implementation sequence
 
@@ -97,7 +97,7 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
 CAH-024 through CAH-026 and CAH-030 through CAH-037 are core learning units. Give the closest review
 attention to CAH-031 through CAH-036: they expose the registry boundary, provider-neutral LLM/tool
 grammar, atomic response admission, one complete function-calling exchange, the bounded
-harness-owned loop, and strict OpenAI response mapping. CAH-037 then tests whether those parts
+harness-owned loop, scoped context evolution, and strict OpenAI response mapping. CAH-037 then tests whether those parts
 produce grounded behavior rather than merely
 type-checking in isolation.
 

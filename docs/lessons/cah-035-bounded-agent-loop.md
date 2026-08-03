@@ -6,8 +6,8 @@
 - **Implementation status:** Planned; only a one-call round trip is specified first
 - **Story:** [CAH-035](../../user-stories/cah-035-run-bounded-agent-loop.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** Harness-owned state transitions, cumulative accounting, reachable stop
-  conditions, and defense-in-depth guards
+- **Review focus:** Harness-owned state transitions, atomic scoped-instruction accumulation,
+  cumulative accounting, reachable stop conditions, and defense-in-depth guards
 - **Visual companion:** None; the Markdown diagram is authoritative
 - **Related architecture:** [Agent loop](../agent-loop.md), [Architecture](../architecture.md), and
   [Safety model](../safety-model.md)
@@ -17,7 +17,8 @@
 ## Quick summary
 
 CAH-035 turns one proven call/result cycle into an explicit sequential state machine with at most
-four model turns and three admitted calls. The Python harness—not a provider or tool—owns progress.
+four model turns and three admitted calls. Successful requested paths can accumulate applicable
+instructions between turns. The Python harness—not a provider or tool—owns progress and context.
 
 ## Learning objectives
 
@@ -26,6 +27,7 @@ After this unit, you should be able to:
 - locate agency in explicit states and transitions;
 - prove termination from hard turn/call ceilings;
 - distinguish reachable limit precedence from defense-in-depth checks;
+- trace atomic context enrichment across nested, repeated, alias, and sibling target scopes;
 - carry history, usage, deadline, and output accounting cumulatively; and
 - explain where a future MCP adapter fits without owning the loop.
 
@@ -40,12 +42,16 @@ A state machine names legal states and transitions. If code cannot name a transi
 
 ```text
 MODEL -> FINAL
-MODEL -> CALL -> VALIDATE -> TOOL -> APPEND -> MODEL
+MODEL -> CALL -> VALIDATE -> TOOL -> CHECK -> DISCOVER -> CHECK -> MERGE -> CHECK -> APPEND -> MODEL
 ```
 
 A common misconception is that every configured limit must be reachable normally. With three call
 slots, a fourth call fails before it could request turn five; the fifth-turn guard still protects
 against corrupted/seeded state.
+
+Another misconception is that paths named in tool output select policy. They do not. Only the
+validated requested `path` from a successful call becomes a `target_scope`; broad list/search results
+need a later specific path-targeting call before their nested instructions apply.
 
 ## Key concepts
 
@@ -54,6 +60,8 @@ against corrupted/seeded state.
 - **Reachable stop:** failure possible from a fresh legal session.
 - **Defense in depth:** redundant guard tested through seeded internal state.
 - **Sequentiality:** at most one active provider or tool operation.
+- **Scoped accumulation:** atomically add newly applicable instruction items after successful reads.
+- **Idempotent scope:** an exact repeat or canonical alias with identical source values adds nothing.
 - **Positional replay:** append each optional continuation immediately before its call and matching
   result in one immutable history tuple.
 
@@ -64,12 +72,16 @@ Ink TUI                 Python harness loop                     Provider
  final only <----- [publish accepted FINAL] <-------------- admitted text
                            ^        |
                            |        +---- next request -------> model
-                           |                    ^
+                           |             current context ^
          APPEND opaque? -> call -> result <---- bounded replay
                            ^
                     VALIDATE + TOOL ----> native read registry
+                              | successful target_scope
+                              v
+                    CHECK -> CAH-025 discover -> CHECK -> CAH-030 merge -> CHECK
 
 Ceilings: 4 provider starts / 3 within-budget calls / one rejecting fourth observation at most
+Context: root-only start; up to 3 atomic scoped enrichments; recheck context/request every turn
 Evidence: one final transcript-v3 usage aggregate; no calls/results/opaque content
 MCP: future registry/executor adapter below the loop, never the loop owner
 ```
@@ -82,10 +94,14 @@ unreachable normally and tested by seeding the turn ledger immediately before ad
 1. Validate the full request and charge a model start.
 2. Collect one atomic CAH-033 outcome.
 3. Publish and finish on final text.
-4. Otherwise charge the call, validate, dispatch, and append optional continuation, call, and result
-   in that exact order.
-5. Repeat while all cumulative checks pass.
-6. Persist one checked usage aggregate only after successful final text.
+4. Otherwise charge the call, validate, dispatch, and check cancellation/deadline after the bounded
+   synchronous return.
+5. For success, discover the validated requested scope, check cancellation/deadline, atomically merge
+   its instructions, and check again; for a known error, retain the current snapshot. Append optional
+   continuation, call, and result only after the guarded context decision succeeds.
+6. Recheck CAH-030 context and CAH-032 512-KiB complete-request bounds, run the pre-start guard, then
+   repeat.
+7. Persist one checked usage aggregate only after successful final text.
 
 ## Implementation code samples
 
@@ -98,14 +114,26 @@ while True:
     if isinstance(outcome, AcceptedFinalText):
         return await publish_final(outcome, aggregate_usage)
     ledger.admit_tool_call()
-    result = dispatch_one(outcome.call)
+    dispatch = dispatch_one(outcome.call)
+    check_cancel_and_deadline()
+    if dispatch.succeeded:
+        discovered = instructions.discover(dispatch.target_scope)
+        check_cancel_and_deadline()
+        candidate_context = context_builder.merge_atomically(context, discovered)
+        check_cancel_and_deadline()
+        context = candidate_context
+    result = dispatch.provider_result
     if outcome.continuation is not None:
         history += (outcome.continuation,)
     history += (outcome.call, result)
+    check_cancel_and_deadline()
 ```
 
 Every helper has a single admission or transition responsibility. The opaque value remains in the
-same CAH-032 history tuple immediately before its call; there is no adapter side channel.
+same CAH-032 history tuple immediately before its call; there is no adapter side channel. Context is
+replaced only after complete discovery/merge validation. Exact repeated/alias scopes are no-ops;
+changed canonical duplicates fail rather than silently replacing an earlier instruction. Each
+bounded synchronous discovery/merge value remains a local candidate until its following guard wins.
 
 ### Planned pseudocode: fifth-turn defense
 
@@ -125,6 +153,10 @@ This test does not invent an impossible fifth-turn provider transcript.
 | seeded fifth start | model admission | zero provider starts |
 | request grows past 512 KiB | request construction | no next start |
 | cancellation during sync tool | post-dispatch guard | late result discarded |
+| cancellation during discovery/merge | following guard | late bundle/package discarded |
+| instruction source changes between scopes | atomic merge | prior context retained; terminal |
+| nested/sibling merge exceeds context budget | atomic merge | no pending result/context publication |
+| list/search returns a nested path | scope selection | returned path alone adds no instruction |
 | invalid mixed response | CAH-033 collector | no tool/publication |
 | usage sum overflows | aggregate admission | no transcript aggregate |
 
@@ -151,6 +183,7 @@ so transition tracing, idempotency, quotas, and recovery become operational requ
 | Dimension | This unit | Production expansion |
 | --- | --- | --- |
 | Turns/calls | 4 / 3 | policy/model-specific quotas |
+| Context | requested-path instruction accumulation | indexed retrieval and versioned context policy |
 | Scheduling | one sequential operation | bounded concurrency and idempotency |
 | Recovery | foreground fail closed | durable checkpoints/resumption |
 | Evidence | aggregate only | redacted transition traces |
@@ -166,12 +199,16 @@ are designed.
 
 1. Trace three calls followed by final text and count every turn.
 2. Explain why a fourth call wins before a fifth-turn limit.
-3. Design a request-growth test crossing 512 KiB without truncation.
-4. Teach back why an MCP server cannot decide the next model turn.
+3. Trace nested then sibling reads; explain why precedence applies within each chain but one sibling
+   does not override the other.
+4. Design a request-growth test crossing 512 KiB without truncation.
+5. Teach back why an MCP server cannot decide the next model turn or select instruction scope.
 
 ## Key takeaways
 
 - The explicit Python state machine is the agent's control plane.
+- Context growth is a guarded transition: requested-path discovery and merge succeed atomically or
+  the loop stops without a next provider start.
 - Cumulative limits and exact precedence make termination provable.
 - Defense-in-depth tests should seed the guarded state instead of inventing illegal histories.
 
@@ -181,6 +218,7 @@ are designed.
 - **Limit precedence:** which guard wins when more than one could reject work.
 - **Seeded state:** deliberate test setup at an internal boundary.
 - **Terminal winner:** the single completion/failure/cancellation selected for a session.
+- **Sibling scope:** a different ancestor chain whose instructions retain separate applicability.
 
 ## Further reading
 

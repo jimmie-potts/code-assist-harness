@@ -61,10 +61,12 @@ boundary around the already selected canonical root plus contained, workspace-re
 resolution. It will not read content or expose any of the tools above. Later read tools remain
 responsible for rechecking the target when they perform filesystem access.
 
-For an ordinary runtime task, the context request defaults to repository scope `.` with empty
-`focus_paths` and `search_queries`. Those empty values are explicit rather than model-inferred.
-Deterministic evaluation may inject non-empty values through a test-only composition seam so that
-selection behavior can be proven without changing the user command or granting the model context
+For an ordinary runtime task, the **initial** context request defaults to repository scope `.` with
+empty `focus_paths` and `search_queries`. Those empty values are explicit rather than task- or
+model-inferred. After a native read succeeds, the registry's harness-owned metadata identifies the
+validated requested target scope; the loop discovers its applicable instructions and atomically adds
+previously unseen sources before another provider start. Deterministic evaluation may inject
+non-empty initial values through a test-only composition seam without granting the model context
 policy authority.
 
 ## Provenance and attribution
@@ -72,6 +74,7 @@ policy authority.
 A repository context item should record:
 
 - A workspace-relative source path.
+- For an instruction, the canonical directory to which it applies.
 - The selected line range or metadata scope.
 - A content hash or revision marker when useful for detecting staleness.
 - The retrieval tool or rule that selected it.
@@ -101,9 +104,10 @@ Selection should prefer, in order:
 5. Lower-confidence supporting material.
 
 When an item does not fit, the builder omits it as a unit or creates a clearly identified bounded
-excerpt. It must not silently cut JSON, split a tool result into an invalid shape, or remove the
-provenance needed to interpret an excerpt. The context builder exposes an inclusion report so a
-learner can see what was selected, omitted, and why.
+excerpt. A later applicable instruction is required: enrichment either adds the complete source
+without evicting prior context or fails before result replay and the next provider start. It must not
+silently cut JSON, split a tool result into an invalid shape, or remove provenance. The context
+builder exposes an inclusion report so a learner can see what was selected, omitted, and why.
 
 ## Iterative retrieval
 
@@ -113,6 +117,8 @@ of every file. A typical read-only task can iterate:
 ```text
 task + instructions
   -> list or search relevant paths
+  -> target a bounded path
+  -> add newly applicable scoped instructions
   -> read bounded source and tests
   -> form a grounded explanation or plan
 ```
@@ -188,9 +194,11 @@ by Python `str.splitlines()`, including its C0, C1, and Unicode separators.
 > the model input.
 
 The [implementation-ready story](../user-stories/cah-030-build-budgeted-context.md) selects required
-instructions and focus files before optional search excerpts under fixed item/UTF-8-byte budgets.
-Its inclusion report preserves admitted provenance and aggregate omission reasons without exposing
-denied labels.
+instructions and focus files before optional search excerpts under fixed item/UTF-8-byte budgets. It
+also owns pure atomic enrichment with an already-discovered instruction bundle: prior items retain
+their relative order, new instruction items carry an `applies_to` directory, and a late ancestor is
+inserted before existing descendants without evicting anything. Its inclusion report preserves
+admitted provenance and aggregate omission reasons without exposing denied labels.
 
 ### Planned CAH-037 — Evaluate the composed read-only outcome
 
@@ -199,4 +207,6 @@ denied labels.
 
 The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) composes the
 strict fake, fixture workspaces, context, registry, and bounded loop. It checks exact retrieval and
-small grounded answer facts; broad semantic ranking and live-model quality remain later work.
+small grounded answer facts, including root-only initial context followed by nested instructions
+after a successful path-targeting read. Broad result-derived scope expansion, semantic ranking, and
+live-model quality remain later work.

@@ -187,7 +187,8 @@ revise a presentation.
 
 ## Deferred work
 
-- CAH-030 combines discovered instructions with bounded repository sources.
+- CAH-030 combines discovered instructions with bounded repository sources and atomically enriches an
+  existing package with a later bundle.
 - CAH-026 through CAH-029 define and implement general read policy and native read operations.
-- Later context and agent-loop units decide how ordered instructions enter provider messages and how
-  tool calls can request more evidence.
+- CAH-034 discovers the applicable bundle after a successful tool target is admitted and carries the
+  enriched context into its follow-up; CAH-035 repeats that rule across the bounded loop.

@@ -6,8 +6,9 @@
   CAH-033, CAH-034, CAH-035, CAH-036
 - **Lesson:** [Proving the read-only assistant](../docs/lessons/cah-037-read-only-assistant-evaluation.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** Composition-root ownership and deterministic end-to-end evidence that retrieval
-  and tool use produce a grounded explanation or plan without permitting writes.
+- **Review focus:** Composition-root ownership and deterministic end-to-end evidence that a
+  path-targeted read refreshes applicable instructions before retrieval produces a grounded
+  explanation or plan, without permitting writes.
 
 ## User story
 
@@ -30,6 +31,8 @@ protocol message, UI surface, or write capability.
   one-turn/one-call `LoopLimits` defaults.
 - Lock the ordinary runtime to one explicit default CAH-030 request rather than inferring files or
   searches from task text.
+- Prove that the exact root-only initial context is atomically enriched with nested instructions only
+  after a successful read request names that nested target path.
 - Permit deterministic evaluation composition to inject an explicit context request through a test/
   eval-only seam.
 - Introduce `evals/` with one synthetic workspace and strict-fake explain/plan cases only when the
@@ -47,7 +50,8 @@ protocol message, UI surface, or write capability.
   `ContextBuildRequest(scope=".", focus_paths=(), search_queries=())`. The runtime does not derive a
   focus path, search query, scope, or hidden retrieval hint from task text, provider output, current
   directory below the workspace root, environment variables, or TUI state. Initial context therefore
-  contains only applicable CAH-025 instructions; repository exploration occurs through read tools.
+  contains only root-applicable CAH-025 instructions; repository exploration and any narrower
+  instruction discovery occur through admitted read tools.
 - The deterministic evaluator may inject one explicit validated `ContextBuildRequest` for a named
   case through the composition dependency. That seam is callable only by eval/test assembly, is not
   a protocol field or user-provider option, and records its exact request in structured test evidence.
@@ -55,8 +59,14 @@ protocol message, UI surface, or write capability.
 - Default mock behavior is deterministic, credential-free, and network-free. Strict M2 evaluations
   inject exact fake scripts. OpenAI remains an explicit selection with CAH-036's bounded repository-
   content egress consent and no-content-secret-scanning warning.
-- One accepted task creates one immutable workspace boundary, discovers ordered instructions, builds
-  one context package, and allocates fresh loop accounting before provider work. The composition root
+- One accepted task creates one immutable workspace boundary, discovers root instructions, builds
+  one initial context package, and allocates fresh loop accounting before provider work. After a
+  successful admitted `read_file` with `path="pkg/file.py"`, the post-dispatch cancellation/deadline
+  guard runs, CAH-025 discovers `pkg/AGENTS.md`, another guard runs, and CAH-030 produces a candidate
+  replacement followed by the pre-commit guard. The pre-start guard then runs before the next fake/
+  OpenAI request. Known tool errors keep the prior package; cancellation/deadline, discovery, or
+  merge failure starts no follow-up and publishes/persists neither the pending result nor context.
+  The composition root
   explicitly constructs `LoopLimits(max_model_turns=4, provider_work_timeout_seconds=120,
   max_assistant_output_bytes=4096, max_observed_tool_calls=3)` for every M2 session. These are CAH-035's
   four-turn/three-call ceilings with CAH-022's existing timeout/output profile made explicit; it never
@@ -70,8 +80,15 @@ protocol message, UI surface, or write capability.
   evidence but no copied secret, dependency tree, generated artifact, host-specific path, VCS data,
   or live credential.
 - At least two cases execute: explain a known implementation fact and plan a bounded change. Scripts
-  assert exact context request, provider history, tool calls/results, accepted sources, final
-  workspace-relative citations, and small required/forbidden answer facts.
+  assert the exact root-only initial context request, the `read_file(path="pkg/file.py")` enrichment
+  step, the next request containing `pkg/AGENTS.md` with its `applies_to`, provider history,
+  calls/results, accepted sources, final workspace-relative citations, and small required/forbidden
+  answer facts.
+- M2 enriches context only from the validated `target_scope` of a successful requested read. Paths
+  merely returned by a broad `list_files` or `search_text` result do not trigger discovery. A
+  grounded evaluation that needs a returned path's nested rules must make a specific path-targeting
+  tool call before final text. Repeated and canonical-alias scopes must be idempotent; sibling scopes
+  must remain separately applicable rather than overriding one another.
 - Structured retrieval and dispatch evidence is authoritative. Answer substrings are narrow outcome
   checks, not a claim of broad semantic quality. Mutations must prove each evaluator rule can fail.
 - The default evaluator performs no network access, writes no target-repository or transcript content,
@@ -100,17 +117,21 @@ protocol message, UI surface, or write capability.
 1. One composition path joins CAH-025 through CAH-036 through public boundaries without reverse
    imports or duplicated policy and supplies the exact four-field M2 loop-limit profile.
 2. Ordinary runtime always uses exactly `scope="."`, empty focus paths, and empty search queries;
-   no task/provider/environment inference changes initial context.
+   no task/provider/environment inference changes initial context. A successful exact
+   `read_file(path="pkg/file.py")` makes `pkg/AGENTS.md` appear in the next request, never the first.
 3. Eval/test assembly alone can inject an explicit validated context request, and exact injection is
    observable in deterministic structured evidence without changing production defaults.
 4. Mock/check remains credential-free and network-free; explicit OpenAI selection retains bounded
    egress behavior and the absent-secret-scan warning.
 5. Exactly four native read operations remain contained in one workspace; no write, subprocess,
    network-tool, MCP, or hosted-tool path is reachable.
-6. Fixture explain and plan cases complete through the bounded loop with exact context/tool evidence,
-   grounded relative citations/facts, one usage aggregate when present, and one existing terminal.
-7. Distractor, forbidden source/claim, escape, limit, invalid response, late tool result, cancellation,
-   and tool failure cases fail reproducibly and safely.
+6. Fixture explain and plan cases complete through the bounded loop with exact root-to-enriched
+   context/tool evidence, grounded relative citations/facts, one usage aggregate when present, and
+   one existing terminal; a broad returned path requires a later specific path-targeting call.
+7. Distractor, forbidden source/claim, escape, limit, invalid response, late tool result,
+   cancellation, tool failure, instruction discovery/merge failure, changed duplicate, and context
+   budget cases fail reproducibly and safely. Repeated/alias and sibling-scope cases prove
+   idempotence and non-overriding applicability.
 8. The runner is deterministic, non-live by default, content-safe, and nonzero on failure; a live run
    is optional observational evidence only.
 9. Protocol/TUI/transcript schemas remain unchanged, and documentation distinguishes proven M2
@@ -121,11 +142,11 @@ protocol message, UI surface, or write capability.
 | Acceptance | Required evidence |
 | --- | --- |
 | 1, 5 | Composition tests inject each boundary and assert one workspace, exact descriptors, and a fresh tracker configured with 4 turns, 120 seconds, 4,096 output bytes, and 3 observed calls for fake and OpenAI sessions. They also prove ownership/import rules, absence of side-effect transports, and that composition neither calls bare `LoopLimits()` nor inherits its one-turn/one-call defaults. |
-| 2 | Runtime/launcher tests capture the exact default `ContextBuildRequest` for varied task text, nested working paths, environment sentinels, mock/OpenAI selection, and repeated sessions. |
+| 2 | Runtime/launcher tests capture the exact root-only default `ContextBuildRequest` for varied task text, nested working paths, environment sentinels, mock/OpenAI selection, and repeated sessions. One strict fake then asserts request one has only root instructions, calls `read_file` with `path="pkg/file.py"`, and request two adds exact `pkg/AGENTS.md` source/`applies_to` while definitions stay unchanged. |
 | 3 | Eval assembly tests inject focus/search requests, assert exact structured projection, reject invalid requests, and then re-run ordinary composition to prove defaults unchanged. |
 | 4 | Provider-selection and socket-guard tests prove mock default, explicit OpenAI gating, bounded request fields, and warning behavior without live credentials. |
-| 6 | Two fixture cases assert exact fake requests, context items, call/result replay, dispatches, final citations/facts, aggregate evidence, ordered events, and one terminal. |
-| 7 | Mutations add a distractor, forbidden path/claim, escape, exhausted limit, invalid grammar, late synchronous return, cancellation barrier, and bounded tool error. |
+| 6 | Two fixture cases assert exact root-to-enriched fake requests, context items, call/result replay, dispatches, final citations/facts, aggregate evidence, ordered events, and one terminal. A broad list/search case cannot ground a nested final until an exact path-targeting call succeeds. |
+| 7 | Mutations add a distractor, forbidden path/claim, escape, exhausted limit, invalid grammar, late synchronous return, post-dispatch/discovery/merge cancellation barriers, bounded tool error, discovery/merge failure, changed duplicate, and context overflow. Repeat/canonical-alias scopes prove no growth; nested and sibling calls prove root-to-nearest chain order and distinct sibling applicability. |
 | 8 | Runner tests cover stable ordering/report bytes, zero/nonzero exits, repeated identical evidence, no content/path/opaque leaks, and explicit live-marker isolation. |
 | 9 | Repository policy, documentation policy, transcript replay, protocol fixtures, reducer tests, and final diff review prove honest status and unchanged schemas. |
 
@@ -133,8 +154,9 @@ protocol message, UI surface, or write capability.
 
 - Run the fixture evaluator twice and compare its structured pass/fail evidence. Use no live provider
   for definition-of-done evidence.
-- Run focused runtime/default-context/eval-injection/composition tests, all M2 native-tool suites,
-  staged-turn/loop/adapter tests, transcript replay, protocol fixtures, and real process-boundary tests.
+- Run focused runtime/default-context/scoped-enrichment/eval-injection/composition tests, all M2
+  native-tool suites, staged-turn/loop/adapter tests, transcript replay, protocol fixtures, and real
+  process-boundary tests.
 - Run `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` with provider credentials removed.
 - If deliberately requested, run the separate live evaluation and report its bounded outcome without
   treating it as canonical evidence.
@@ -156,8 +178,9 @@ presentation.
 
 ## Definition of done
 
-- Explain/plan cases and meaningful safety/failure mutations pass through composed runtime and
-  existing process boundary twice with identical structured evidence.
+- Explain/plan cases and meaningful scoped-instruction, idempotence, sibling, safety, and failure
+  mutations pass through composed runtime and existing process boundary twice with identical
+  structured evidence.
 - Exact ordinary default context and evaluation-only injection have direct tests, and all CAH-025
   through CAH-036 dependencies are Done without contract bypasses.
 - **Delivered production-code churn** records the measured result and is no more than 600 lines;
@@ -169,9 +192,10 @@ presentation.
 
 ## Planned evidence
 
-- Composition tests proving exact default/injected context requests, dependencies, explicit M2
-  `(4 turns, 120 seconds, 4096 output bytes, 3 observed calls)` limits, provider selection, and
-  side-effect absence.
+- Composition tests proving exact root-only default/injected context requests, nested instruction
+  enrichment after `read_file(path="pkg/file.py")`, idempotent repeat/alias scopes, non-overriding
+  siblings, atomic failures, explicit M2 `(4 turns, 120 seconds, 4096 output bytes, 3 observed calls)`
+  limits, provider selection, and side-effect absence.
 - Synthetic fixture, deterministic runner, explain/plan cases, and mutations with concise reports.
 - Existing protocol/transcript evidence proving final text remains the only visible tool-assisted
   outcome.

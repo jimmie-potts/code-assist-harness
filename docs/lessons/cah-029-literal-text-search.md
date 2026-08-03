@@ -25,7 +25,7 @@ After completing this unit, you should be able to:
 
 - define literal, case-sensitive, non-overlapping matching;
 - define “one line” using Python's complete `str.splitlines()` separator repertoire;
-- bound search by recursive depth, files, source bytes, matches, and excerpt bytes;
+- bound search by inherited listing entries, recursive depth, source bytes, matches, and excerpt bytes;
 - explain direct-file failure versus directory-search omission; and
 - preserve canonical provenance and deterministic result order.
 
@@ -39,8 +39,8 @@ read boundary as listing and reading.
 
 Literal `a.*b` means the four characters `a`, `.`, `*`, `b`; it is not a regular expression. Match
 columns count Unicode scalars, while budgets count UTF-8 bytes. A common misconception is that
-limiting matches bounds the scan. Candidate-file and aggregate-byte limits bound work before a match
-is found.
+limiting matches bounds the scan. CAH-027's total-entry listing cap and CAH-029's aggregate-byte
+limit bound work before a match is found.
 
 Another common misconception is that only `\n` and `\r` split lines. Python also recognizes vertical
 tab, form feed, three information separators, NEL, and Unicode line/paragraph separators. Testing
@@ -52,7 +52,7 @@ the request boundary rejects every recognized separator directly.
 - **Canonical order:** path bytes, then 1-based line and column.
 - **Safe excerpt:** at most 512 UTF-8 bytes, always containing the complete match.
 - **Directory omission:** unsafe candidates become aggregate counts, not leaked labels.
-- **Explicit stop reason:** match, file, byte, or listing bounds explain truncation.
+- **Explicit stop reason:** match, byte, or inherited listing bounds explain truncation.
 - **Closed one-line grammar:** no LF, VT, FF, CR/CRLF, FS, GS, RS, NEL, Unicode line separator, or
   Unicode paragraph separator is admitted in a query.
 
@@ -74,9 +74,12 @@ Agent-loop dispatch, protocol, and transcript/evidence are unchanged here.
 
 `SearchTextRequest.max_depth` defaults to 4 and admits only 1 through 8. A directory search passes
 that exact value once to CAH-027 with `recursive=true` and `max_items=500`; it never clamps, offsets,
-or substitutes the value. The operation examines at most 500 files and 2 MiB of candidate content,
-returns at most 200 matches, and never returns more than 512 bytes per excerpt. These are
-reproducible work/output limits, not token estimates.
+or substitutes the value. CAH-027 counts both files and directories, so one result contains at most
+500 total entries and therefore at most 500 candidate files. If another admitted entry exists,
+search propagates the `listing` reason rather than claiming a separate file limit it cannot observe.
+The operation examines at most 2 MiB of candidate content, returns at most 200 matches, and never
+returns more than 512 bytes per excerpt. These are reproducible work/output limits, not token
+estimates.
 
 ## Practical walkthrough
 
@@ -95,10 +98,14 @@ Planned pseudocode only:
 ```text
 listing = list_files(path=request.path, recursive=True,
                      max_depth=request.max_depth, max_items=500)
-for path in listing.files:
-    text = bounded_strict_text(path)
+if listing.truncated:
+    limit_reasons.add("listing")
+for entry in listing.entries:
+    if entry.kind != "file":
+        continue
+    text = bounded_strict_text(entry.path)
     for line, column in literal_matches(text, request.query):
-        matches.append(bounded_excerpt(path, line, column))
+        matches.append(bounded_excerpt(entry.path, line, column))
         stop_when_budget_reached()
 return ordered_matches_and_summary(matches)
 ```
@@ -112,7 +119,8 @@ Candidates inherit policy, matching has no regex interpretation, excerpt constru
 - LF, VT, FF, CR/CRLF, FS/GS/RS, NEL, and Unicode line/paragraph separators fail even at the end of a
   query; nearby non-separator controls prove the check is not an overbroad control-character ban.
 - An invalid-text direct file fails; the same file in directory search increments a safe count.
-- The 501st candidate or first file beyond 2 MiB is not partially read.
+- A 501st admitted listing entry is represented by `listing`; the first file beyond 2 MiB is not
+  partially read.
 - A long multibyte line is ellipsized without splitting the match or a UTF-8 sequence.
 - Depth 0 or 9 and a lone-surrogate query fail before CAH-027 or filesystem work; omitted depth is
   observed as exactly 4 in the one listing request.
@@ -157,7 +165,8 @@ known-file evaluations show a measurable miss rate that cannot be fixed by bette
 3. Calculate line/column versus UTF-8 byte positions for a multibyte string.
 4. Snapshot the CAH-027 request for omitted depth and explicit depths 1 and 8; prove 0 and 9 execute
    no listing.
-5. Test each candidate and output limit below, at, and above.
+5. Test flat and mixed 499/500/501-entry listings plus each search-owned byte/output limit below, at,
+   and above.
 6. Teach back: which budgets limit work before any result reaches an LLM?
 
 ## Key takeaways

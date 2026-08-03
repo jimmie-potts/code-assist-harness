@@ -496,6 +496,79 @@ def test_m2_plans_are_reviewable_learning_units() -> None:
     assert "## Definition of done" in template
 
 
+def test_m2_search_and_scoped_instruction_contracts_stay_coherent() -> None:
+    story_names = (
+        "cah-029-search-repository-text.md",
+        "cah-030-build-budgeted-context.md",
+        "cah-031-register-read-tools.md",
+        "cah-032-define-provider-tool-contract.md",
+        "cah-034-run-one-read-tool-round-trip.md",
+        "cah-035-run-bounded-agent-loop.md",
+        "cah-036-map-openai-tool-calls.md",
+        "cah-037-prove-read-only-assistant.md",
+    )
+    stories = {
+        name: " ".join(
+            (REPOSITORY_ROOT / "user-stories" / name).read_text(encoding="utf-8").split()
+        )
+        for name in story_names
+    }
+
+    search = stories["cah-029-search-repository-text.md"]
+    assert "`candidate_files`" not in search
+    assert "one bounded listing" in search
+    assert "499/500/501 admitted listing entries" in search
+    assert "`listing` or `candidate_bytes` reasons" in search
+    search_lesson = " ".join(
+        (REPOSITORY_ROOT / "docs" / "lessons" / "cah-029-literal-text-search.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert "if listing.truncated:" in search_lesson
+    assert 'limit_reasons.add("listing")' in search_lesson
+    assert "for entry in listing.entries:" in search_lesson
+    assert 'if entry.kind != "file":' in search_lesson
+
+    context = stories["cah-030-build-budgeted-context.md"]
+    assert "pure, atomic merge" in context
+    assert "without evicting or rewriting prior context" in context
+    assert "canonical `applies_to` directory" in context
+    assert "16 distinct instruction sources, 24 total items, and 96 KiB" in context
+    assert "topology-correct positions inside the instruction block" in context
+    assert "an ancestor created after its descendant was admitted" in context
+
+    registry = stories["cah-031-register-read-tools.md"]
+    assert "pure `target_scope(validated_input)` extractor" in registry
+    assert "A known native or registry failure carries no target scope" in registry
+
+    provider = stories["cah-032-define-provider-tool-contract.md"]
+    assert "Every `ProviderRequest` is an immutable snapshot" in provider
+    assert "successive request from CAH-030's atomically enriched package" in provider
+    assert "local `ReadToolSuccess.target_scope` never enters" in provider
+
+    round_trip = stories["cah-034-run-one-read-tool-round-trip.md"]
+    assert "post-dispatch" in round_trip and "deadline check" in round_trip
+    assert "checks once more after merge before committing" in round_trip
+    assert "pre-start guard runs immediately before the follow-up" in round_trip
+    assert "CAH-025" in round_trip and "CAH-030" in round_trip
+    assert "paths merely returned in its result never become scopes" in round_trip
+
+    agent_loop = stories["cah-035-run-bounded-agent-loop.md"]
+    assert "accumulate instruction items" in agent_loop
+    assert "Only the requested target scope is admitted" in agent_loop
+    assert "paths returned by broad listing/search output never drive discovery" in agent_loop
+    assert "guards run after discovery, after merge before result/context append" in agent_loop
+
+    adapter = stories["cah-036-map-openai-tool-calls.md"]
+    assert "exactly `source`, `applies_to`, and `content`" in adapter
+    assert "one sibling never overrides another" in adapter
+
+    evaluation = stories["cah-037-prove-read-only-assistant.md"]
+    assert '`read_file` with `path="pkg/file.py"`' in evaluation
+    assert "the next request containing `pkg/AGENTS.md` with its `applies_to`" in evaluation
+    assert "merely returned by a broad `list_files` or `search_text` result" in evaluation
+
+
 def test_network_access_is_isolated_to_openai_adapter_and_runtime_guards() -> None:
     violations: list[str] = []
     for path in _repository_files(PRODUCTION_SOURCE_ROOTS, {".py", ".ts", ".tsx"}):

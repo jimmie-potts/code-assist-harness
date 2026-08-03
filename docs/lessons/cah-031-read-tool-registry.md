@@ -6,8 +6,8 @@
 - **Implementation status:** Planned; no model-callable read registry exists yet
 - **Story:** [CAH-031](../../user-stories/cah-031-register-read-tools.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** Typed capability registration and dispatch as the stable seam for local tools
-  and a future MCP adapter
+- **Review focus:** Typed capability registration, target-scope metadata, and dispatch as the stable
+  seam for local tools and a future MCP adapter
 - **Visual companion:** None; the Markdown diagram is authoritative
 - **Related architecture:** [Architecture](../architecture.md), [Tool system](../tool-system.md), and
   [Safety model](../safety-model.md)
@@ -16,10 +16,10 @@
 
 ## Quick summary
 
-CAH-031 puts the four native repository-read operations behind one immutable, typed registry and
-projects successful native results into one bounded canonical JSON envelope. Its main lesson is that
-a registry is a harness-owned capability boundary: it controls selection and model-facing result
-shape, while the tools retain their own validation and filesystem policy.
+CAH-031 puts the four native repository-read operations behind one immutable, typed registry,
+extracts each successful request's local target scope, and projects its result into one bounded
+canonical JSON envelope. Its main lesson is that a registry is a harness-owned capability boundary:
+it controls selection and typed metadata, while tools retain validation and filesystem policy.
 
 ## Learning objectives
 
@@ -27,6 +27,7 @@ After this unit, you should be able to:
 
 - distinguish registration, dispatch, execution, and policy;
 - explain why only read capabilities enter the M2 registry;
+- trace pure `target_scope` extraction from validated input to local success metadata;
 - trace exact-name typed dispatch without provider SDK types; and
 - explain why explicit result projectors are safer than reflection; and
 - contrast this local registry with a future generalized MCP-capable registry port.
@@ -56,11 +57,18 @@ later field might contain diagnostics or host data. Each `ReadTool` therefore ha
 allowlist projector, and the registry validates that projection before producing the compact
 `{"result":...}` envelope.
 
+A validated path is also not yet proof that access succeeded. Each `ReadTool` has a pure
+`target_scope` extractor that returns its validated `request.path`, but the registry attaches that
+local metadata only to a fully successful result. Known failures carry no scope, so later instruction
+discovery cannot mistake a rejected target for an admitted one.
+
 ## Key concepts
 
 - **Descriptor:** bounded metadata about a tool, separate from its callable.
 - **Capability:** the effect class the harness permits; M2 admits only `read_workspace`.
 - **Typed dispatch:** exact name lookup followed by exact input- and result-type checks.
+- **Target scope:** content-suppressed local success metadata copied exactly from validated
+  `request.path`; it is absent from model-facing JSON and every failure.
 - **Allowlisted projector:** tool-specific mapping from reviewed native result fields to a JSON-safe
   tree; no reflection or generic model dump.
 - **Canonical success envelope:** compact sorted-key UTF-8 JSON, at most 65,536 bytes including
@@ -77,7 +85,7 @@ task/events only       round trip / loop (CAH-034/035)      tool name + JSON
     |                           |                                    |
     |                           v                                    |
     |                  [CAH-031 read registry] <---------------------+
-    |               exact name + typed input/result
+    |          exact name + typed input/result + pure target_scope
     |                           |
     |              +------------+-------------+
     |              v            v             v
@@ -85,7 +93,9 @@ task/events only       round trip / loop (CAH-034/035)      tool name + JSON
     |              +------------+-------------+
     |                           v
     |                  allowlisted projector
-    |                  canonical {"result":...}
+    |          local target scope + canonical {"result":...}
+    |                    |               |
+    |     later CAH-025/030 merge   provider result later
     +---------------- final assistant text later    Evidence: none in CAH-031
 
 Future MCP: catalog snapshot -> schema/name/capability re-admission -> generalized registry port
@@ -93,11 +103,10 @@ Future MCP: catalog snapshot -> schema/name/capability re-admission -> generaliz
 ```
 
 The registry preserves deterministic order, rejects duplicate names atomically, and exposes no
-mutation after construction. Dispatch validates the exact native result, calls its tool-specific
-projector, rejects floats/arbitrary objects/cycles/lone surrogates, then uses `ensure_ascii=False`,
-compact separators, sorted keys, and `allow_nan=False`. CAH-032 will create model-facing definitions
-and reuse this success envelope; CAH-033 will admit a complete response, and CAH-034 will parse and
-dispatch the admitted call.
+mutation after construction. Dispatch extracts the exact typed path without effects, validates the
+native result, calls its allowlisted projector, and returns both local content-suppressed scope and
+canonical JSON. Scope is never placed in that JSON. CAH-032 creates model-facing definitions and
+reuses only the envelope; CAH-034 later consumes local scope for instruction discovery and merge.
 
 ## Practical walkthrough
 
@@ -105,10 +114,12 @@ dispatch the admitted call.
 2. Construct one registry from `list_files`, `stat_path`, `read_file`, and `search_text`.
 3. Reject duplicates and every non-read capability before publishing the registry.
 4. Dispatch only an exact registered name with its exact validated input type.
-5. Validate the declared result type, run its explicit projector, and validate the projected JSON
+5. Extract exact `request.path` without resolution or effects; attach it only if execution succeeds.
+6. Validate the declared result type, run its explicit projector, and validate the projected JSON
    tree.
-6. Wrap it as `{"result":...}` and enforce the inclusive 65,536-byte UTF-8 bound after escaping.
-7. Prove pre-dispatch rejection executes zero times and invalid/oversized output never escapes.
+7. Wrap it as `{"result":...}` and enforce the inclusive 65,536-byte UTF-8 bound after escaping.
+8. Prove pre-dispatch rejection executes zero times and every failure exposes neither scope nor
+   invalid/oversized output.
 
 ## Implementation code samples
 
@@ -118,6 +129,7 @@ dispatch the admitted call.
 registry = ReadToolRegistry((list_files, stat_path, read_file, search_text))
 request = ReadFileRequest(path="src/app.py")
 success = registry.dispatch("read_file", request)
+assert success.target_scope == "src/app.py"  # local and suppressed from repr/JSON
 assert success.output_json == (
     '{"result":{"end_line":1,"path":"src/app.py","returned_bytes":6,'
     '"source_bytes":6,"start_line":1,"text":"hello\\n",'
@@ -125,9 +137,10 @@ assert success.output_json == (
 )
 ```
 
-Construction establishes the closed capability set. Dispatch validates the typed result, and the
-read-file projector explicitly chooses every shown field. Sorted keys and compact separators make
-the exact output stable; content suppression keeps it out of ordinary representations.
+Construction establishes the closed capability set. Dispatch copies the exact validated path,
+validates the typed result, and explicitly projects every shown JSON field. Sorted keys and compact
+separators make output stable; content suppression keeps both scope and JSON out of ordinary
+representations.
 
 ### Planned pseudocode: side-effect rejection
 
@@ -147,6 +160,7 @@ being decided.
 | duplicate name | registry construction | reject the complete registry | duplicate-name unit test |
 | unknown name | dispatcher | fixed failure, zero tool calls | spy-tool test |
 | wrong input type | dispatcher | fixed failure before execution | parameterized type test |
+| invalid/effectful scope extractor | registry invariant | no success and no scope | extractor spy test |
 | wrong result type | dispatcher | fixed invariant failure after one call; no value escapes | bad-spy test |
 | float/cycle/lone surrogate from projector | projection validator | `invalid_read_tool_result`; no value escapes | table-driven projector tests |
 | wrapped output above 65,536 bytes | output boundary | `read_tool_output_too_large`; no truncation | exact byte and native-max tests |
@@ -196,16 +210,18 @@ are designed.
 
 1. Explain why duplicate-name rejection is safer than last-registration-wins.
 2. Write tests proving a wrong input executes zero tool code and a wrong result never escapes.
-3. Teach back the difference between a registry, an executor, and the agent loop.
-4. Explain why a 65,536-byte native text result can exceed the 65,536-byte envelope limit.
-5. Sketch the re-admission steps an MCP-capable generalized registry port needs without letting it
+3. Prove one successful path is local metadata but absent from JSON/repr, while a known failure has
+   no scope.
+4. Teach back the difference between a registry, an executor, and the agent loop.
+5. Explain why a 65,536-byte native text result can exceed the 65,536-byte envelope limit.
+6. Sketch the re-admission steps an MCP-capable generalized registry port needs without letting it
    choose the next model turn.
 
 ## Key takeaways
 
 - The Python harness owns the admitted tool catalog and dispatch decision.
-- Exact names/types, explicit projectors, canonical bytes, and read-only capability admission are
-  the core invariants.
+- Exact names/types, success-only target scope, explicit projectors, canonical bytes, and read-only
+  capability admission are the core invariants.
 - MCP needs a future generalized and re-admitting registry port; it is neither direct compatibility
   nor a replacement for harness policy or orchestration.
 
@@ -214,6 +230,7 @@ are designed.
 - **Registry:** immutable mapping from reviewed tool names to implementations.
 - **Dispatcher:** component that selects one registered implementation.
 - **Capability:** classified effect a tool may perform.
+- **Target scope:** validated request path retained only as local metadata on a successful read.
 - **MCP:** protocol for connecting model applications to external context and tools.
 
 ## Further reading

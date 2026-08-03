@@ -454,13 +454,14 @@ remains candidate evidence until accepted final text completes the session.
 > ownership handoff is visible before general iteration.
 
 This [planned story](../user-stories/cah-034-run-one-read-tool-round-trip.md) implements exactly two
-fake-backed model turns around one native read dispatch. It preserves the exact selected context and
-registry-derived catalog, gates exact model-facing keys before native Pydantic validation, dispatches
-only after CAH-033 accepts the complete first response, and replays one canonical correlated result
-envelope into the follow-up request after appending `continuation? -> call -> result` to the single
-ordered history. Synchronous native reads are bounded and non-preemptive;
-cancellation is checked before and after execution, and a late result is discarded when cancellation
-wins.
+fake-backed model turns around one native read dispatch. It preserves the registry-derived catalog,
+gates exact model-facing keys before native Pydantic validation, and dispatches only after CAH-033
+accepts the complete first response. After a successful dispatch, it discovers the validated target's
+applicable instructions and atomically enriches context before replaying one canonical correlated
+result envelope and appending `continuation? -> call -> result` to the single ordered history.
+Synchronous native reads, instruction discovery, and context merge are bounded and non-preemptive;
+cancellation/deadline guards run after each stage and before the follow-up start, discarding any late
+result, bundle, or candidate package when another terminal wins.
 
 ### CAH-035 — Run the bounded agent loop
 
@@ -469,7 +470,8 @@ wins.
 
 This [planned story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces the teaching branch
 with a sequential state machine capped at four model turns and three within-budget tool calls. It
-permits one call per turn, keeps all budgets cumulative, and retains exactly one rejecting fourth
+permits one call per turn, accumulates successful target-scoped instructions without removing prior
+context, keeps all budgets cumulative, and retains exactly one rejecting fourth
 observation when that limit wins, matching CAH-022 evidence semantics. It fails closed on mixed,
 multiple, or parallel call shapes. Provider usage is optional session-aggregate evidence and is
 admitted only alongside accepted final assistant text, never as a per-tool-turn lifecycle fact.

@@ -73,20 +73,22 @@ provider response handling, context selection, or agent-loop continuation.
 | --- | ---: | --- |
 | Query | 256 UTF-8 bytes | Above the limit fails before repository access. |
 | Recursive depth | default 4 / hard 8 | Directory search passes the exact request depth to CAH-027 and never examines deeper descendants. |
-| Candidate files | 500 | Stop before a 501st admitted file and mark the result truncated. |
+| Recursive listing entries | CAH-027 hard 500 | Inspect only files in the one bounded listing; propagate listing truncation when another admitted entry exists. |
 | Aggregate candidate content | 2 MiB (2,097,152 bytes) | Stop before reading a file that would cross the budget. |
 | One candidate file | 256 KiB (262,144 bytes) | Directory search skips larger files; direct-file search fails. |
 | Returned matches | default 100 / hard 200 | Stop at requested count and mark the result truncated when more work remains. |
 | One excerpt | 512 UTF-8 bytes | Apply the deterministic excerpt algorithm above. |
 
 - `SearchTextResult` contains an immutable match tuple, `truncated`, one ordered set of
-  `limit_reasons` (`matches`, `candidate_files`, `candidate_bytes`, or `listing`),
+  `limit_reasons` (`matches`, `candidate_bytes`, or `listing`),
   `files_examined`, `source_bytes_examined`, and aggregate counts skipped as ignored/unavailable,
   oversized, or non-text. Skipped labels, bytes, and policy reasons are never returned.
 - Candidate paths come from exactly one `ListFilesRequest(path=request.path, recursive=true,
   max_depth=request.max_depth, max_items=500)`. Search must pass the admitted value unchanged; it
-  may not substitute the default, clamp it, add one, or perform a second walk. Canonical order and
-  CAH-027 listing truncation are preserved. A directory search skips invalid UTF-8, NUL-containing,
+  may not substitute the default, clamp it, add one, or perform a second walk. The 500-item bound
+  counts both files and directories, so it yields at most 500 candidate files without a second
+  candidate-file limiter. Canonical order is preserved, and `ListFilesResult.truncated` adds the
+  `listing` reason. A directory search skips invalid UTF-8, NUL-containing,
   oversized, denied, ignored, unavailable, and special files with aggregate counts; a direct-file
   search reports the corresponding CAH-026 fixed error. Direct-file search validates `max_depth`
   for one request contract but does not perform a directory listing.
@@ -122,8 +124,8 @@ host path, denied label, ignore rule, raw byte, or OS text.
    path/line/column order until a reviewed bound is reached.
 3. Each excerpt is at most 512 UTF-8 bytes, contains the full query, uses the exact ellipsis algorithm,
    and never splits a Unicode encoding.
-4. Recursive-depth, candidate-file, aggregate-byte, per-file, query, and returned-match bounds
-   produce deterministic failures or explicit truncation and aggregate skip counts.
+4. Recursive-depth, inherited listing-entry, aggregate-byte, per-file, query, and returned-match
+   bounds produce deterministic failures or explicit truncation and aggregate skip counts.
 5. Directory search omits ignored, denied, unavailable, non-text, oversized, and unsupported files
    without labels; direct-file search returns the shared fixed safe error.
 6. Requests and results are immutable, typed, documented, provider-neutral, and suppress queries and
@@ -140,7 +142,7 @@ host path, denied label, ignore rule, raw byte, or OS text.
 | Excerpt boundary | Place a multibyte match within lines at 511/512/513+ bytes and near each edge | Unit | Exact full or ellipsized excerpt, <=512 bytes, no split character |
 | Query/match limits | Test query 255/256/257 bytes and matches 99/100/101 plus 199/200/201 | Unit | Success/truncation at configured bounds and input failure above hard max |
 | Recursive depth | Spy on CAH-027 and place matches at depths 1, 4, 8, and 9; omit depth, then request 1, 8, 0, and 9 | Policy integration | Default 4 and admitted 1/8 are passed unchanged in exactly one recursive request; 0/9 fail before listing |
-| Candidate budgets | Test 499/500/501 files and 2 MiB below/at/above | Unit | Exact examined counts and ordered limit reasons without partial file read |
+| Candidate budgets | Test flat and mixed trees with 499/500/501 admitted listing entries plus 2 MiB below/at/above | Unit/integration | Exact examined counts, `listing` or `candidate_bytes` reasons, and no partial file read |
 | Direct versus tree failure | Use invalid UTF-8, NUL, oversized, ignored, denied, and escaping files | Policy integration | Direct fixed errors; tree skip counts with no skipped label leak |
 | Check-before-read | Replace a listed file at a deterministic injected seam | Boundary integration | Search rechecks and omits/fails safely rather than reading replacement |
 
@@ -182,8 +184,9 @@ search with subprocess, regex, indexed, and semantic search. Do not add or revis
 ## Definition of done
 
 1. Every acceptance criterion maps to deterministic happy, boundary, and adversarial tests.
-2. Query scalar, NUL, complete line-separator grammar, byte, depth, candidate-file, aggregate-byte,
-   per-file, match, and excerpt boundaries pass deterministic evidence before downstream access.
+2. Query scalar, NUL, complete line-separator grammar, byte, depth, inherited listing-entry,
+   aggregate-byte, per-file, match, and excerpt boundaries pass deterministic evidence before
+   downstream access.
 3. Literal positions, canonical ordering, safe excerpts, policy omission, direct fixed errors, and
    check-before-read behavior are proved without leaks.
 4. Public request and result contracts are immutable, typed, documented, and reject extra fields.

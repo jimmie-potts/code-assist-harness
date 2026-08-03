@@ -6,8 +6,8 @@
 - **Implementation status:** Planned; tool-aware provider requests are not implemented
 - **Story:** [CAH-032](../../user-stories/cah-032-define-provider-tool-contract.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** Provider-neutral LLM context, definitions, opaque continuation, calls, and results
-  plus the strict schema intersection that adapters can map without owning the loop
+- **Review focus:** Provider-neutral scoped context snapshots, definitions, opaque continuation,
+  calls, and results that adapters can map without owning the loop
 - **Visual companion:** None; the Markdown diagram is authoritative
 - **Related architecture:** [Architecture](../architecture.md),
   [Agent loop](../agent-loop.md), and [Tool system](../tool-system.md)
@@ -17,17 +17,19 @@
 
 ## Quick summary
 
-CAH-032 defines immutable, provider-neutral context, canonical tool schemas, opaque continuation,
-calls, and exact result envelopes and teaches the strict fake to compare them. The important design
-idea is an anti-corruption boundary: provider integrations translate to harness values rather than
-exporting their own types into the loop.
+CAH-032 defines immutable, provider-neutral context snapshots, canonical tool schemas, opaque
+continuation, calls, and exact result envelopes and teaches the strict fake to compare them. A later
+request may carry CAH-030's enriched snapshot without mutating the earlier request. Provider
+integrations translate these harness values rather than exporting SDK types or selecting context.
 
 ## Learning objectives
 
 After this unit, you should be able to:
 
 - separate a tool definition, a requested call, and a returned result;
-- project selected context without sending its local inclusion report;
+- project selected context, including instruction `applies_to`, without sending its local inclusion
+  report or CAH-031 target scope;
+- distinguish immutable successive context snapshots from in-place mutation;
 - explain why arguments remain unparsed at the provider boundary;
 - explain why model-facing required keys must be checked before native defaults can apply;
 - validate the exact call-ID grammar and strict Unicode-scalar/UTF-8 boundaries;
@@ -70,6 +72,12 @@ but a stateless follow-up must keep its position. CAH-032 therefore models one b
 which later call or assistant item it belongs to after several turns; core preserves the payload but
 does not understand it.
 
+Repository context has a similar ownership rule. CAH-030 decides which items exist. CAH-032 copies
+one complete immutable snapshot and charges every field—including an instruction's canonical
+`applies_to` directory—to the request bound. If later orchestration enriches context, it constructs a
+new request; an adapter may serialize that value but may not omit or select an item. Sibling scopes
+remain unrelated even when serialization needs one deterministic order.
+
 ## Key concepts
 
 - **Provider-neutral value:** harness type containing no SDK object.
@@ -81,15 +89,18 @@ does not understand it.
 - **Canonical envelope:** sorted-key compact UTF-8 JSON; success is exactly
   `{"result":...}`, error exactly `{"error":{"code":...,"message":...}}`.
 - **History grammar:** rules preventing orphan, duplicate, or unresolved call/result items.
-- **Context projection:** the exact admitted CAH-030 items, without its local omission report.
+- **Context projection:** the exact admitted CAH-030 items and instruction `applies_to`, without its
+  local omission report or CAH-031 success-only target scope.
+- **Context snapshot:** one immutable per-request value; a later enriched request does not mutate the
+  earlier one.
 - **Raw-key gate:** exact model-facing key-set admission before native validation or defaults.
 
 ## Architecture and design
 
 ```text
 Ink TUI                 Python harness domain                    Adapters
-task/events      context -> [CAH-032 neutral contract]   OpenAI function calling
-    |        context / definition / opaque / call / result <-> future provider adapter
+task/events   context snapshot -> [CAH-032 neutral contract]   OpenAI function calling
+    |      scoped context / definition / opaque / call / result <-> future provider adapter
     |                           ^
     |                           |
     |                    strict fake provider
@@ -104,6 +115,9 @@ Future MCP: catalog snapshot + re-admission -> generalized registry port -> neut
 Later CAH-034 dispatch:
 raw JSON -> decode object -> [CAH-032 exact key gate] -> native Pydantic -> read tool
                               missing/defaulted keys stop here
+
+Later context flow:
+CAH-031 local target_scope -> CAH-025 bundle -> CAH-030 merge -> new CAH-032 request snapshot
 ```
 
 Definitions use a closed schema table: the root has exactly `type`, `properties`, `required`, and
@@ -113,20 +127,24 @@ type-specific constraints. Calls use
 strict UTF-8 after JSON parsing; lone surrogates and literal NUL fail without normalization. Result
 status must match its sole top-level envelope key. Ordered history rejects orphan results and
 unresolved calls, and a continuation that does not immediately precede its provider-produced call or
-assistant message. New context preserves CAH-030 order/content while omitting its report.
+assistant message. Context preserves CAH-030 order/content/`applies_to` while omitting its report and
+local target-scope metadata. Every metadata byte is part of the 512-KiB request projection.
 
 ## Practical walkthrough
 
 1. Add immutable definition, continuation, call, and result values to the provider domain.
 2. Extend one request-history tuple with legal user/assistant/continuation/call/result items; do not
    add an adapter side channel.
-3. Project one CAH-030 package without its inclusion report.
+3. Project one CAH-030 package with instruction `applies_to`, but without its inclusion report or
+   CAH-031 target scope.
 4. Call the separate pure bridge to filter Pydantic `title`/`default`, reject every other unsupported
    keyword, require all fields, and canonicalize all definitions atomically.
 5. Add the separate pure raw-key gate that CAH-034 will run after JSON-object decoding and before
    native Pydantic validation.
-6. Make the strict fake compare context, definitions, and history exactly.
-7. Prove every byte/item bound and that mismatch messages reveal structure, never content.
+6. Make the strict fake compare initial and enriched context snapshots, definitions, and history
+   exactly without mutating the initial request.
+7. Prove every byte/item bound, including `applies_to`, and that mismatch messages reveal structure,
+   never content.
 
 ## Implementation code samples
 
@@ -146,12 +164,21 @@ request = ProviderRequest(
     input=(user, opaque, call, result),
     tools=(definition,),
 )
+
+enriched_request = ProviderRequest(
+    context=project_context(enriched_package),
+    input=(user, opaque, call, result),
+    tools=(definition,),
+)
+assert request.context != enriched_request.context
 ```
 
 The bridge—not the provider value—converts a registry descriptor. The call preserves untrusted
 arguments. The opaque payload is one content-suppressed history item immediately before that call and
 counts once toward both the 16-item and 512-KiB request limits. The result reuses CAH-031's exact
-canonical success envelope and is admitted only after the matching call.
+canonical success envelope and is admitted only after the matching call. The local
+`ReadToolSuccess.target_scope` is deliberately absent; only CAH-030's admitted scoped items enter the
+new request.
 
 ### Exact schema subset
 
@@ -196,6 +223,8 @@ The constructor rejects impossible history before an adapter or model sees it.
 | continuation at start/end, duplicated, reordered, or before the wrong item | history grammar | reject request without exposing payload | positional-history table |
 | continuation above 65,536 bytes or request above 512 KiB | continuation/request constructor | reject atomically | below/at/above byte snapshots |
 | legacy and new context both supplied | request constructor | reject duplicate priority models | compatibility test |
+| missing/changed instruction `applies_to` | context projection/fake | reject the mismatched snapshot | exact-context snapshot |
+| CAH-031 local target scope enters request/result | projection boundary | reject the extra field | omission sentinel test |
 | request projection above 512 KiB | request constructor | reject without truncation | byte-bound test |
 | raw malformed arguments | later dispatcher, not CAH-032 | preserve bytes without execution | constructor test |
 | omitted defaulted or additional model key | CAH-032 raw-key gate | reject before Pydantic/defaults | spy-validator key-set tests |
@@ -231,7 +260,7 @@ revocation.
 | --- | --- | --- |
 | Contract | small immutable Python values | versioned cross-service schemas |
 | Providers | strict fake first | multiple adapters and compatibility suites |
-| History | sequential positional continuation/call/result items | durable resumable conversations |
+| History | sequential positional continuation/call/result items and immutable context snapshots | durable resumable conversations |
 | Security | bounded local values | schema governance and remote trust |
 | Cost | explicit, narrow seam | migration and interoperability ownership |
 
@@ -250,6 +279,7 @@ features or MCP only when a real reviewed capability requires them and compatibi
 5. Explain why the inclusion report stays local even though admitted context goes to the model.
 6. Explain why status plus `{"error":...}` is valid but status plus `{"result":...}` is not.
 7. Teach back why keeping a native Python default does not make that field optional for the model.
+8. Compare initial and enriched requests and identify every `applies_to` byte charged to the latter.
 
 ## Key takeaways
 
@@ -259,6 +289,8 @@ features or MCP only when a real reviewed capability requires them and compatibi
   never interpreted or stored in evidence.
 - Model-facing required keys are admitted before native Pydantic defaults; local callers keep their
   native defaults.
+- Each request is an immutable scoped-context snapshot; adapters serialize the whole admitted value
+  and never receive CAH-031's local target scope.
 - OpenAI maps this neutral seam directly; MCP needs a future generalized registry port with explicit
   re-admission and remote-operation ownership.
 
@@ -270,6 +302,8 @@ features or MCP only when a real reviewed capability requires them and compatibi
 - **History grammar:** allowed ordering and pairing of model input items.
 - **Positional continuation:** opaque provider state whose location next to an output item is part of
   its meaning.
+- **Scoped context snapshot:** immutable per-request projection whose instruction items retain their
+  canonical `applies_to` directories.
 
 ## Further reading
 

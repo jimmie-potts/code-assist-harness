@@ -190,10 +190,12 @@ the launcher and `main()` through the concrete adapter. Runtime shutdown, stdin 
 cancellation tear down active provider work without fabricating a user-cancellation terminal when
 teardown wins.
 
-For M2, a plain task enters context selection with scope `.` and empty `focus_paths` and
+For M2, a plain task enters **initial** context selection with scope `.` and empty `focus_paths` and
 `search_queries`; deterministic evaluations may inject explicit values through their composition
-seam. Planned CAH-037 explicitly composes the M2 limit profile as four model turns, 120 provider-work
-seconds, 4,096 assistant-output bytes, and three observed tool calls; it does not inherit the current
+seam. A successful native read contributes its validated requested target as harness-only scope
+metadata, and the loop atomically enriches later requests with newly applicable instructions before
+another provider start. Planned CAH-037 explicitly composes the M2 limit profile as four model turns,
+120 provider-work seconds, 4,096 assistant-output bytes, and three observed tool calls; it does not inherit the current
 one-turn/one-call constructor defaults. Explicit OpenAI selection also authorizes bounded,
 policy-admitted repository context and tool results to leave the local machine for that session. Path
 admission is not content-level secret scanning, so the configuration and CLI must warn that an allowed
@@ -219,8 +221,8 @@ dependency-resolution changes commit `uv.lock`.
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
 | Workspace path containment | Python workspace boundary | Planned in CAH-024: one immutable canonical root resolves contained, workspace-relative targets; later tools recheck at access time. |
-| Context selection | Python context subsystem | Planned in CAH-025 through CAH-030: context items retain source, scope, inclusion reason, and deterministic budget cost. |
-| Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
+| Context selection | Python context subsystem | Planned in CAH-025 through CAH-030: context items retain source, applicable directory, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
+| Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel and typed target-scope metadata; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
 | Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs and explicitly typed non-lifecycle evidence are persisted after admission. |
 | Visible conversation, plan, tools, errors, and diffs | Ink TUI | Visible state is reduced from runtime events. |
@@ -493,15 +495,24 @@ budget before calling a provider.
 CAH-024 through CAH-030 refine that subsystem into single-responsibility units. The sequence owns the
 canonical workspace boundary, scoped `AGENTS.md` discovery, shared read policy, native listing,
 bounded text reads, literal search, and atomic context selection with inclusion and omission
-evidence. Each filesystem operation re-resolves immediately before access and reports only
+evidence. CAH-030 also admits a newly discovered required instruction bundle atomically without
+removing earlier context. Each filesystem operation re-resolves immediately before access and reports only
 workspace-relative provenance. CAH-031 then exposes those handlers through the smallest generic,
-typed read registry needed by the M2 loop; later E4 work extends that seam for side effects.
+typed read registry needed by the M2 loop, including a harness-only target-scope extractor for each
+successful read; later E4 work extends that seam for side effects.
 
 CAH-032 through CAH-036 refine the provider-neutral tool exchange, atomic full-response admission,
 one request/call/result/response round trip, bounded iteration, and strict OpenAI Responses
 translation. A response is fully buffered and validated before final text is published or a tool is
 dispatched. Decoded model arguments must contain the exact advertised key set before native Pydantic
 validation can apply defaults; direct Python callers keep the unchanged native models and defaults.
+After successful dispatch and its cancellation/deadline guard, CAH-034/035 discover the requested
+target's scoped instructions and atomically enrich the next immutable request. Additional guards run
+after bounded synchronous discovery, after merge before commit, and before the next provider start;
+late candidate values are discarded. Repeated canonical sources are idempotent only when unchanged;
+a late ancestor enters before existing descendants, while sibling scopes retain explicit
+applicability rather than an invented cross-sibling precedence. Known tool failures keep context
+unchanged.
 Opaque provider continuation is a bounded, content-suppressed item in the same ordered request
 history immediately before its call or assistant item, so neither core nor an adapter side channel
 loses its replay position.

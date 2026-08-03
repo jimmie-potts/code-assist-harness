@@ -6,8 +6,9 @@
 - **Implementation status:** Planned; the OpenAI adapter remains text-only
 - **Story:** [CAH-036](../../user-stories/cah-036-map-openai-tool-calls.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** Strict SDK translation, full stateless replay of canonical reasoning-item envelopes,
-  explicit repository egress, and adapter-versus-loop ownership
+- **Review focus:** Strict SDK translation, scoped-instruction serialization, full stateless replay
+  of canonical reasoning-item envelopes, explicit repository egress, and adapter-versus-loop
+  ownership
 - **Visual companion:** None; the Markdown diagram is authoritative
 - **Related architecture:** [Architecture](../architecture.md), [Agent loop](../agent-loop.md), and
   [Safety model](../safety-model.md)
@@ -20,13 +21,16 @@ CAH-036 maps the proven neutral loop to OpenAI Responses local function calling.
 complete stateless replay, including every stored reasoning-item field and its exact input projection,
 and explicitly asks the API to return encrypted reasoning for later replay. Omitted or null optional
 reasoning `content`/`status` become canonical null markers and are omitted again on input replay.
-Every response must match one exact message-or-call grammar before the loop sees it.
+Every context snapshot serializes an instruction's canonical `source` and `applies_to` scope, so
+nested and sibling applicability survives request mapping. Every response must match one exact
+message-or-call grammar before the loop sees it.
 
 ## Learning objectives
 
 After this unit, you should be able to:
 
 - map neutral definitions/calls/results without leaking SDK types into core;
+- serialize growing scoped instructions without inventing cross-sibling precedence;
 - explain why `store=false` requires complete ordered replay;
 - preserve a complete reasoning replay item without letting core interpret or record it;
 - separate tool semantic status from SDK lifecycle status; and
@@ -54,6 +58,10 @@ turn 2 input:  [...original input, complete reasoning item, function call, funct
 `reasoning.context="current_turn"` does not make it safe to drop replayed output items. A common
 misconception is also that `parallel_tool_calls=false` validates output count; the adapter still must.
 
+Instructions need both identity and applicability. `pkg/AGENTS.md` may guide `pkg/file.py` without
+guiding `other/file.py`. Sending content without `source` and `applies_to` would erase the harness's
+scope decision at the provider boundary.
+
 ## Key concepts
 
 - **Stateless replay:** send complete locally owned ordered history every turn.
@@ -63,6 +71,9 @@ misconception is also that `parallel_tool_calls=false` validates output count; t
 - **Strict adapter grammar:** `[reasoning?, function_call]` or `[reasoning?, message]` only.
 - **Egress consent:** explicit OpenAI selection authorizes bounded admitted repository content.
 - **Semantic result:** compact function-output JSON interpreted by the model, not SDK lifecycle.
+- **Scoped instruction:** content paired with canonical source and the directory it applies to.
+- **Chain precedence:** root-to-nearest ordering inside one canonical ancestor chain; siblings do not
+  override one another.
 
 ## Architecture and design
 
@@ -75,9 +86,12 @@ Ink TUI              Python harness domain                     OpenAI Responses
                          ^                  full replay: one ordered neutral history
                          |                  + opaque? -> call -> result positions
                   local read registry
+                         |
+              CAH-035 context snapshots: root -> nested/sibling instruction growth
 
 Request: store=false, parallel_tool_calls=false,
          include=["reasoning.encrypted_content"], no previous_response_id
+Instructions: [{source, applies_to, content}, ...] from current immutable snapshot
 Egress: explicit OpenAI selection; bounded source may leave host; no content secret scan
 Evidence: no SDK payload, source content, arguments/results, or reasoning envelope
 ```
@@ -88,7 +102,8 @@ before CAH-033 exposes an atomic outcome.
 
 ## Practical walkthrough
 
-1. Map selected instructions and explicitly untrusted repository evidence.
+1. Map the current snapshot's selected instructions as exact `source`, `applies_to`, and content;
+   preserve root-to-nearest order within each chain and distinct sibling applicability.
 2. Map strict local function definitions and the complete positional neutral history.
 3. Set stateless/sequential options, request encrypted reasoning replay, and omit continuation IDs.
 4. Reconcile exactly one of the two legal output-item sequences.
@@ -102,6 +117,7 @@ before CAH-033 exposes an atomic outcome.
 ```python
 sdk_request = {
     "input": map_all_items(request),
+    "instructions": map_scoped_instructions(request.context),
     "tools": map_strict_functions(request.tools),
     "store": False,
     "parallel_tool_calls": False,
@@ -111,6 +127,8 @@ sdk_request = {
 ```
 
 The exact one-element `include` appears unchanged on every request, not only follow-up turns.
+`map_scoped_instructions` preserves each context item's insertion order as `source`, `applies_to`,
+then `content`; it consumes the snapshot supplied for that turn rather than caching turn one.
 `map_all_items` reconstructs every prior reasoning item's ID, empty summary, encrypted content, and
 type from its canonical opaque envelope at that history position. The canonical envelope always has
 six keys: omitted or null output `content`/`status` is stored as null and omitted from the later input;
@@ -141,6 +159,9 @@ fixed transport value, never a policy decision.
 | two calls despite parallel=false | invalid response | output-count mutation |
 | encrypted-content include missing on any turn | outbound contract failure | turn-one-through-four snapshots |
 | reasoning item omitted on replay | request mismatch | exact turn-two snapshot |
+| `source` or `applies_to` omitted | outbound contract failure | exact instruction JSON snapshot |
+| sibling treated as overriding | mapping-order failure | both distinct scopes remain present |
+| successful nested read has no context growth | request mismatch | turn-by-turn context snapshots |
 | completed reasoning omits `content` or `status` | canonical null marker, then omitted input key | optional-field cross-product |
 | reasoning has non-empty content, wrong status, missing required field, or extra key | invalid response | no opaque/call/text/usage escapes |
 | full reasoning envelope exceeds bound | invalid response | safe redacted representation |
@@ -189,10 +210,14 @@ security control; do not imply path policy already scans file contents.
 4. Show why tool-error JSON still uses a completed transport item.
 5. Teach back what explicit OpenAI selection authorizes and what it does not protect.
 6. Map omitted, null, and present `content`/`status` through canonical storage and input replay.
+7. Serialize root, `pkg`, and sibling `other` instructions; identify where precedence is defined and
+   why the adapter must not collapse the siblings.
 
 ## Key takeaways
 
 - The adapter translates; the harness admits, dispatches, and continues.
+- Every mapped instruction carries canonical `source` and `applies_to`; ordering expresses
+  root-to-nearest precedence only inside an ancestor chain, never sibling override.
 - Every stateless request asks for `reasoning.encrypted_content`; otherwise later full replay is not
   guaranteed to be constructible.
 - Stateless replay preserves every required reasoning field in order and handles optional fields
@@ -206,6 +231,7 @@ security control; do not imply path policy already scans file contents.
 - **Opaque replay:** preserving provider state without reading its contents.
 - **Repository egress:** source-derived content leaving the local host.
 - **DLP:** controls that detect or prevent sensitive-data disclosure; deferred here.
+- **Applies-to scope:** canonical workspace-relative directory governed by an instruction item.
 
 ## Further reading
 

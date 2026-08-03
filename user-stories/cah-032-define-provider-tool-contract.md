@@ -6,8 +6,8 @@
 - **Dependencies:** CAH-030, CAH-031
 - **Lesson:** [Provider-neutral tool contract](../docs/lessons/cah-032-provider-tool-contract.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** The language-neutral seam between harness tool semantics and provider-specific
-  function-calling APIs.
+- **Review focus:** The language-neutral seam for scoped context, tool semantics, and
+  provider-specific function-calling APIs.
 
 ## User story
 
@@ -19,8 +19,9 @@
 
 CAH-032 extends the provider port and strict fake with the complete provider-neutral request and
 history values needed for tool-assisted turns, including an ordered opaque-continuation carrier and
-an immutable projection of CAH-030 context. It does not parse or dispatch a call, run a second model
-turn, map OpenAI SDK events, or expose MCP.
+an immutable, scope-preserving projection of one CAH-030 context snapshot. It permits later requests
+to carry a newly enriched snapshot but does not discover or merge instructions, compare session
+transitions, parse or dispatch a call, run a second model turn, map OpenAI SDK events, or expose MCP.
 
 ## Scope
 
@@ -28,8 +29,9 @@ turn, map OpenAI SDK events, or expose MCP.
   one tool result, and a bounded opaque-continuation item type.
 - Extend `ProviderRequest` with ordered model input history and an ordered tuple of available tool
   definitions while preserving text-only requests.
-- Add a pure projection from CAH-030's package into ordered provider request context without sending
-  the inclusion report or flattening repository evidence into user/assistant history.
+- Add a pure projection from CAH-030's package into ordered provider request context, including each
+  instruction's explicit `applies_to`, without sending the inclusion report or flattening repository
+  evidence into user/assistant history.
 - Refactor `ProviderToolCallRequested` to carry the shared call value rather than duplicating fields.
 - Teach the strict fake to compare the complete tool-aware request and script tool-call observations.
 - Add one pure harness bridge that maps CAH-031 registry descriptors and native Pydantic input models
@@ -117,14 +119,24 @@ turn, map OpenAI SDK events, or expose MCP.
   unresolved prior calls, and text after an unresolved call are rejected at construction. The M2
   round-trip order is therefore original input, optional continuation, call, matching result.
 - `ProviderRequest.repository_context` is the exact immutable ordered `ContextItem` tuple projected
-  from one successful CAH-030 package. It inherits that package's 24-item and 96-KiB content bounds;
-  the inclusion report remains harness evidence and never becomes model input. The existing
-  `repository_instructions` field remains valid for CAH-020 through CAH-023 compatibility only when
-  `repository_context` is empty. Supplying both representations fails construction, so no source is
-  duplicated or silently given another priority.
+  from one successful CAH-030 package. An instruction projection includes canonical source,
+  canonical `applies_to`, path-local precedence, exact admitted content, byte count, and truncation
+  state; focus and search items retain their existing kind-specific provenance. It inherits that
+  package's 16-source, 24-item, and 96-KiB content bounds. The inclusion report remains
+  harness evidence and never becomes model input. The existing `repository_instructions` field
+  remains valid for CAH-020 through CAH-023 compatibility only when `repository_context` is empty.
+  Supplying both representations fails construction, so no source is duplicated or silently given
+  another priority.
+- Every `ProviderRequest` is an immutable snapshot. Later orchestration may build a successive request
+  from CAH-030's atomically enriched package; the earlier request remains unchanged. CAH-032 neither
+  invokes enrichment nor proves a transition monotonic in isolation, while the strict fake can
+  compare exact successive snapshots. No constructor requires all requests in unrelated sessions to
+  share a context value.
 - Provider adapters receive already-selected context. They may serialize item kind, canonical
-  workspace label, line provenance, and content, but may not add, omit, deduplicate, rank, or mutate
-  items. Adapter-specific role/framing is deferred to that adapter's mapping story.
+  workspace label, instruction `applies_to` and path-local precedence, line provenance, and content,
+  but may not add, omit, deduplicate, rank, select, or mutate items. A sibling scope's serialization
+  order does not create precedence. Adapter-specific role/framing is deferred to that adapter's
+  mapping story.
 - Available definitions are an immutable ordered tuple with unique names. Empty definitions retain
   the exact CAH-023 text-only request semantics.
 - Native request defaults remain available to direct Python callers, but the bridge removes
@@ -133,6 +145,10 @@ turn, map OpenAI SDK events, or expose MCP.
   silently filling a value the model omitted.
 - `ProviderToolCallRequested` is still only an observation. Neither its construction nor the fake
   parses arguments, performs lookup, executes a tool, or authorizes another turn.
+- CAH-031's local `ReadToolSuccess.target_scope` never enters `ProviderToolResult`, request context,
+  history, schema, or the canonical result envelope. Later harness orchestration may use it to obtain
+  a CAH-025 bundle and ask CAH-030 for a new snapshot; providers receive only the resulting admitted
+  context items.
 - Fake request mismatch diagnostics remain bounded and content-safe: they may identify a structural
   field path and exchange number but never include message text, schema content, arguments, result
   output, or `repr()` of the request.
@@ -169,16 +185,16 @@ turn, map OpenAI SDK events, or expose MCP.
 | Error code / message | code matches `[a-z][a-z0-9_]{0,63}`; non-empty message is at most 1,024 UTF-8 bytes |
 | Complete canonical tool-result envelope | 64 KiB (65,536 UTF-8 bytes), including escaping, keys, punctuation, and wrapper |
 | Ordered conversation/history items | 16 per request |
-| Complete provider-neutral request projection | 512 KiB (524,288 UTF-8 bytes) |
+| Complete provider-neutral request projection | 512 KiB (524,288 UTF-8 bytes), including context labels and instruction `applies_to` metadata |
 
 Every byte bound uses the strict UTF-8 rules above. Construction rejects a value above its bound
 rather than truncating it, and ordinary representations omit schema, argument, result, continuation,
 and message content. A continuation counts as one of the 16 history items. Its tagged projection is
 exactly `{"kind":"opaque_continuation","payload":<string>}`. The complete request bound is the
 length of one compact, sorted-key JSON projection using the same serializer options over messages,
-context, definitions, continuations, calls, and results; the tagged continuation and its JSON
-escaping are charged exactly once. It is a deterministic admission proxy, not a provider token count
-or a claim about an adapter's exact wire bytes.
+every context field including `applies_to`, definitions, continuations, calls, and results; the
+tagged continuation and its JSON escaping are charged exactly once. It is a deterministic admission
+proxy, not a provider token count or a claim about an adapter's exact wire bytes.
 
 ## Reviewability budget
 
@@ -187,7 +203,8 @@ or a claim about an adapter's exact wire bytes.
 - **Counted paths:** additions plus deletions under `src/code_assist_harness/` and `tui/src/`.
 - **Excluded from count:** tests, documentation, fixtures, lockfiles, and generated artifacts.
 - Split schema canonicalization into an earlier contract unit if implementation requires a general
-  JSON-Schema engine or broad changes outside the provider models and strict fake.
+  JSON-Schema engine, scoped projection requires orchestration/session state, or the unit is likely
+  to exceed 600 production lines. Do not broaden this contract to make room implicitly.
 - The range is a review estimate, not a quota; do not pad a smaller coherent implementation.
 
 ## Acceptance criteria
@@ -204,8 +221,9 @@ or a claim about an adapter's exact wire bytes.
    emits scripted call requests, and reports structural mismatches without content leakage.
 6. The pure registry-to-definition bridge maps all four operations exactly or fails atomically
    before provider work, without reverse imports or a duplicate catalog.
-7. One successful CAH-030 package projects into exact ordered request context; reports are omitted,
-   legacy instruction-only requests remain valid, and mixed legacy/new context is rejected.
+7. One successful CAH-030 package projects into exact ordered request context including instruction
+   `applies_to`; reports and CAH-031 local target scope are omitted, legacy instruction-only requests
+   remain valid, and mixed legacy/new context is rejected.
 8. Every owned model-facing string proves strict Unicode-scalar/UTF-8 round-trip admission and fixed
    byte boundaries without normalization or content leakage.
 9. An already decoded model-facing argument object must contain exactly every canonical required key
@@ -214,7 +232,10 @@ or a claim about an adapter's exact wire bytes.
 10. Continuations are non-empty strict Unicode-scalar/UTF-8 values bounded at 65,536 bytes, count once
     toward both history-item and request-projection limits, and never enter representations or
     diagnostics.
-11. No dispatch, extra model turn, OpenAI mapping, MCP transport, protocol, or TUI behavior is added.
+11. Independently immutable successive requests may carry an atomically enriched context snapshot;
+    the strict fake compares each exact value, all context metadata is charged once to the 512-KiB
+    request bound, and neither this contract nor an adapter selects or removes an item.
+12. No dispatch, extra model turn, OpenAI mapping, MCP transport, protocol, or TUI behavior is added.
 
 ## Acceptance-to-test matrix
 
@@ -225,8 +246,9 @@ or a claim about an adapter's exact wire bytes.
 | 2, 10 | Table tests cover valid text-only, `continuation? -> call -> result`, `continuation? -> assistant`, and multiple separated continuation/call/result groups in one history; reject start/end, orphan, duplicate, unresolved, reordered, and wrongly followed continuations; and prove 16/17-item plus 65,535/65,536/65,537-byte boundaries, NUL/lone-surrogate rejection, multibyte counting, safe `repr`, and exact per-item single-charge request projections at 524,287/524,288/524,289 bytes. |
 | 5 | Strict-fake tests accept one exact tool request and reject changed order, definition, continuation payload, call, and result fields with only a structural mismatch path. |
 | 6, 9 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. Argument-gate tests use a native model with a default, prove an omitted defaulted key and an extra key fail before a spy `model_validate` call, prove the exact key set reaches native validation unchanged, and prove direct native construction still applies the default. |
-| 7 | Context-projection tests assert exact order/provenance/content, report omission, inherited bounds, legacy compatibility, and mixed-representation rejection. |
-| 11 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
+| 7, 11 | Context-projection tests assert exact order/source/`applies_to`/path-local precedence/content, report and local-target-scope omission, inherited 16-source/24-item/96-KiB bounds, and exact 512-KiB charging. Two-request fake scripts prove the first snapshot is unchanged while the second contains CAH-030's enriched instruction block; sibling serialization is not treated as precedence. |
+| 7 | Compatibility tests preserve legacy instruction-only requests and reject mixed legacy/new context. |
+| 12 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
 
 ## Validation
 
@@ -239,6 +261,8 @@ or a claim about an adapter's exact wire bytes.
   before native Pydantic validation/default application while direct native callers retain defaults.
 - Prove continuation order, item counting, tagged canonical request projection, exact strict-fake
   equality, 65,536-byte payload admission, and content-suppressed failures without parsing payloads.
+- Snapshot initial and enriched context requests, including `applies_to` and boundary-changing label
+  bytes, and prove adapters/fakes cannot omit, select, or reorder an admitted item.
 - Re-run existing text-only adapter/session tests unchanged or with narrow construction updates.
 - Run the canonical network-free repository gate.
 
@@ -251,8 +275,8 @@ changes are permitted.
 
 ## Exclusions
 
-- Registry dispatch, JSON argument validation against a native tool input, tool execution, or a
-  second provider turn.
+- Registry dispatch, JSON argument validation against a native tool input, tool execution, context
+  enrichment, transition validation, or a second provider turn.
 - OpenAI Responses SDK mapping; direct MCP compatibility; remote MCP/hosted tools; catalog
   snapshot/re-admission; remote/network capability, auth, timeout, cancellation, or
   `structuredContent`/`outputSchema`/`isError` mapping; dynamic discovery; or provider-managed
@@ -262,8 +286,8 @@ changes are permitted.
 ## Definition of done
 
 - Exact constructors, schema table/canonicalization, pre-Pydantic argument-key gate, call-ID grammar,
-  result envelopes, ordered opaque continuations, and fake behavior have happy and meaningful failure
-  tests.
+  result envelopes, ordered opaque continuations, scoped initial/enriched context snapshots, and fake
+  behavior have happy and meaningful failure tests.
 - Existing text-only provider behavior remains compatible and the provider port remains SDK-free.
 - Production-code churn does not exceed 600 lines; any broader schema or orchestration concern is
   split out.
@@ -275,7 +299,8 @@ changes are permitted.
 
 - Provider-domain tests for immutable definition/call/result/continuation values and ordered history
   grammar.
-- Strict-fake tests proving exact content-safe request matching and script completion.
+- Strict-fake tests proving exact content-safe initial/enriched request matching and script
+  completion, including `applies_to` projection and request-byte charging.
 - Import-policy evidence that SDK and MCP types remain outside the provider-neutral contract.
 
 ## Deferred work

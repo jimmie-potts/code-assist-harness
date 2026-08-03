@@ -71,7 +71,9 @@ shell string in the MVP.
 
 A bounded piece of information selected for a provider request. It includes content, source
 provenance such as a path and line range, an inclusion reason, and a contribution to the context
-budget.
+budget. An instruction item also names its canonical `applies_to` directory. Later successful tool
+targets may add unchanged, previously unseen instruction items atomically; sibling scopes do not
+imply precedence over one another.
 
 ## Correlation ID
 
@@ -255,7 +257,8 @@ selected repository context, strict local tool definitions, positional opaque co
 matched call/result history under a fixed canonical byte bound. The request deliberately excludes
 provider credentials, SDK values,
 provider-specific response objects, instruction discovery, context-selection policy, and inclusion
-reports. A plain runtime task defaults context scope to `.` with empty focus and search inputs.
+reports. A plain runtime task defaults its initial context scope to `.` with empty focus and search
+inputs; later immutable requests may contain instruction items added for successful tool targets.
 Explicit OpenAI selection authorizes the bounded, policy-admitted repository content in that request
 to leave the machine; path admission does not content-secret-scan ordinary allowed files.
 
@@ -280,9 +283,9 @@ session's one supervised cleanup task. This protects admission against competing
 deadline, or terminal selection; an ordinary later sink or observer failure does not roll back an
 earlier accepted view. The session is distinct from the default `MockSession`, provider adapter,
 multi-turn loop, and TUI projection. CAH-033 first makes one tool-aware response an atomic admission
-transaction. CAH-034
-then adds the explicit two-turn teaching path, and CAH-035 replaces it with the bounded sequential
-loop while preserving provider-session ownership and cleanup.
+transaction. CAH-034 then adds the explicit two-turn teaching path plus atomic target-scoped
+instruction enrichment, and CAH-035 replaces it with the bounded sequential loop while preserving
+current context, provider-session ownership, and cleanup.
 
 ## Reducer
 

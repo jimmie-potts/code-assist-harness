@@ -117,6 +117,9 @@ is likely to cross the ceiling.
 - Registry handlers remain synchronous and bounded. Cancellation and deadline checks run before and
   after a handler; an in-flight handler is non-preemptive, its eventual result is discarded when
   cancellation wins, and later work must add a cooperative interface before claiming mid-call reap.
+- Scoped instruction discovery and context merge are also bounded synchronous stages. The loop checks
+  after each one, commits neither result nor candidate context until those guards pass, and checks
+  again before the next provider start.
 - Every provider-facing tool outcome uses compact, sorted-key UTF-8 JSON capped at 65,536 bytes
   inclusive: exactly `{"result":<projected>}` for success or
   `{"error":{"code":"<code>","message":"<fixed message>"}}` for failure. Oversize output fails with
@@ -157,10 +160,19 @@ is likely to cross the ceiling.
 - Every accepted path is resolved again immediately before access. Results use canonical
   workspace-relative labels and fixed failures rather than host paths or raw OS errors.
 - Context items are atomic. Selection either includes a complete bounded item or records why it was
-  omitted; it never silently cuts invalid JSON or removes provenance.
-- Plain runtime tasks use context scope `.` with empty `focus_paths` and `search_queries`. Evaluation
-  may inject those fields explicitly through a test-only composition seam; the model does not choose
-  initial context-selection inputs.
+  omitted; it never silently cuts invalid JSON or removes provenance. An instruction item carries its
+  canonical `applies_to` directory; sibling directories do not invent a precedence relationship.
+- Plain runtime tasks use **initial** context scope `.` with empty `focus_paths` and `search_queries`.
+  Evaluation may inject those fields explicitly through a test-only composition seam; the model does
+  not choose initial context-selection inputs.
+- Each successful native read returns the validated requested `path` as harness-only target-scope
+  metadata. Before another provider start, CAH-034/035 use CAH-025 and CAH-030 to add previously unseen
+  applicable instructions atomically without evicting prior items. A newly appearing ancestor enters
+  before existing descendants while every prior pair retains its relative order. Exact repeats are
+  idempotent; changed duplicates, discovery failures, and item/byte overflow stop before replay.
+  Known tool failures keep context unchanged. M2 does not fan out instructions for paths merely
+  returned by a broad listing or search, so its grounded evaluation performs a specific
+  path-targeting read before final text.
 
 ### Evidence and interface boundaries
 

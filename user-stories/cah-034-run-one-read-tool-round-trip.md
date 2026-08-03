@@ -6,8 +6,9 @@
 - **Dependencies:** CAH-030, CAH-031, CAH-032, CAH-033
 - **Lesson:** [One read-tool round trip](../docs/lessons/cah-034-one-read-tool-round-trip.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** One visible harness-owned observe-validate-dispatch-result-follow-up sequence,
-  including exact safe result envelopes, cancellation boundaries, and aggregate usage evidence.
+- **Review focus:** One visible harness-owned observe-validate-dispatch-enrich-result-follow-up
+  sequence, including scoped-instruction refresh, exact safe result envelopes, cancellation
+  boundaries, and aggregate usage evidence.
 
 ## User story
 
@@ -25,8 +26,10 @@ another tool capability, or new transcript schema.
 
 - Accept one CAH-033 tool-call outcome, validate and dispatch it through CAH-031, and construct one
   matching provider-neutral result.
-- Start exactly one follow-up provider turn with full immutable call/result replay, the original
-  CAH-030 context, and the same CAH-032 definitions.
+- After one successful path-targeted read, discover instructions for its validated request path and
+  atomically enrich the CAH-030 context before starting exactly one follow-up provider turn.
+- Start that follow-up with full immutable call/result replay, the resulting context snapshot, and
+  the same CAH-032 definitions.
 - Publish only CAH-033-admitted final text through the existing protocol lifecycle.
 - Aggregate optional usage from the two accepted turns with checked arithmetic and persist one
   existing session-level model-usage aggregate only after accepted final text.
@@ -37,8 +40,10 @@ another tool capability, or new transcript schema.
 ## Locked contract
 
 - Before the first provider start, CAH-032's pure bridge produces the exact ordered four-tool
-  catalog. Bridge failure performs zero provider and tool work. Both provider requests retain the
-  same immutable context tuple and tool definitions; inclusion-report evidence is never sent.
+  catalog. Bridge failure performs zero provider and tool work. The first request uses CAH-030's
+  root-scope context snapshot. The follow-up uses either the atomically enriched snapshot after a
+  successful path-targeted read or that initial snapshot after a known tool error. Tool definitions
+  remain byte-for-byte unchanged, and inclusion-report evidence is never sent.
 - CAH-033 atomically returns the first accepted call. Only then does orchestration charge the one
   observed tool call and run, in order: exact registry lookup, JSON-object decoding, CAH-032's exact
   model-facing required-key gate, native Pydantic input validation, synchronous dispatch, native
@@ -49,6 +54,20 @@ another tool capability, or new transcript schema.
   cancellation and the captured absolute deadline immediately before dispatch and immediately after
   it returns. Cancellation cannot interrupt Python code already executing; a result that returns
   after cancellation or deadline selection is discarded, never replayed, published, or persisted.
+- After an admitted call passes validation and its native tool succeeds, CAH-031 exposes the
+  validated request `path` as the local `target_scope`. Only after the post-dispatch
+  cancellation/deadline check passes does orchestration ask CAH-025 to discover instructions for
+  that scope. It checks cancellation/deadline again after discovery, asks CAH-030 for a candidate
+  merged package, and checks once more after merge before committing either the context replacement
+  or pending result to history. The existing pre-start guard runs immediately before the follow-up
+  `Provider.start()`. Discovery and merge are synchronous and bounded but not preemptible; a value
+  returned after cancellation/deadline wins is discarded. A known tool error skips discovery and
+  merge, produces its safe result, and leaves the initial context snapshot intact.
+- Instruction discovery or context-merge failure is a safe session terminal: no follow-up provider
+  operation starts and neither the pending result nor a partially enriched context is published or
+  persisted. A successful broad `list_files` or `search_text` enriches only for its validated
+  requested `path`; paths merely returned in its result never become scopes. M2 therefore requires a
+  specific path-targeting call before a final answer can rely on that path's nested instructions.
 - A successful tool output is the exact compact canonical CAH-031 JSON envelope
   `{"result":<allowlisted-value>}`. Known failures are exact compact JSON envelopes
   `{"error":{"code":"<code>","message":"<fixed message>"}}` with no whitespace. The closed error
@@ -62,8 +81,8 @@ another tool capability, or new transcript schema.
   exception, OS text, secret, or unbounded content. Rendering or envelope overflow fails the session
   safely instead of truncating JSON.
 - The follow-up request is a full immutable replay of original input plus the exact admitted call,
-  its matching result, optional first-turn opaque continuation, and the same definitions/context. The
-  single CAH-032 history tuple appends them exactly as
+  its matching result, optional first-turn opaque continuation, the same definitions, and the
+  atomically selected context snapshot. The single CAH-032 history tuple appends them exactly as
   `..., continuation? -> ProviderToolCall -> ProviderToolResult`; no separate continuation field or
   adapter side channel exists. It is reconstructed under CAH-032's 16-item and 512-KiB bounds before
   `Provider.start()`.
@@ -101,17 +120,20 @@ another tool capability, or new transcript schema.
    and exactly one follow-up provider start when admission checks pass.
 2. Validation runs in the locked order, and every known failure produces its exact bounded compact
    JSON envelope without executing a rejected later stage.
-3. The follow-up request replays the original input, optional opaque continuation, exact call/result,
-   unchanged context, and unchanged definitions in the single provider-neutral history order
-   `continuation? -> call -> result`.
+3. A successful path-targeted dispatch refreshes instructions for the validated request path and the
+   follow-up replays the exact call/result against that atomically enriched context; a known tool
+   error replays against the initial context. Definitions remain unchanged and history stays in the
+   single provider-neutral order `continuation? -> call -> result`.
 4. One accepted follow-up final answer publishes staged chunks through existing events and selects
    one completed session; a second call or invalid response starts no third turn.
-5. Synchronous tools are never represented as preemptible: cancellation/deadline is checked before
-   and after dispatch, and any late result is discarded.
+5. Synchronous dispatch, discovery, and merge are never represented as preemptible:
+   cancellation/deadline is checked before and after dispatch, after discovery, after merge before
+   committing result/context, and before the follow-up start; every late value is discarded.
 6. Optional per-turn usage is summed with checked arithmetic and exactly one existing aggregate is
    persisted only after accepted final text; partial/rejected usage is absent.
-7. All budgets span the two turns and one call without reset, and request overflow prevents the
-   rejecting provider start.
+7. Instruction discovery/merge and all budgets span the two turns and one call without reset;
+   discovery, merge, context, or request overflow prevents the follow-up start without publishing or
+   persisting the pending result/context.
 8. Existing transcript v3 and protocol v1 remain unchanged and content-safe; no per-call evidence
    record, argument, tool content, or provider continuation is persisted.
 
@@ -119,19 +141,20 @@ another tool capability, or new transcript schema.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1, 3-4 | One strict-fake/native-fixture integration asserts two exact requests—including `[user, opaque, call, result]` when continuation is present—one dispatch, full replay, ordered final events, one terminal, and zero third starts. |
+| 1, 3-4 | One strict-fake/native-fixture integration starts with root instructions, dispatches a nested path, and asserts a second exact request with its newly applicable instruction—including `[user, opaque, call, result]` when continuation is present—one dispatch, full replay, unchanged definitions, ordered final events, one terminal, and zero third starts. A known-error case proves the second request retains the initial context. |
 | 2 | Parameterized malformed/non-object JSON, omitted defaulted keys, additional keys, unknown tool, invalid input/result, every CAH-026 access error, oversized rendering, and programmer defect asserts the exact envelope or safe session failure plus stage counters. A spy proves the raw-key gate rejects before native Pydantic validation/default application. |
-| 5 | Logical checkpoints select cancellation/deadline immediately before dispatch and while a bounded synchronous fake runs; post-return checks discard distinctive late-result sentinels. |
+| 5 | Logical checkpoints select cancellation/deadline immediately before dispatch, after dispatch, after discovery, after merge before append, and immediately before the follow-up start. Distinctive late tool/bundle/package sentinels are discarded; discovery and merge failures publish/persist neither result nor context and start no follow-up. |
 | 6 | Two-turn tables cover no usage, usage on either/both turns, exact checked sums, aggregate overflow, rejected turn two, cancellation, and one transcript-v3 aggregate write. |
-| 7 | Seeded boundary tests exhaust model starts, deadline, assistant UTF-8 output, tool calls, and 512-KiB request projection without reset or late work. |
+| 7 | Seeded boundary tests exhaust instruction/context item and byte budgets, model starts, deadline, assistant UTF-8 output, tool calls, and 512-KiB request projection without reset or late work. Broad list/search results prove returned paths do not become scopes. |
 | 8 | Transcript/replay and protocol fixture suites prove unchanged schemas and absence of call IDs, arguments, result/continuation content, and host paths. |
 
 ## Validation
 
 - Use strict fake exchanges, bounded synchronous fake tools, injected clocks, and logical
   checkpoints; never use live requests or wall-clock sleeps.
-- Assert exact request history, registry-stage counters, result bytes, provider starts/cleanup,
-  aggregate usage, transcript projection, protocol events, and terminal count.
+- Assert exact request history and context snapshots, registry/discovery/merge stage counters, result
+  bytes, provider starts/cleanup, aggregate usage, transcript projection, protocol events, and
+  terminal count.
 - Run focused round-trip, registry, limits, transcript-v3, runtime, and protocol tests followed by
   the canonical non-live repository gate.
 
@@ -162,8 +185,10 @@ contrasts local dispatch with a future MCP adapter. Do not create or update a pr
 
 ## Planned evidence
 
-- One exact two-exchange fake script with one native dispatch and immutable replay.
-- Closed-table result-envelope, validation-order, late-result, and budget failure suites.
+- One exact two-exchange fake script with root-only initial instructions, one nested native dispatch,
+  atomic scoped-instruction enrichment, and immutable replay with unchanged definitions.
+- Closed-table result-envelope, validation-order, discovery/merge, late-result, and budget failure
+  suites, including unchanged-context known errors and no returned-path inference.
 - Checked two-turn usage aggregation with exactly one existing transcript-v3 session record.
 
 ## Deferred work
