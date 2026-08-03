@@ -545,21 +545,22 @@ describe('real Node to uv to Python boundary', () => {
         7000,
         'first rendered session did not complete',
       );
+      const semanticFrames = frames.map(semanticTerminalText);
 
-      const firstDelta = frames.findIndex(
+      const firstDelta = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Mock response:') &&
           !frame.includes('the task crossed the process boundary') &&
           frame.includes('Session status: running'),
       );
-      const secondDelta = frames.findIndex(
+      const secondDelta = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Mock response:') &&
           frame.includes('the task crossed the process boundary') &&
           !frame.includes('successfully.') &&
           frame.includes('Session status: running'),
       );
-      const thirdDelta = frames.findIndex(
+      const thirdDelta = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Mock response:') &&
           frame.includes('the task crossed the process boundary') &&
@@ -567,7 +568,7 @@ describe('real Node to uv to Python boundary', () => {
           frame.includes('successfully.') &&
           frame.includes('Session status: running'),
       );
-      const firstCompletion = frames.findIndex(
+      const firstCompletion = semanticFrames.findIndex(
         (frame) =>
           frame.includes('Explain the rendered boundary.') &&
           frame.includes('streamed') &&
@@ -584,10 +585,14 @@ describe('real Node to uv to Python boundary', () => {
       await waitForCondition(
         () =>
           frames.some(
-            (frame) =>
-              frame.includes('Prove the rendered boundary again.') &&
-              (frame.match(/Mock response:/gu)?.length ?? 0) === 2 &&
-              frame.includes('Session status: completed'),
+            (frame) => {
+              const semanticFrame = semanticTerminalText(frame);
+              return (
+                semanticFrame.includes('Prove the rendered boundary again.') &&
+                (semanticFrame.match(/Mock response:/gu)?.length ?? 0) === 2 &&
+                semanticFrame.includes('Session status: completed')
+              );
+            },
           ),
         7000,
         'second rendered session did not complete',
@@ -606,6 +611,12 @@ describe('real Node to uv to Python boundary', () => {
     expect(supervisor.getState().status).toBe('stopped');
   }, 15_000);
 });
+
+function semanticTerminalText(frame: string): string {
+  // Responsive Ink panels may wrap one sentence between vertical border cells. Boundary evidence
+  // compares the visible text and its frame order rather than treating layout glyphs as content.
+  return frame.replace(/[|\u2500-\u257f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
 
 function readScenarioFixture<T>(filename: string): readonly T[] {
   const contents = readFileSync(new URL(filename, scenarioFixtureRoot), 'utf8');

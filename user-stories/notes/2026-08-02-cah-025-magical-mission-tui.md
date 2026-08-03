@@ -117,6 +117,14 @@ Node-Python boundary tests. `git diff --check` passes. The App-level Ink resize 
 types and preserves the pending draft across 110, 76, and 44 columns without invoking submission or
 cancellation callbacks. Automated coverage also verifies `NO_COLOR` and `TERM=dumb`.
 
+The first GitHub Actions handoff exposed one presentation-sensitive assertion in the real
+Node-to-Python boundary test: it searched a raw bordered frame for one uninterrupted cumulative
+delta, so legitimate Ink wrapping could make the second delta appear absent. The test now removes
+layout-only vertical/box-drawing borders and folds whitespace before checking the same exact delta
+content, running status, completion, second task, and frame ordering. Production code and the
+process-boundary contract are unchanged; the focused boundary test and canonical repository gate
+pass with the hardened evidence path.
+
 ## Publication evidence
 
 - Branch: `agent/magical-mission-tui`
