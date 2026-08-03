@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +26,14 @@ from .protocol import (
     SessionStartCommand,
 )
 from .provider import Provider, RepositoryInstruction
+from .provider.openai_config import (
+    DEFAULT_PROVIDER,
+    OpenAIProviderConfiguration,
+    ProviderConfigurationError,
+    ProviderName,
+    resolve_provider_configuration,
+    validate_provider_selection,
+)
 from .provider_session import (
     MonotonicClock,
     MonotonicWaiter,
@@ -52,6 +60,8 @@ class _RuntimeOptions:
 
     workspace: Path
     transcript_enabled: bool
+    provider: ProviderName
+    model: str | None
 
 
 def resolve_workspace(value: str | Path) -> Path:
@@ -88,6 +98,8 @@ def _parse_runtime_options(arguments: Sequence[str]) -> _RuntimeOptions:
     )
     parser.add_argument("--workspace", action="append", metavar="PATH")
     parser.add_argument("--no-transcript", action="store_true")
+    parser.add_argument("--provider", action="append", metavar="NAME")
+    parser.add_argument("--model", action="append", metavar="MODEL")
     parsed = parser.parse_args(arguments)
 
     workspace_values: list[str] | None = parsed.workspace
@@ -96,10 +108,66 @@ def _parse_runtime_options(arguments: Sequence[str]) -> _RuntimeOptions:
     if len(workspace_values) != 1:
         raise RuntimeConfigurationError("--workspace PATH must be provided exactly once")
 
+    provider_values: list[str] | None = parsed.provider
+    if provider_values is not None and len(provider_values) != 1:
+        raise RuntimeConfigurationError("--provider NAME may be provided at most once")
+    model_values: list[str] | None = parsed.model
+    if model_values is not None and len(model_values) != 1:
+        raise RuntimeConfigurationError("--model MODEL may be provided at most once")
+
+    provider_candidate = DEFAULT_PROVIDER if provider_values is None else provider_values[0]
+    model_candidate = None if model_values is None else model_values[0]
+    try:
+        provider, model = validate_provider_selection(provider_candidate, model_candidate)
+    except ProviderConfigurationError as error:
+        raise RuntimeConfigurationError(str(error)) from None
+
     return _RuntimeOptions(
         workspace=resolve_workspace(workspace_values[0]),
         transcript_enabled=not parsed.no_transcript,
+        provider=provider,
+        model=model,
     )
+
+
+def _create_openai_provider(configuration: OpenAIProviderConfiguration) -> Provider:
+    """Import and construct the concrete adapter only after SDK-free validation.
+
+    Args:
+        configuration: Validated model and credential retained inside the provider boundary.
+
+    Returns:
+        One reusable provider whose operations own their SDK resources lazily.
+    """
+    from .provider.openai_responses import OpenAIResponsesProvider
+
+    return OpenAIResponsesProvider(configuration)
+
+
+def _compose_provider(
+    options: _RuntimeOptions,
+    environment: Mapping[str, str],
+) -> Provider | None:
+    """Select the mock path or construct OpenAI after complete local validation.
+
+    Args:
+        options: Provider/model pair already validated by the Python argument boundary.
+        environment: Process environment inspected only when OpenAI was selected.
+
+    Returns:
+        ``None`` for ``MockSessionRunner`` or the concrete OpenAI adapter.
+
+    Raises:
+        ProviderConfigurationError: If OpenAI environment or credential validation fails.
+    """
+    configuration = resolve_provider_configuration(
+        options.provider,
+        options.model,
+        environment,
+    )
+    if configuration is None:
+        return None
+    return _create_openai_provider(configuration)
 
 
 async def _read_stdin_chunks() -> AsyncIterator[bytes]:
@@ -188,8 +256,8 @@ async def run_runtime(
     canonical workspace supplied by the supervisor. After readiness, one ``session.start`` runs the
     deterministic CAH-005 stream in a child task so the command reader can reject overlapping work
     and honor orderly shutdown. Tests may inject a provider to run one CAH-022 provider-neutral
-    turn; the launched ``main()`` path deliberately supplies none and remains on ``MockSession``.
-    Python remains authoritative for every terminal event.
+    turn. The launched ``main()`` path supplies none for the default mock or the explicitly selected
+    OpenAI adapter. Python remains authoritative for every terminal event.
 
     Args:
         workspace: Canonical existing directory owned by this runtime process.
@@ -197,7 +265,7 @@ async def run_runtime(
         transcript_settings: Optional explicit storage and redaction settings. When omitted and
             persistence is enabled, settings are derived from XDG and recognized sensitive
             environment values. Disabled mode never inspects those locations or values.
-        provider: Optional provider implementation for the test-oriented CAH-021 composition seam.
+        provider: Optional provider implementation selected by the composition root or a test seam.
         repository_instructions: Ordered, already-resolved instructions supplied only to an injected
             provider session. Discovery and precedence remain later work.
         loop_limits: Optional immutable hard budgets for injected provider-backed sessions.
@@ -566,13 +634,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     try:
         options = _parse_runtime_options(arguments)
+        provider = _compose_provider(options, os.environ)
         asyncio.run(
             run_runtime(
                 options.workspace,
                 transcript_enabled=options.transcript_enabled,
+                provider=provider,
+                loop_limits=LoopLimits() if provider is not None else None,
             )
         )
-    except RuntimeConfigurationError as error:
+    except (ProviderConfigurationError, RuntimeConfigurationError) as error:
         print(f"runtime configuration error: {error}", file=sys.stderr)
         return 2
     except OSError as error:

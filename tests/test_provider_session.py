@@ -43,6 +43,7 @@ from code_assist_harness.provider import (
 )
 from code_assist_harness.provider_session import (
     MAX_PROVIDER_TURN_OUTPUT_BYTES,
+    PROVIDER_CLEANUP_GRACE_SECONDS,
     ProviderSession,
 )
 from code_assist_harness.session_state import SessionState, SessionUpdate
@@ -111,6 +112,8 @@ class _ControlledOperation:
         cancel_releases_iteration: bool = False,
         block_cancel: bool = False,
         block_wait_closed: bool = False,
+        shield_cancel_owner: bool = False,
+        shield_wait_closed_owner: bool = False,
         wait_closed_error: str | None = None,
         cancel_error: str | None = None,
     ) -> None:
@@ -121,6 +124,8 @@ class _ControlledOperation:
         self._cancel_releases_iteration = cancel_releases_iteration
         self._block_cancel = block_cancel
         self._block_wait_closed = block_wait_closed
+        self._shield_cancel_owner = shield_cancel_owner
+        self._shield_wait_closed_owner = shield_wait_closed_owner
         self._wait_closed_error = wait_closed_error
         self._cancel_error = cancel_error
         self._claimed = False
@@ -132,8 +137,12 @@ class _ControlledOperation:
         self.cancel_started = asyncio.Event()
         self.cancel_finished = asyncio.Event()
         self.release_cancel = asyncio.Event()
+        self.cleanup_owner_started = asyncio.Event()
+        self.cleanup_owner_finished = asyncio.Event()
         self.cancel_calls = 0
         self.wait_closed_calls = 0
+        self.force_cancel_cleanup_calls = 0
+        self.cleanup_owner_task: asyncio.Task[None] | None = None
 
     def events(self) -> AsyncIterator[ProviderStreamEvent]:
         if self._claimed:
@@ -162,7 +171,9 @@ class _ControlledOperation:
         try:
             if self._cancel_releases_iteration:
                 self.release_iteration.set()
-            if self._block_cancel:
+            if self._shield_cancel_owner:
+                await self._join_cleanup_owner()
+            elif self._block_cancel:
                 await self.release_cancel.wait()
             if self._cancel_error is not None:
                 raise RuntimeError(self._cancel_error)
@@ -173,10 +184,38 @@ class _ControlledOperation:
     async def wait_closed(self) -> None:
         self.wait_closed_calls += 1
         self.wait_closed_started.set()
-        if self._block_wait_closed:
+        if self._shield_wait_closed_owner:
+            await self._join_cleanup_owner()
+        elif self._block_wait_closed:
             await self.release_wait_closed.wait()
         if self._wait_closed_error is not None:
             raise RuntimeError(self._wait_closed_error)
+
+    async def force_cancel_cleanup(self) -> None:
+        self.force_cancel_cleanup_calls += 1
+        owner = self.cleanup_owner_task
+        if owner is None:
+            return
+        if not owner.done():
+            owner.cancel()
+        try:
+            await owner
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+
+    async def _join_cleanup_owner(self) -> None:
+        if self.cleanup_owner_task is None:
+            self.cleanup_owner_task = asyncio.create_task(self._block_cleanup_owner())
+        await asyncio.shield(self.cleanup_owner_task)
+
+    async def _block_cleanup_owner(self) -> None:
+        self.cleanup_owner_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.cleanup_owner_finished.set()
 
 
 class _FutureBackedIterator:
@@ -231,6 +270,9 @@ class _IteratorBoundaryOperation:
 
     async def wait_closed(self) -> None:
         self.wait_closed_calls += 1
+
+    async def force_cancel_cleanup(self) -> None:
+        return
 
 
 class _SingleOperationProvider:
@@ -1332,6 +1374,9 @@ def test_synchronous_provider_boundary_crossing_selects_deadline_and_cancels_ins
             async def wait_closed(self) -> None:
                 return
 
+            async def force_cancel_cleanup(self) -> None:
+                return
+
         operation = CrossingOperation()
 
         class CrossingProvider:
@@ -1425,11 +1470,11 @@ def test_deadline_cleanup_exception_is_diagnostic_and_does_not_rewrite_limit() -
     assert "sk-secret-deadline-cleanup-error" not in b"".join(lines).decode()
 
 
-def test_deadline_cleanup_grace_cancels_and_reaps_one_shared_cancel_call() -> None:
+def test_deadline_cleanup_grace_force_cancels_and_reaps_the_nested_owner() -> None:
     async def scenario() -> tuple[list[bytes], _ControlledOperation]:
         lines: list[bytes] = []
         clock = _MutableMonotonicClock()
-        operation = _ControlledOperation((), block_iteration=True, block_cancel=True)
+        operation = _ControlledOperation((), block_iteration=True, shield_cancel_owner=True)
 
         async def sink(line: bytes) -> None:
             lines.append(line)
@@ -1448,6 +1493,7 @@ def test_deadline_cleanup_grace_cancels_and_reaps_one_shared_cancel_call() -> No
         await asyncio.wait_for(clock.wait_for_waiter(10.0), timeout=1)
         clock.advance_to(10.0)
         await asyncio.wait_for(operation.cancel_started.wait(), timeout=1)
+        await asyncio.wait_for(operation.cleanup_owner_started.wait(), timeout=1)
         await asyncio.wait_for(clock.wait_for_waiter(15.0), timeout=1)
         clock.advance_to(15.0)
         await asyncio.wait_for(operation.cancel_finished.wait(), timeout=1)
@@ -1458,6 +1504,10 @@ def test_deadline_cleanup_grace_cancels_and_reaps_one_shared_cancel_call() -> No
 
     assert operation.cancel_calls == 1
     assert operation.cancel_finished.is_set()
+    assert operation.force_cancel_cleanup_calls == 1
+    assert operation.cleanup_owner_finished.is_set()
+    assert operation.cleanup_owner_task is not None
+    assert operation.cleanup_owner_task.done()
     assert _event_types(lines) == ["session.started", "runtime.error", "session.failed"]
     assert _wire_events(lines)[-2]["payload"] == {
         "code": "provider_cleanup_failed",
@@ -1467,6 +1517,63 @@ def test_deadline_cleanup_grace_cancels_and_reaps_one_shared_cancel_call() -> No
     assert _wire_events(lines)[-1]["payload"] == {
         "code": "provider_work_deadline_exceeded",
         "message": "Provider work exceeded its time limit.",
+    }
+
+
+def test_completion_cleanup_grace_force_cancels_and_reaps_the_nested_owner() -> None:
+    async def scenario() -> tuple[list[bytes], _ControlledOperation]:
+        lines: list[bytes] = []
+        clock = _MutableMonotonicClock()
+        operation = _ControlledOperation(
+            (
+                ProviderTextDelta("selected completion"),
+                ProviderTextCompleted("selected completion"),
+                ProviderCompleted(),
+            ),
+            shield_wait_closed_owner=True,
+        )
+
+        async def sink(line: bytes) -> None:
+            lines.append(line)
+
+        session = ProviderSession(
+            OrderedEventWriter(sink, timestamp_factory=lambda: TIMESTAMP),
+            _SingleOperationProvider(operation),
+            _session_start(),
+            "ses_completion_cleanup_grace",
+            monotonic_now=clock.now,
+            monotonic_waiter=clock.wait_until,
+        )
+        running = asyncio.create_task(session.run())
+        await asyncio.wait_for(operation.wait_closed_started.wait(), timeout=1)
+        await asyncio.wait_for(operation.cleanup_owner_started.wait(), timeout=1)
+        await asyncio.wait_for(
+            clock.wait_for_waiter(PROVIDER_CLEANUP_GRACE_SECONDS),
+            timeout=1,
+        )
+        clock.advance_to(PROVIDER_CLEANUP_GRACE_SECONDS)
+        await asyncio.wait_for(operation.cleanup_owner_finished.wait(), timeout=1)
+        await asyncio.wait_for(running, timeout=1)
+        return lines, operation
+
+    lines, operation = asyncio.run(scenario())
+
+    assert operation.wait_closed_calls == 1
+    assert operation.cancel_calls == 0
+    assert operation.force_cancel_cleanup_calls == 1
+    assert operation.cleanup_owner_task is not None
+    assert operation.cleanup_owner_task.done()
+    assert _event_types(lines) == [
+        "session.started",
+        "assistant.delta",
+        "runtime.error",
+        "assistant.completed",
+        "session.completed",
+    ]
+    assert _wire_events(lines)[-3]["payload"] == {
+        "code": "provider_cleanup_failed",
+        "message": "Provider cleanup could not be confirmed.",
+        "recoverable": True,
     }
 
 

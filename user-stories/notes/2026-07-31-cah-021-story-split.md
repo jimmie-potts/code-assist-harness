@@ -109,9 +109,11 @@ the safer dependency order explicit.
 ## Planned evidence
 
 Each unit must supply its own focused success and meaningful failure tests, current written lesson,
-visual PPTX lesson with rendered-slide and overflow evidence, implementation note, full
-`./scripts/check` result, and ready-for-review pull request. Planning lessons remain `Planned` and do
-not link nonexistent decks or present pseudocode as shipped implementation.
+implementation note, full `./scripts/check` result, and ready-for-review pull request. This note
+originally required a visual PPTX for every unit; the later presentation freeze supersedes that
+requirement. Retained decks through CAH-022 are historical, while CAH-023 and later use Markdown plus
+a compact text diagram only. Planning lessons remain `Planned` and do not present pseudocode as
+shipped implementation.
 
 ## Validation evidence
 
@@ -123,7 +125,8 @@ not link nonexistent decks or present pseudocode as shipped implementation.
 - No dependency, protocol, runtime, TUI, fixture, or executable-behavior file changed.
 - A manual documentation-policy audit confirms 15 reciprocal story/lesson pairs, aligned statuses,
   every required planned-lesson section, three-to-five production reference groups per new lesson,
-  Further reading coverage for those references, and no nonexistent planned visual-deck links.
+  Further reading coverage for those references, and the then-current visual-deck policy. The later
+  presentation freeze supersedes that visual requirement.
 
 ## References
 

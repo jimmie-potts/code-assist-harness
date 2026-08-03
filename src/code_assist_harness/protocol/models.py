@@ -50,8 +50,35 @@ def _validate_safe_message(value: str) -> str:
     return value
 
 
+def _validate_assistant_text(value: str) -> str:
+    """Admit normal text layout without allowing terminal state-changing controls."""
+    _validate_unicode_scalar_text(value)
+    if any(
+        (ord(character) < 32 and character not in {"\t", "\n"}) or 127 <= ord(character) <= 159
+        for character in value
+    ):
+        raise ValueError("assistant text contains an unsupported terminal control")
+    return value
+
+
+def _validate_unicode_scalar_text(value: str) -> str:
+    """Reject lone surrogates that JSON can represent but UTF-8 cannot encode."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("text must contain only Unicode scalar values") from None
+    return value
+
+
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 """A semantic wire string that must contain at least one character."""
+
+_SessionTask = Annotated[
+    str,
+    StringConstraints(min_length=1),
+    AfterValidator(_validate_unicode_scalar_text),
+]
+"""A non-empty user task that can be encoded as UTF-8 after JSON decoding."""
 
 ErrorCode = Annotated[
     str,
@@ -65,6 +92,13 @@ SafeMessage = Annotated[
     AfterValidator(_validate_safe_message),
 ]
 """A bounded single-line failure message without C0 or C1 terminal controls."""
+
+_AssistantText = Annotated[
+    str,
+    StringConstraints(min_length=1),
+    AfterValidator(_validate_assistant_text),
+]
+"""Non-empty assistant text allowing TAB/LF but no other C0 or C1 controls."""
 
 CommandId = Annotated[
     str,
@@ -120,7 +154,7 @@ class RuntimeInitializePayload(_WireModel):
 class SessionStartPayload(_WireModel):
     """Wire payload carrying the user task for a future session implementation."""
 
-    task: NonEmptyString
+    task: _SessionTask
 
 
 class SessionCancelPayload(_WireModel):
@@ -144,9 +178,9 @@ class EmptySessionPayload(_WireModel):
 
 
 class AssistantTextPayload(_WireModel):
-    """Wire payload containing one non-empty assistant text value."""
+    """Wire payload containing terminal-safe assistant text."""
 
-    text: NonEmptyString
+    text: _AssistantText
 
 
 class SessionFailedPayload(_WireModel):

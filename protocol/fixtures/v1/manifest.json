@@ -149,12 +149,28 @@
       "path": "invalid/invalid-payload.ndjson"
     },
     {
+      "id": "invalid-task-unicode",
+      "direction": "command",
+      "classification": "invalid_payload",
+      "reason": "The session.start task contains an escaped lone surrogate that is not a Unicode scalar value.",
+      "format": "ndjson_line",
+      "path": "invalid/invalid-task-unicode.ndjson"
+    },
+    {
       "id": "unsafe-error-message",
       "direction": "event",
       "classification": "invalid_payload",
       "reason": "A user-visible runtime error message contains a terminal control character.",
       "format": "ndjson_line",
       "path": "invalid/unsafe-error-message.ndjson"
+    },
+    {
+      "id": "unsafe-assistant-text",
+      "direction": "event",
+      "classification": "invalid_payload",
+      "reason": "Assistant text contains terminal controls that could alter terminal state.",
+      "format": "ndjson_line",
+      "path": "invalid/unsafe-assistant-text.ndjson"
     },
     {
       "id": "extra-field",

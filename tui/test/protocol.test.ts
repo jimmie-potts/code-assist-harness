@@ -211,6 +211,18 @@ describe('version 1 protocol schemas', () => {
     ).toBe('malformed_envelope');
   });
 
+  it('accepts Unicode scalar tasks and rejects lone surrogates before encoding', () => {
+    const safe = command('session.start', {task: 'Explain café 👩‍💻'});
+    expect(parseCommandLine(JSON.stringify(safe))).toMatchObject({ok: true});
+    expect(() => encodeCommandLine(safe)).not.toThrow();
+
+    for (const task of ['unsafe\ud800text', 'unsafe\udffftext']) {
+      const unsafe = command('session.start', {task});
+      expect(parseFailureCode(parseCommandLine(JSON.stringify(unsafe)))).toBe('invalid_payload');
+      expect(() => encodeCommandLine(unsafe)).toThrow(ProtocolEncodingError);
+    }
+  });
+
   it('rejects terminal controls in user-visible failure fields', () => {
     const unsafe = runtimeEvent('runtime.error', {
       code: 'unsafe_error',
@@ -219,6 +231,28 @@ describe('version 1 protocol schemas', () => {
     });
 
     expect(parseFailureCode(parseEventLine(JSON.stringify(unsafe)))).toBe('invalid_payload');
+  });
+
+  it('accepts TAB/LF assistant layout and rejects other C0/C1 controls', () => {
+    const safeText = 'first line\n\tsecond line café 👩‍💻';
+    for (const eventType of ['assistant.delta', 'assistant.completed']) {
+      const safe = sessionEvent(eventType, 1, {text: safeText});
+      expect(parseEventLine(JSON.stringify(safe))).toMatchObject({ok: true});
+
+      const controls = [
+        ...Array.from({length: 32}, (_value, codePoint) => codePoint).filter(
+          (codePoint) => codePoint !== 9 && codePoint !== 10,
+        ),
+        ...Array.from({length: 33}, (_value, index) => index + 127),
+      ];
+      for (const codePoint of controls) {
+        const unsafe = sessionEvent(eventType, 1, {text: `unsafe${String.fromCodePoint(codePoint)}text`});
+        expect(parseFailureCode(parseEventLine(JSON.stringify(unsafe)))).toBe('invalid_payload');
+      }
+
+      const surrogate = sessionEvent(eventType, 1, {text: 'unsafe\ud800text'});
+      expect(parseFailureCode(parseEventLine(JSON.stringify(surrogate)))).toBe('invalid_payload');
+    }
   });
 
   it('requires session envelope fields only on session events', () => {

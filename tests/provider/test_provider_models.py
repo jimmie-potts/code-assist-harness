@@ -96,6 +96,35 @@ def test_every_provider_stream_variant_is_harness_owned_and_constructible() -> N
     ]
 
 
+def test_provider_text_preserves_supported_layout_and_unicode() -> None:
+    text = "first line\n\tsecond line café 👩‍💻"
+
+    assert ProviderTextDelta(text).text == text
+    assert ProviderTextCompleted(text).text == text
+
+
+@pytest.mark.parametrize("code_point", [*range(0x20), *range(0x7F, 0xA0)])
+@pytest.mark.parametrize("event_type", [ProviderTextDelta, ProviderTextCompleted])
+def test_provider_text_rejects_terminal_controls(
+    code_point: int,
+    event_type: type[ProviderTextDelta] | type[ProviderTextCompleted],
+) -> None:
+    if code_point in {0x09, 0x0A}:
+        assert event_type(f"safe{chr(code_point)}layout").text == f"safe{chr(code_point)}layout"
+        return
+
+    with pytest.raises(ValueError, match="unsupported terminal controls"):
+        event_type(f"unsafe{chr(code_point)}text")
+
+
+@pytest.mark.parametrize("event_type", [ProviderTextDelta, ProviderTextCompleted])
+def test_provider_text_rejects_lone_surrogates(
+    event_type: type[ProviderTextDelta] | type[ProviderTextCompleted],
+) -> None:
+    with pytest.raises(ValueError, match="valid UTF-8"):
+        event_type("unsafe\ud800text")
+
+
 def test_tool_arguments_preserve_malformed_serialized_input_without_parsing() -> None:
     malformed = '{"path": "README.md"'
 

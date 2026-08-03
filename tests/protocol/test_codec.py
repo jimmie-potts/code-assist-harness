@@ -158,6 +158,20 @@ def test_unknown_type_is_distinct_from_an_invalid_known_payload() -> None:
     )
 
 
+def test_escaped_lone_surrogate_task_is_an_invalid_payload() -> None:
+    line = (
+        b'{"protocol_version":1,"type":"session.start","command_id":"cmd_codec-1",'
+        b'"timestamp":"2026-07-16T12:34:56.789Z","payload":{"task":"unsafe\\ud800text"}}'
+    )
+
+    failure = _assert_failure(
+        parse_command_line(line),
+        ProtocolParseErrorCode.INVALID_PAYLOAD,
+    )
+
+    assert "unsafe" not in failure.message
+
+
 def test_missing_known_envelope_field_is_not_misreported_as_payload_failure() -> None:
     value = _command()
     del value["command_id"]
@@ -241,6 +255,13 @@ def test_failure_messages_reject_terminal_controls_before_entering_trusted_state
         "runtime.error",
         {"code": "unsafe_error", "message": "unsafe\x1b[31m", "recoverable": False},
     )
+
+    _assert_failure(parse_event_line(_json_line(value)), ProtocolParseErrorCode.INVALID_PAYLOAD)
+
+
+@pytest.mark.parametrize("event_type", ["assistant.delta", "assistant.completed"])
+def test_assistant_text_controls_are_invalid_payloads(event_type: str) -> None:
+    value = _session_event(event_type, {"text": "unsafe\x1b]52;c;clipboard\x07"})
 
     _assert_failure(parse_event_line(_json_line(value)), ProtocolParseErrorCode.INVALID_PAYLOAD)
 

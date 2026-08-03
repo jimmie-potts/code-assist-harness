@@ -3,9 +3,9 @@
 > Status: CAH-006 implements protocol version 1 readiness, deterministic mocked streaming, and
 > cooperative session cancellation across the real Node-to-`uv`-to-Python boundary. CAH-009
 > documents that execution with normalized message tapes. CAH-010 derives equivalent lifecycle
-> state from validated v1 events. CAH-021 and CAH-022 reuse that wire contract for the separately
-> injected provider turn and its hard-limit failures; the launched `main()` path remains `MockSession`.
-> CAH-023 is the next unit and will add the first live adapter without changing that ownership split.
+> state from validated v1 events. CAH-021 and CAH-022 reuse that wire contract for the provider turn
+> and its hard-limit failures. CAH-023 adds explicit OpenAI composition and the first live adapter
+> without changing protocol v1; launch still defaults to `MockSession`.
 
 The Ink TUI and Python harness communicate through a small, versioned NDJSON protocol. The
 protocol is deliberately simpler than a general RPC system: one local parent process owns the
@@ -36,7 +36,8 @@ CAH-003 launches one child with this shell-free argument array:
 PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   --python VENV_PYTHON
-  -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
+  -- python -E -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
+     --workspace CANONICAL_WORKSPACE
 ```
 
 Node supplies each displayed token separately with `shell: false` and configures stdin, stdout, and
@@ -45,11 +46,15 @@ rejects a path under `/mnt` or a name ending in `.exe`. It also requires
 `REPOSITORY_ROOT/.venv/pyvenv.cfg` plus executable `VENV_PYTHON` at `.venv/bin/python`; failure stops
 before `uv` can create or change the project environment. `REPOSITORY_ROOT` identifies the harness
 project for `uv`, while `--python VENV_PYTHON` fixes its prepared interpreter. The separately
-resolved `CANONICAL_WORKSPACE` identifies the one future target repository. The launch directory is
+resolved `CANONICAL_WORKSPACE` identifies the one future target repository. `PROVIDER` defaults to
+`mock`; `openai` requires `EXACT_MODEL` to be `gpt-5.6-luna`. TypeScript validates this
+pair for early feedback and Python validates it again before SDK import. Provider/model selection is
+process configuration and never enters protocol stdin. The launch directory is
 the default workspace, and `--workspace PATH` selects an override relative to that launch directory
 before both Node and Python canonicalize and validate it. The child environment removes
-`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and every `UV_*` variable so ambient selectors cannot
-bypass the preflight or redirect the requested harness module.
+`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `SSLKEYLOGFILE`, and every `UV_*` variable so ambient
+selectors cannot bypass the preflight, redirect the requested harness module, or export TLS session
+secrets. The argument array starts Python with `-E` so any remaining `PYTHON*` variables are ignored.
 
 `src/code_assist_harness/runtime.py` feeds stdin bytes to `CommandLineReader`, validates commands,
 and emits only models serialized by `OrderedEventWriter`. `tui/src/runtime-supervisor.ts` feeds
@@ -124,7 +129,9 @@ Command and correlation IDs match `cmd_[A-Za-z0-9_-]{1,64}`. Session IDs match
 `ses_[A-Za-z0-9_-]{1,64}`. Sequence values start at 1 and cannot exceed JavaScript's largest safe
 integer, `9007199254740991`, so Python and TypeScript preserve the same value. Error codes use
 `[a-z][a-z0-9_.-]{0,63}`; visible error messages are 1–1024 characters and reject C0/C1 terminal
-controls. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the terminating LF.
+controls. Assistant text is non-empty valid UTF-8, preserves TAB and LF for layout, and rejects every
+other C0/C1 control. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the
+terminating LF.
 
 ## Version 1 message set
 
@@ -133,7 +140,7 @@ All objects are strict: undeclared envelope or payload fields are invalid.
 | Command | Payload | Implemented behavior through CAH-006 |
 | --- | --- | --- |
 | `runtime.initialize` | `workspace: non-empty string` | Compare with the supervised canonical workspace and emit readiness or a terminal initialization error. |
-| `session.start` | `task: non-empty string` | After readiness, start the deterministic mock when trimmed task text is non-empty and no session is active. |
+| `session.start` | `task: non-empty Unicode-scalar string` | After readiness, start the selected session when trimmed task text is non-empty and no session is active. |
 | `session.cancel` | `session_id: ses_…` | Request cooperative cancellation for the matching active mock; repeated or recent-terminal requests are harmless. |
 | `runtime.shutdown` | Empty object | End cleanly; an accepted mock session is drained before exit. |
 
@@ -142,8 +149,8 @@ All objects are strict: undeclared envelope or payload fields are invalid.
 | `runtime.ready` | Runtime | `workspace: non-empty string` |
 | `runtime.error` | Runtime | `code`, `message`, and `recoverable` |
 | `session.started` | Session | Empty object |
-| `assistant.delta` | Session | `text: non-empty string` |
-| `assistant.completed` | Session | `text: non-empty string` |
+| `assistant.delta` | Session | `text: non-empty terminal-safe string; TAB/LF allowed` |
+| `assistant.completed` | Session | `text: non-empty terminal-safe string; TAB/LF allowed` |
 | `session.completed` | Session | Empty object |
 | `session.cancelled` | Session | Empty object |
 | `session.failed` | Session | `code` and `message` |
@@ -171,7 +178,9 @@ contract drift becomes a demonstrated maintenance problem.
 An unsupported version is rejected before interpreting its version-specific fields. Malformed JSON,
 numeric overflow, an invalid envelope, an unknown command type, or an invalid known payload becomes
 a safe `runtime.error`; the Python reader continues at the next physical line. The error never
-copies the raw line or validator internals. After readiness, Python also returns recoverable
+copies the raw line or validator internals. Although a JSON escape can spell a lone surrogate, both
+wire schemas reject it from `session.start.task` before the TUI writes the command or Python creates
+a session; only Unicode scalar values can become provider input. After readiness, Python also returns recoverable
 `invalid_task` for a whitespace-only task and recoverable `session_active` for an overlapping task,
 both correlated to the rejected command. The Ink submission path blocks these two cases locally,
 so those runtime errors protect direct or future protocol callers rather than define normal UI
@@ -187,13 +196,16 @@ and becomes a sanitized visible warning. CAH-011 uses this existing envelope for
 transcript, and does not alter an active or terminal session outcome. A nonrecoverable runtime error,
 malformed message, or invalid session tape still fails closed.
 
-The injected provider path also uses that recoverable envelope for `provider_cleanup_failed` when a
+The provider-backed path also uses that recoverable envelope for `provider_cleanup_failed` when a
 cleanup barrier or subsequent local read reaping raises or exceeds its local grace. Provider cleanup
 has one shared loop-owned task per session; a deadline watcher may start it in cancellation mode and
 the finalizer joins that same task rather than invoking cleanup concurrently. Every `cancel()` or
 `wait_closed()` await is supervised by a fixed five-second grace. Cleanup completion wins an exact
-cleanup/grace tie; otherwise the local cleanup awaitable is cancelled and reaped. This requires the
-provider to propagate task cancellation and does not claim remote cleanup succeeded.
+cleanup/grace tie. Otherwise the local barrier awaitable is cancelled and reaped, then the required
+`ProviderOperation.force_cancel_cleanup()` hook cancels and awaits the provider's actual local cleanup
+and SDK tasks without shielding. Returning from that hook means no provider-owned local task remains;
+it does not claim remote cleanup succeeded. This requires the provider to propagate task
+cancellation.
 
 The fixed, payload-free warning is correlated to the originating `session.start`, emitted at most
 once after the cleanup attempt, and precedes any already-selected session terminal. If runtime
@@ -211,6 +223,15 @@ while an already-admitted publication is blocked, but that ordered, non-interlea
 transaction completes its wire/reducer/observer work before the latched deadline selects the
 terminal. An ordinary later failure does not roll back an earlier accepted view. At an exact provider
 event/deadline tie, the deadline wins and the observation is not published.
+
+CAH-023 maps OpenAI text, normalized failure, and optional usage observations into these existing
+events and transcript evidence. Provider-domain values reject terminal state-changing text controls,
+and both wire validators mirror that rule before an assistant event enters trusted state. Provider
+configuration, SDK lifecycle/item events, stream/client cleanup, credentials, and raw responses never
+become protocol messages. Adapter failures therefore reuse the existing bounded `session.failed` and
+`runtime.error` shapes; the stricter payload validation preserves protocol version 1 and is locked by
+a shared invalid fixture. The separate runtime-configuration fixture locks TypeScript/Python provider
+and model constants rather than extending the wire protocol.
 
 Transcript compatibility is a separate local-storage contract, not an NDJSON protocol revision. The
 writer now emits transcript version 3, replay accepts internally consistent versions 1, 2, and 3, and

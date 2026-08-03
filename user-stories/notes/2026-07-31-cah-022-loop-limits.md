@@ -32,8 +32,10 @@ network-adapter unit.
   cancellation may begin; no rollback or local-sink latency bound is claimed.
 - Provider cleanup has one loop-owned task. The deadline watcher may create it and the finalizer
   joins it. Cleanup completion wins an exact cleanup/grace tie; otherwise the five-second injected
-  grace cancels and reaps a cancellation-responsive local awaitable. A failure leaves provider
-  cleanup unconfirmed and emits only the stable payload-free diagnostic.
+  grace cancels and reaps the cancellation-responsive local barrier. The required provider
+  `force_cancel_cleanup()` hook then cancels and awaits every provider-owned local task without
+  shielding. Failure still leaves remote cleanup unconfirmed and emits only the stable payload-free
+  diagnostic.
 - Limit failures, provider completion/failure, user cancellation, and teardown retain CAH-021's
   single terminal-selection and finalization ownership. The four stable limit codes and bounded
   messages never include configured values or provider content.
@@ -69,7 +71,9 @@ preselected teardown, or a completed session can leave local work behind.
 
 Deadline cancellation and normal finalization must never call `operation.cancel()` concurrently.
 Both paths obtain the same shared cleanup task. Cleanup uses its own grace because provider work has
-already exceeded or completed its budget; the grace is not a fifth configurable work allowance.
+already exceeded or completed its budget; the grace is not a fifth configurable work allowance. A
+later contract correction added authoritative force-reap after grace expiry so the session cannot
+return while a shielded adapter cleanup owner remains active locally.
 
 Tool observations differ from admitted-work counters. Model-turn and output counts never exceed
 their maxima. The rejecting tool request is itself evidence, so `tool_calls_observed` is exactly

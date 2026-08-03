@@ -5,7 +5,7 @@ A user story is the delivery contract; a lesson is the learning companion that e
 concepts, architecture, design choices, practical failure modes, and how the same problem is often
 handled in a production organization.
 
-The first lesson set maps one-to-one to the 15 implementation-ready stories. Outcome-level epics do
+The lesson set maps one-to-one to the 16 implementation-ready stories. Outcome-level epics do
 not receive lesson files until they are refined into a story with acceptance criteria. This keeps a
 lesson attached to work that can actually be built and verified.
 
@@ -28,36 +28,35 @@ scale, risk, regulations, existing platform capabilities, operational maturity, 
 ownership. Prefer an official product or project reference when naming a tool, and explain the
 capability it represents so the lesson remains useful if the vendor changes.
 
-CAH-007 and every unit completed going forward also link a visual PowerPoint companion under
-`assets/`; this policy is prospective for units that were already Done. Treat each new deck as tested
-learning material: render and inspect every slide, run the overflow check, and keep its status and
-evidence aligned with the written lesson. Tasteful humor and visual flair are welcome when they
-clarify or reinforce the concept; they must never weaken accuracy, legibility, or caveats.
+Retained visual PowerPoint companions through CAH-022 are frozen historical artifacts under
+`assets/`. They may diverge from later design corrections and are not authoritative. Starting with
+CAH-023, the Markdown lesson and its compact architecture diagram are the only lesson artifacts. Do
+not add or revise presentations unless the user explicitly reverses this freeze.
 
 ## Lesson sequence
 
-| Order | Unit | Lesson | Story status |
+| Order | Unit | Lesson | Lesson status |
 | ---: | --- | --- | --- |
-| 1 | CAH-001 | [Architecture decisions](cah-001-architecture-decisions.md) | Done |
-| 2 | CAH-008 | [Educational documentation standards](cah-008-documentation-standards.md) | Done |
-| 3 | CAH-002 | [Ink application shell](cah-002-ink-application-shell.md) | Done |
-| 4 | CAH-003 | [Python runtime supervision](cah-003-python-runtime-supervision.md) | Done |
-| 5 | CAH-004 | [Protocol version 1](cah-004-protocol-v1.md) | Done |
-| 6 | CAH-005 | [Mocked streaming session](cah-005-mocked-streaming-session.md) | Done |
-| 7 | CAH-006 | [Session cancellation](cah-006-session-cancellation.md) | Done |
-| 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Done |
-| 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Done |
-| 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Done |
+| 1 | CAH-001 | [Architecture decisions](cah-001-architecture-decisions.md) | Verified against implementation |
+| 2 | CAH-008 | [Educational documentation standards](cah-008-documentation-standards.md) | Verified against implementation |
+| 3 | CAH-002 | [Ink application shell](cah-002-ink-application-shell.md) | Verified against implementation |
+| 4 | CAH-003 | [Python runtime supervision](cah-003-python-runtime-supervision.md) | Verified against implementation |
+| 5 | CAH-004 | [Protocol version 1](cah-004-protocol-v1.md) | Verified against implementation |
+| 6 | CAH-005 | [Mocked streaming session](cah-005-mocked-streaming-session.md) | Verified against implementation |
+| 7 | CAH-006 | [Session cancellation](cah-006-session-cancellation.md) | Verified against implementation |
+| 8 | CAH-009 | [Walking-skeleton guide](cah-009-walking-skeleton-guide.md) | Verified against implementation |
+| 9 | CAH-007 | [Repository-wide checks](cah-007-repository-checks.md) | Verified against implementation |
+| 10 | CAH-010 | [Session state reducer](cah-010-session-state-reducer.md) | Verified against implementation |
 | 11 | CAH-011 | [Append-only transcript](cah-011-append-only-transcript.md) | Verified against implementation |
 | 12 | CAH-020 | [Provider interface and fake](cah-020-provider-interface-and-fake.md) | Verified against implementation |
 | 13 | CAH-021 | [One provider-neutral turn](cah-021-one-model-turn.md) | Verified against implementation |
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Verified against implementation |
-| 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Planned |
+| 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Verified against implementation |
+| 16 | CAH-024 | [Workspace boundary](cah-024-workspace-boundary.md) | Planned |
 
-The CAH-022 lesson includes a validated
-[loop-limits visual companion](assets/cah-022-loop-limits.pptx). CAH-023 is the next
-dependency-ready learning unit; the launched application still uses `MockSession` until that adapter
-and its composition-root activation are implemented.
+CAH-023 completes the M1 learning sequence by locating the first real-provider adapter behind the
+harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024 is
+the planned first M2 boundary unit. Both use Markdown-only lessons with compact text diagrams.
 
 ## Required lesson structure
 
@@ -80,8 +79,8 @@ Every unit lesson contains:
 11. Practical exercises that work without a live model or network unless explicitly opt-in.
 12. A concise takeaway list and a lesson-local glossary.
 13. Further reading that links the story, local architecture, and named production references.
-14. For CAH-007 and units completed going forward, a linked visual PPTX that has passed
-    slide-by-slide and overflow review.
+14. Retain any linked historical PPTX through CAH-022 without revising it. Starting with CAH-023, do
+    not add a presentation; the Markdown architecture diagram carries placement.
 
 Use [the lesson template](lesson-template.md) when a new implementation-ready story is added.
 

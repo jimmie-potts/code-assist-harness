@@ -28,7 +28,7 @@ harness library.
 | Done | Every acceptance criterion is met, validation passes, and required documentation is current. |
 
 CAH-001, CAH-008, CAH-002, CAH-003, CAH-004, CAH-005, CAH-006, CAH-009, CAH-007, CAH-010,
-CAH-011, CAH-020, CAH-021, and CAH-022 are
+CAH-011, CAH-020, CAH-021, CAH-022, and CAH-023 are
 **Done**: the architecture baseline, documentation standard, Ink shell, supervised Python process,
 protocol version 1 boundary, deterministic mocked-session slice, authoritative cancellation
 lifecycle, fixture-backed walking-skeleton guide, offline repository/CI gate, and equivalent
@@ -38,10 +38,12 @@ CAH-020 exposes provider-neutral request and stream contracts plus a strict prog
 CAH-021 adds the first injected fake-backed turn, strict stream grammar, terminal and cleanup
 serialization, and bounded usage evidence. CAH-022 adds four validated hard limits, fresh per-session
 tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop evidence with
-v1/v2/v3 replay. M0 is complete and M1 is in progress. CAH-023 is the next dependency-ready unit and
-will introduce and activate the OpenAI Responses adapter. The launched `main()` path and TUI still
-use `MockSession`; workspace reads, tool execution, policy, and broader multi-turn loop behavior are
-also unimplemented.
+v1/v2/v3 replay. CAH-023 adds the strict OpenAI Responses adapter plus explicit cross-language
+provider/model configuration while preserving the mock default. M0 and M1 are complete. Workspace
+reads, tool execution, policy, and broader multi-turn loop behavior remain unimplemented. CAH-024 is
+the first implementation-ready M2 unit and remains **Planned**: it will introduce an immutable
+Python workspace boundary for contained, workspace-relative path resolution without yet reading
+files or exposing a model tool.
 
 ## Dependency-ordered implementation sequence
 
@@ -61,7 +63,8 @@ also unimplemented.
 | 12 | [CAH-020: Define the provider interface and fake provider](cah-020-provider-interface-and-fake.md) | [Provider interface and fake](../docs/lessons/cah-020-provider-interface-and-fake.md) | M1 | Done | CAH-010, CAH-011 |
 | 13 | [CAH-021: Run one provider-neutral turn](cah-021-complete-one-model-turn.md) | [One provider-neutral turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Done | CAH-020 |
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Done | CAH-021 |
-| 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Planned | CAH-022 |
+| 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Done | CAH-022 |
+| 16 | [CAH-024: Establish the workspace boundary](cah-024-establish-workspace-boundary.md) | [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md) | M2 | Planned | CAH-023 |
 
 See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
 
@@ -117,3 +120,12 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
   budget, deadline and cleanup race semantics, stable failure codes, transcript-v3 evidence,
   deterministic validation, and handoff to CAH-023. The linked
   [visual lesson](../docs/lessons/assets/cah-022-loop-limits.pptx) accompanies the written lesson.
+- [2026-08-01 CAH-023 OpenAI Responses adapter](notes/2026-08-01-cah-023-openai-responses-adapter.md)
+  records the configuration gate, strict event automaton, cleanup ownership, deterministic and
+  optional-live validation boundary, and Markdown learning evidence.
+- [2026-08-02 CAH-023 adversarial-review hardening](notes/2026-08-02-cah-023-adversarial-review-hardening.md)
+  records the credential, environment, stream-validation, and cleanup fixes plus the deliberately
+  unchanged model and refusal boundaries.
+- [2026-08-02 CAH-024 workspace-boundary planning](notes/2026-08-02-cah-024-workspace-boundary-planning.md)
+  records the E3 story split, the decisions already fixed by the architecture, and the boundary
+  between planned path containment and later filesystem access.

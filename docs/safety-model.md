@@ -1,8 +1,10 @@
 # Safety Model
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
-> injected provider-session path; the launched `main()` path remains `MockSession`, and this is not a
-> sandbox or a claim that untrusted code can be executed safely.
+> provider-session path, and CAH-023 makes that path available only through explicit, validated OpenAI
+> selection. CAH-024 plans a Python workspace path boundary but has not implemented it. The launch
+> still defaults to `MockSession`; this is not a sandbox or a claim that untrusted code can be
+> executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
 repository content are untrusted inputs. Safety therefore comes from defense in depth: bounded
@@ -58,14 +60,17 @@ safe.
 ## Workspace and path safety
 
 The runtime will receive its workspace explicitly; the launch directory is only the default
-selected by the CLI. All model-facing paths are workspace-relative. Before access, the harness
-resolves and normalizes the requested path, checks the closest existing ancestor, and rejects
-traversal or symlink resolution outside the workspace.
+selected by the CLI. All model-facing paths are workspace-relative. CAH-024 will turn that existing
+canonical root into an immutable Python boundary, resolve one relative target against a filesystem
+snapshot, and reject absolute paths, traversal, or symlink resolution outside the workspace. It will
+report an accepted target with a workspace-relative label and will not itself read the target.
 
-Path checks must be repeated at execution time because files and symlinks can change after a
-proposal. Edit operations also use content-hash or exact-content preconditions. A stale proposal
-returns a conflict and never overwrites newer content. Tests must cover `..`, absolute paths,
-symlinked files and directories, missing descendants under symlinks, and replacement races.
+That planned snapshot check is necessary but not execution-time authorization. Path checks must be
+repeated when a later tool accesses a target because files and symlinks can change after validation
+or a proposal. Edit operations also use content-hash or exact-content preconditions. A stale
+proposal returns a conflict and never overwrites newer content. Later execution tests must cover
+missing descendants under symlinks and replacement races in addition to the CAH-024 containment
+matrix.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -105,7 +110,7 @@ Cancellation will be checked before provider calls, tool execution, edit applica
 loop step. Since external work may finish concurrently, the session terminal-state guard ensures
 exactly one completed, cancelled, or failed event wins.
 
-CAH-022 implements four hard limits for injected provider-backed sessions: model-turn admission,
+CAH-022 implements four hard limits for provider-backed sessions: model-turn admission,
 provider-work time, cumulative accepted UTF-8 output, and observed provider tool calls. The immutable
 configuration is validated before use, while every allocated session owns a fresh tracker. Admission
 is charged before `Provider.start()`, output before publication, and tool requests before parsing or
@@ -121,11 +126,36 @@ ordinary later failure does not roll back an earlier accepted view. The deadline
 sink-latency bound.
 
 Every provider cleanup await uses the session's one shared supervised cleanup task and a fixed
-five-second local grace. A completed cleanup wins an exact cleanup/grace tie; otherwise the local
-awaitable is cancelled and reaped and `provider_cleanup_failed` is emitted at most once without
-replacing the selected terminal outcome. This requires provider awaitables to propagate task
-cancellation and does not prove remote cleanup succeeded. File-size, search-result,
+five-second local grace. A completed cleanup wins an exact cleanup/grace tie. Otherwise the local
+barrier task is cancelled and reaped, and the required provider force-reap hook cancels and awaits
+every provider-owned local cleanup or SDK task without shielding. `provider_cleanup_failed` is emitted
+at most once without replacing the selected terminal outcome. No local provider task remains after
+force-reap, but resource release stays unconfirmed: this requires cancellation-responsive provider
+code and does not prove remote cleanup succeeded. File-size, search-result,
 command-duration, whole-session, and later tool-execution limits remain future controls.
+
+CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
+validate the explicit `openai` provider plus exact `gpt-5.6-luna` model, while Python
+remains authoritative before SDK import. `OPENAI_API_KEY` is inspected only after that selection;
+every other `OPENAI_*` setting is rejected so ambient routing, headers, or logging cannot silently
+alter the request. Both the supervised child and canonical `scripts/check` gate remove
+`SSLKEYLOGFILE`; the child starts Python with `-E`, and direct adapter construction independently
+rejects that TLS secret-export selector before client creation. The adapter
+fixes the official endpoint, disables environment proxy trust, redirects, SDK retries, and background
+mode, and sets `store=false` for the request. Its closed failure table never exposes SDK exceptions,
+bodies, headers, request IDs, model candidates, or credentials. Assistant text preserves TAB/LF
+layout but rejects every other C0/C1 control at the provider-domain boundary; the Python and
+TypeScript wire validators repeat that check before text can enter terminal state.
+
+Each OpenAI operation lazily owns one client and stream. Natural termination and cancellation share
+one shielded adapter cleanup task that attempts both closes, beneath the harness's five-second local
+cleanup grace. A bounded cleanup failure records that release is unconfirmed; it does not claim remote
+cleanup succeeded or replace the selected session outcome. An independently raised `CancelledError`
+from a close coroutine is recorded as that bounded failure while both closes are still attempted;
+cancellation of the cleanup owner itself remains control flow and stops the remaining sequential
+closes. Ordinary joiners shield this owner, while grace expiry causes the session to cancel and reap it
+through the required authoritative hook. Default validation uses SDK fakes with network denied, and
+the live smoke requires explicit flags, the exact model, and a credential.
 
 ## Transcripts and privacy
 
@@ -157,7 +187,8 @@ and recognized credential syntax are redacted before a lifecycle input is persis
 safety net, so producers should avoid emitting secrets in the first place.
 
 The CLI implements `--no-transcript`, which disables local JSONL and summary files without changing
-the event tape. It does not govern future provider-side storage. A first transcript failure becomes
+the event tape. It does not govern the adapter's separate `store=false` request setting or broader
+provider-account retention controls. A first transcript failure becomes
 one sanitized recoverable TUI warning, disables later persistence attempts for that process, and
 cannot silently corrupt or rewrite session state.
 
@@ -179,6 +210,7 @@ At minimum, safety tests cover:
 - Rejected approval producing no side effect.
 - Command timeout and cancellation terminating child processes.
 - Secret-like values omitted or redacted from events, diagnostics, fixtures, and transcripts.
+- Provider/model/environment/key rejection before SDK import, with fixed non-echoing diagnostics.
 
 Passing these tests demonstrates the specified controls; it does not turn restricted host execution
 into secure execution of arbitrary untrusted code.
@@ -195,7 +227,15 @@ into secure execution of arbitrary untrusted code.
 > As a user, I want each decision tied to the command or edit I reviewed so that stale approvals
 > cannot authorize changed work.
 
-### Future story — Protect the workspace boundary
+### Planned CAH-024 — Establish snapshot workspace containment
+
+> As a user, I want every repository target interpreted relative to one canonical workspace so that
+> a context operation cannot begin with an outside-workspace path.
+
+CAH-024 introduces the immutable Python boundary and deterministic containment tests. It does not
+perform filesystem access or eliminate time-of-check-to-time-of-use races.
+
+### Future story — Recheck workspace targets at execution
 
 > As a user, I want traversal, symlinks, and stale edit targets checked at execution time so that
 > tools cannot escape or overwrite newer content.

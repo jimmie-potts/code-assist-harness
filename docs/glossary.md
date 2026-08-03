@@ -34,8 +34,10 @@ closes that operation's stream but does not itself select or emit the session te
 The fixed local time allowed for one provider `cancel()` or `wait_closed()` awaitable to settle.
 CAH-022 supervises the one shared cleanup task per provider session with a non-configurable
 five-second monotonic grace. A cleanup task already complete when the grace wakes wins the tie;
-otherwise its local awaitable is cancelled and reaped and cleanup remains explicitly unconfirmed.
-This bound requires cancellation-responsive provider code and is not proof of remote cleanup.
+otherwise its local barrier awaitable is cancelled and reaped and the required
+`force_cancel_cleanup()` hook cancels and awaits all provider-owned local tasks without shielding.
+Cleanup remains explicitly unconfirmed: local force-reaping is not proof of remote resource release
+and requires cancellation-responsive provider code.
 
 ## Cancellation acknowledgement
 
@@ -162,8 +164,9 @@ glossary. A lesson is educational context, not evidence that planned behavior ha
 One provider request and its complete streamed response. A model turn may produce assistant text,
 one or more tool-call requests, usage information, or a provider failure, and may end early through
 operation cancellation. Cancellation closes the provider stream rather than appearing as a
-provider stream event. CAH-021 implements exactly one turn for an injected provider; another turn,
-tool continuation, and launched-provider activation remain planned.
+provider stream event. CAH-021 implements exactly one provider-neutral turn, and CAH-023 runs that
+same turn when the user explicitly selects OpenAI and the exact supported model; the default remains
+mock. Another turn, tool continuation, and automatic multi-turn behavior remain planned.
 
 ## NDJSON
 
@@ -197,17 +200,20 @@ rejected explicitly instead of being interpreted optimistically.
 ## Provider
 
 An adapter that accepts harness-level model requests and emits provider-neutral stream events.
-Provider SDK objects and raw responses remain inside the adapter. The implemented deterministic
-fake uses the same port without an SDK or network access; CAH-023 will add the first real adapter for
-one exact text-only foreground OpenAI Responses stream after hard limits. The launched M0
-`MockSession` is a runtime fixture, not a provider consumer; tests and later composition roots can
-inject a provider into `run_runtime` for CAH-021's turn and CAH-022's limits.
+Provider SDK objects and raw responses remain inside the adapter. The deterministic fake uses the
+same port without an SDK or network access. The implemented OpenAI adapter accepts one exact
+text-only foreground Responses stream after hard limits; it is selected only by `--provider openai`
+plus the allowlisted model. The default `MockSession` is a runtime fixture, not a provider consumer.
 
 ## Provider operation
 
 One single-consumer asynchronous response stream returned by a provider. Its `cancel()` method is
 idempotent and waits for cleanup, while `wait_closed()` observes cleanup without requesting it.
-After either natural closure or awaited cancellation, no later provider event may be emitted.
+After either natural closure or awaited cancellation, no later provider event may be emitted. The
+OpenAI operation lazily owns one SDK client and stream and routes natural termination and cancellation
+through one shielded adapter cleanup task. The required session-only `force_cancel_cleanup()` method
+bypasses that shield after cleanup grace expires, cancels and reaps all operation-owned local tasks,
+and closes the stream logically without claiming remote resources were released.
 
 ## Provider request
 
@@ -228,14 +234,14 @@ or the shared lifecycle reducers.
 
 ## Provider session
 
-The harness-owned orchestrator for one injected provider-neutral turn. `ProviderSession` builds one
+The harness-owned orchestrator for one provider-neutral turn. `ProviderSession` builds one
 request, owns one fresh CAH-022 limit tracker, starts and claims at most one operation, validates its
 strict stream grammar, and admits each lifecycle publication as an ordered, non-interleaved,
 cancellation-shielded wire/reducer/observer transaction. It selects one outcome and joins the
 session's one supervised cleanup task. This protects admission against competing cancellation,
 deadline, or terminal selection; an ordinary later sink or observer failure does not roll back an
 earlier accepted view. The
-session is distinct from the launched `MockSession`, provider adapter, multi-turn loop, and TUI
+session is distinct from the default `MockSession`, provider adapter, multi-turn loop, and TUI
 projection.
 
 ## Reducer
@@ -254,9 +260,10 @@ filesystem, or subprocess effects.
 
 The Python process entry point that reads protocol commands, supervises sessions and active work,
 writes ordered events, and coordinates shutdown. It hosts the harness core but is not itself the
-terminal interface. `run_runtime` supports injected-provider composition for deterministic tests;
-that seam accepts the immutable limits configuration and injectable monotonic clock pair. `main()`
-currently injects no provider and therefore launches `MockSession`.
+terminal interface. `run_runtime` supports provider composition and accepts the immutable limits
+configuration plus injectable monotonic clock pair. `main()` defaults to `MockSession`; explicit
+OpenAI/model selection validates configuration before lazily composing the concrete adapter and
+supplying default limits.
 
 ## Sequence number
 
@@ -331,6 +338,13 @@ uses it.
 The single canonical directory tree the session may inspect or modify. It defaults to the launch
 directory and can be set with `--workspace PATH`. Path validation, including symlink resolution,
 must prevent escape from this boundary.
+
+## Workspace boundary
+
+The planned CAH-024 immutable Python value that owns one canonical workspace root and resolves
+model-facing relative targets into contained paths with workspace-relative labels. It describes a
+validated filesystem snapshot; later read, edit, or command code must recheck containment when it
+performs access because validation alone does not prevent filesystem replacement races.
 
 ## Workspace configuration
 

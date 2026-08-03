@@ -16,6 +16,7 @@ import {PassThrough} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
 
 import {MAX_PROTOCOL_LINE_BYTES} from '../src/protocol.js';
+import {OPENAI_TEXT_STREAM_MODEL} from '../src/provider-configuration.js';
 import {
   buildRuntimeLaunchRequest,
   prepareRuntimeLaunch,
@@ -232,8 +233,11 @@ describe('PythonRuntimeSupervisor', () => {
         '/repo/.venv/bin/python',
         '--',
         'python',
+        '-E',
         '-m',
         'code_assist_harness.runtime',
+        '--provider',
+        'mock',
         '--workspace',
         '/workspace',
       ],
@@ -245,6 +249,41 @@ describe('PythonRuntimeSupervisor', () => {
         env: {},
       },
     });
+  });
+
+  it('forwards an explicit OpenAI model as separate shell-free Python arguments', () => {
+    const request = buildRuntimeLaunchRequest(
+      '/repo',
+      '/workspace',
+      'uv',
+      {},
+      true,
+      'openai',
+      OPENAI_TEXT_STREAM_MODEL,
+    );
+
+    expect(request.arguments.slice(-6)).toEqual([
+      '--provider',
+      'openai',
+      '--model',
+      OPENAI_TEXT_STREAM_MODEL,
+      '--workspace',
+      '/workspace',
+    ]);
+    expect(request.arguments.filter((argument) => argument === '--provider')).toHaveLength(1);
+    expect(request.arguments.filter((argument) => argument === '--model')).toHaveLength(1);
+    expect(request.options.shell).toBe(false);
+  });
+
+  it('rejects an invalid direct supervisor provider/model pair before spawn', () => {
+    const model = 'model-value-that-must-not-be-echoed';
+
+    expect(() =>
+      buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {}, true, 'mock', model),
+    ).toThrow('--model is supported only with --provider openai.');
+    const message = launchConfigurationErrorMessage('openai', model);
+    expect(message).toBe('Unsupported OpenAI model. Use gpt-5.6-luna.');
+    expect(message).not.toContain(model);
   });
 
   it('forwards transcript opt-out as one separate shell-free Python argument', () => {
@@ -263,11 +302,19 @@ describe('PythonRuntimeSupervisor', () => {
       UV_PROJECT_ENVIRONMENT: '/tmp/other-environment',
       UV_ISOLATED: '1',
       VIRTUAL_ENV: '/tmp/active-environment',
+      SSLKEYLOGFILE: '/tmp/tls-session-secrets',
       CUSTOM_SETTING: 'kept',
+      OPENAI_API_KEY: 'kept-for-authoritative-python-validation',
+      OPENAI_BASE_URL: 'kept-so-python-can-reject-it',
     };
     const request = buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', environment);
 
-    expect(request.options.env).toEqual({PATH: '/usr/bin', CUSTOM_SETTING: 'kept'});
+    expect(request.options.env).toEqual({
+      PATH: '/usr/bin',
+      CUSTOM_SETTING: 'kept',
+      OPENAI_API_KEY: 'kept-for-authoritative-python-validation',
+      OPENAI_BASE_URL: 'kept-so-python-can-reject-it',
+    });
     expect(environment).toEqual({
       PATH: '/usr/bin',
       PYTHONHOME: '',
@@ -275,7 +322,10 @@ describe('PythonRuntimeSupervisor', () => {
       UV_PROJECT_ENVIRONMENT: '/tmp/other-environment',
       UV_ISOLATED: '1',
       VIRTUAL_ENV: '/tmp/active-environment',
+      SSLKEYLOGFILE: '/tmp/tls-session-secrets',
       CUSTOM_SETTING: 'kept',
+      OPENAI_API_KEY: 'kept-for-authoritative-python-validation',
+      OPENAI_BASE_URL: 'kept-so-python-can-reject-it',
     });
   });
 
@@ -1093,6 +1143,41 @@ describe('PythonRuntimeSupervisor', () => {
     await closeOnInputEnd(child, supervisor);
   });
 
+  it('rejects invalid Unicode task text before publishing or writing and remains usable', async () => {
+    const child = new FakeChild();
+    const commandIds = [
+      INITIALIZATION_COMMAND_ID,
+      SESSION_COMMAND_ID,
+      SECOND_SESSION_COMMAND_ID,
+      SHUTDOWN_COMMAND_ID,
+    ];
+    const supervisor = createSupervisor(child, {
+      createCommandId: () => commandIds.shift() ?? 'cmd_unexpected',
+    });
+    const updates: string[] = [];
+    supervisor.subscribeToSessionUpdates((update) => {
+      updates.push(update.type);
+    });
+    await startReady(child, supervisor);
+    const write = vi.spyOn(child.stdin, 'write');
+
+    expect(() => supervisor.submitTask('unsafe\ud800task')).toThrow(
+      'could not be encoded for the Python runtime',
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    expect(supervisor.getState()).toEqual({status: 'running', workspace: WORKSPACE});
+
+    const acceptedLine = nextInputLine(child);
+    expect(supervisor.submitTask('Still usable.')).toBe(SECOND_SESSION_COMMAND_ID);
+    expect(await acceptedLine).toBe(
+      sessionStartCommandLine(SECOND_SESSION_COMMAND_ID, 'Still usable.'),
+    );
+    expect(updates).toEqual(['task.submitted']);
+
+    await closeOnInputEnd(child, supervisor);
+  });
+
   it('reports an actionable startup failure without entering running', async () => {
     const child = new FakeChild();
     const supervisor = createSupervisor(child);
@@ -1241,6 +1326,17 @@ describe('PythonRuntimeSupervisor', () => {
     await supervisor.stop();
   });
 });
+
+function launchConfigurationErrorMessage(provider: 'mock' | 'openai', model: string): string {
+  try {
+    buildRuntimeLaunchRequest('/repo', '/workspace', 'uv', {}, true, provider, model);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+  }
+  throw new Error('Expected runtime launch configuration to fail.');
+}
 
 function writeExecutable(path: string): void {
   writeFileSync(path, '#!/bin/sh\nexit 0\n', {mode: 0o755});

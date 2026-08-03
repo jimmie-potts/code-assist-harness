@@ -1,0 +1,218 @@
+#!/usr/bin/python3 -I
+"""Launch one command with a strictly admitted repository-local OpenAI key."""
+
+from __future__ import annotations
+
+import getpass
+import os
+import stat
+import sys
+import unicodedata
+from pathlib import Path
+
+API_KEY_NAME = "OPENAI_API_KEY"
+MAX_API_KEY_BYTES = 4096
+MAX_DEV_ENV_BYTES = 16_384
+FORMAT_ERROR = (
+    "dev.env must contain exactly one OPENAI_API_KEY assignment; "
+    "blank lines and comments are allowed."
+)
+LAUNCH_USAGE = "Usage: ./scripts/with-openai-dev-key COMMAND [ARGUMENT ...]"
+INIT_USAGE = "       ./scripts/with-openai-dev-key --init"
+
+
+class ConfigurationError(Exception):
+    """Bounded local-configuration failure whose message contains no file content."""
+
+
+def _read_dev_environment(path: Path) -> str:
+    """Read one validated regular file descriptor without following a final symlink."""
+    # O_NONBLOCK lets us reject a FIFO by descriptor type without waiting for a writer.
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        raise ConfigurationError(
+            "dev.env must be a readable, regular, non-symlink file at the repository root."
+        ) from None
+
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ConfigurationError(
+                "dev.env must be a readable, regular, non-symlink file at the repository root."
+            )
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise ConfigurationError(
+                "dev.env must have mode 0600. Run chmod 600 dev.env and retry."
+            )
+        with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            descriptor = -1
+            payload = stream.read(MAX_DEV_ENV_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    if len(payload) > MAX_DEV_ENV_BYTES:
+        raise ConfigurationError("dev.env is too large to be a local credential file.")
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ConfigurationError("dev.env must be valid UTF-8 text.") from None
+
+
+def _parse_api_key(contents: str) -> str:
+    """Parse one literal assignment and reject unsafe Unicode before child execution."""
+    api_key: str | None = None
+    for line in contents.split("\n"):
+        if line == "" or line.startswith("#"):
+            continue
+        if not line.startswith(f"{API_KEY_NAME}=") or api_key is not None:
+            raise ConfigurationError(FORMAT_ERROR)
+        api_key = line.removeprefix(f"{API_KEY_NAME}=")
+
+    if not api_key:
+        raise ConfigurationError(
+            "dev.env must contain exactly one non-empty OPENAI_API_KEY assignment."
+        )
+    return _validate_api_key(api_key)
+
+
+def _validate_api_key(api_key: str) -> str:
+    """Validate one secret without including any portion of it in a failure message."""
+    if not api_key:
+        raise ConfigurationError(
+            "dev.env must contain exactly one non-empty OPENAI_API_KEY assignment."
+        )
+    try:
+        encoded = api_key.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ConfigurationError(
+            "OPENAI_API_KEY in dev.env must be valid UTF-8 without surrogate code points."
+        ) from None
+    if len(encoded) > MAX_API_KEY_BYTES:
+        raise ConfigurationError("OPENAI_API_KEY in dev.env must not exceed 4096 UTF-8 bytes.")
+    unsafe_character = any(
+        character.isspace() or unicodedata.category(character).startswith("C")
+        for character in api_key
+    )
+    if unsafe_character:
+        raise ConfigurationError(
+            "OPENAI_API_KEY in dev.env must not contain whitespace or control characters."
+        )
+    return api_key
+
+
+def _unlink_created_file(path: Path, metadata: os.stat_result) -> None:
+    """Remove only the still-addressable inode created by the failed initialization."""
+    try:
+        current = path.stat(follow_symlinks=False)
+        if (current.st_dev, current.st_ino) == (metadata.st_dev, metadata.st_ino):
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _initialize_dev_environment(path: Path) -> None:
+    """Create an owner-only credential file, then prompt for and persist one validated key."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise ConfigurationError("dev.env already exists; refusing to replace it.") from None
+    except OSError:
+        raise ConfigurationError(
+            "dev.env could not be created safely at the repository root."
+        ) from None
+
+    try:
+        metadata = os.fstat(descriptor)
+    except OSError:
+        os.close(descriptor)
+        raise ConfigurationError(
+            "dev.env could not be created safely at the repository root."
+        ) from None
+    completed = False
+    try:
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ConfigurationError("dev.env could not be created safely at the repository root.")
+        try:
+            os.fchmod(descriptor, 0o600)
+        except OSError:
+            raise ConfigurationError("dev.env could not be restricted to mode 0600.") from None
+
+        try:
+            api_key = _validate_api_key(getpass.getpass("OpenAI API key: "))
+        except (EOFError, KeyboardInterrupt, OSError):
+            raise ConfigurationError(
+                "Credential entry was cancelled; no dev.env file was kept."
+            ) from None
+
+        payload = f"{API_KEY_NAME}={api_key}\n".encode()
+        try:
+            with os.fdopen(descriptor, "wb", closefd=True) as stream:
+                descriptor = -1
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError:
+            raise ConfigurationError("dev.env could not be written safely.") from None
+
+        try:
+            current = path.stat(follow_symlinks=False)
+        except OSError:
+            raise ConfigurationError(
+                "dev.env changed during initialization; no key was kept."
+            ) from None
+        if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise ConfigurationError("dev.env changed during initialization; no key was kept.")
+        if stat.S_IMODE(current.st_mode) != 0o600:
+            raise ConfigurationError("dev.env could not be restricted to mode 0600.")
+        completed = True
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if not completed:
+            _unlink_created_file(path, metadata)
+
+    print("Created repository-root dev.env with mode 0600.")
+
+
+def _reject_ambient_provider_environment() -> None:
+    """Reject ambient SDK or TLS key-log configuration without revealing any value."""
+    if "SSLKEYLOGFILE" in os.environ or any(name.startswith("OPENAI_") for name in os.environ):
+        raise ConfigurationError(
+            "OpenAI or TLS key-logging configuration is already set. Unset every OPENAI_* "
+            "variable and SSLKEYLOGFILE before using scripts/with-openai-dev-key."
+        )
+
+
+def main(arguments: list[str]) -> int:
+    """Validate local configuration, then replace this process with the selected command."""
+    repository_root = Path(__file__).resolve().parent.parent
+    if arguments == ["--init"]:
+        _initialize_dev_environment(repository_root / "dev.env")
+        return 0
+    if arguments and arguments[0] == "--init":
+        raise ConfigurationError(f"{LAUNCH_USAGE}\n{INIT_USAGE}")
+    if not arguments or not arguments[0]:
+        raise ConfigurationError(LAUNCH_USAGE)
+
+    _reject_ambient_provider_environment()
+    api_key = _parse_api_key(_read_dev_environment(repository_root / "dev.env"))
+    environment = os.environ.copy()
+    environment[API_KEY_NAME] = api_key
+    try:
+        os.execvpe(arguments[0], arguments, environment)
+    except (OSError, ValueError):
+        message = "Code Assist Harness could not start the selected command."
+        raise ConfigurationError(message) from None
+    raise AssertionError("os.execvpe returned unexpectedly")
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except ConfigurationError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1) from None

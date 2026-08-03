@@ -119,9 +119,10 @@ complete mocked session across it, and CAH-006 adds authoritative cancellation:
   `--frozen`, `--no-cache`, `--no-sync`, `--offline`, `--no-env-file`, `--no-progress`, and
   `--no-python-downloads`, selects the prepared interpreter with `--python VENV_PYTHON`, and follows
   with
-  `-- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`. Its child environment
-  copies the parent except for `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, and all `UV_*` variables;
-  the supported project, environment, and interpreter choices are supplied explicitly in argv;
+  `-- python -E -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE`. Its child environment
+  copies the parent except for `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `SSLKEYLOGFILE`, and all
+  `UV_*` variables; the supported project, environment, and interpreter choices are supplied
+  explicitly in argv, while `-E` makes Python ignore any remaining `PYTHON*` variables;
 - `src/code_assist_harness/runtime.py` validates that explicit workspace, owns one `asyncio` loop,
   parses bounded protocol commands, starts at most one `MockSession` task, routes a matching
   `session.cancel`, writes validated events to stdout, and drains accepted mock work before clean

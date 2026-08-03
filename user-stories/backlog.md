@@ -39,10 +39,12 @@ side-effect-free replay and local opt-out, and reports persistence loss without 
 source of truth. CAH-020 now supplies provider-neutral request and stream types plus a strict,
 network-free programmable fake. CAH-021 now connects that port to one provider-neutral, fake-backed
 turn through an injected runtime seam, with strict observation grammar and bounded usage evidence.
-CAH-022 now puts four validated hard limits, fresh per-session accounting, deterministic deadline and
-cleanup supervision, and transcript-v3 loop evidence around that turn. The launched runtime still
-selects `MockSession`; CAH-023 is the next dependency-ready unit and will add and activate the OpenAI
-Responses adapter.
+CAH-022 puts four validated hard limits, fresh per-session accounting, deterministic deadline and
+cleanup supervision, and transcript-v3 loop evidence around that turn. CAH-023 now activates one
+explicitly configured, text-only OpenAI Responses adapter behind that bounded provider port while
+keeping the mock as the default. M1 is complete. CAH-024 is now the first implementation-ready E3
+story: it plans an immutable Python workspace boundary while leaving repository discovery and reads
+to later single-responsibility units.
 
 ## Epic backlog
 
@@ -89,20 +91,25 @@ rather than lifecycle state. A version-3 mock tape may omit loop evidence.
 - Add the OpenAI Responses adapter only after the provider-neutral turn and hard limits pass.
 - Keep OpenAI SDK types and future LangChain adapters outside core domain types.
 
-Implementation-ready stories in this epic: CAH-020, CAH-021, CAH-022, and CAH-023. CAH-020 through
-CAH-022 are complete. CAH-023 is next after hard-limit enforcement. M1 is complete only after the
-explicitly configured Responses adapter is verified.
+Implementation-ready stories in this epic: CAH-020, CAH-021, CAH-022, and CAH-023. All four are
+complete. The harness now owns one bounded provider turn with deterministic fake and explicitly
+configured OpenAI paths; the SDK remains isolated behind the provider port.
 
 ### E3 - Repository context and read-only tools
 
 **Outcome:** The agent retrieves relevant repository information without loading the entire
 workspace.
 
-- Establish a single validated workspace root.
+- Establish a reusable Python boundary around the single canonical workspace root.
 - Discover repository instructions and bounded context sources.
 - Implement native file listing, bounded reads, text search, and path metadata tools.
 - Track source locations, inclusion reasons, and context budgets.
 - Evaluate known-file retrieval using fixture workspaces.
+
+[CAH-024](cah-024-establish-workspace-boundary.md) is the first implementation-ready story in this
+epic. It will validate contained, workspace-relative path targets against the selected root and
+return immutable harness-owned path values. It does not discover instructions, read file content,
+register model tools, or claim protection against filesystem changes after validation.
 
 ### E4 - Tool registry and controlled execution
 

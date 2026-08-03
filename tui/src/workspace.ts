@@ -1,6 +1,11 @@
 import {realpathSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
 
+import {
+  resolveProviderSelection,
+  type ProviderSelection,
+} from './provider-configuration.js';
+
 /** The one canonical repository workspace assigned to a runtime process. */
 export interface WorkspaceSelection {
   /** Canonical, symlink-resolved directory passed to the Python child. */
@@ -10,12 +15,12 @@ export interface WorkspaceSelection {
 }
 
 /** User-facing launch configuration parsed before the Python child is constructed. */
-export interface ApplicationConfiguration {
+export type ApplicationConfiguration = {
   /** The one canonical target repository assigned to this application process. */
   readonly workspace: WorkspaceSelection;
   /** Whether Python should create local transcript and summary artifacts. */
   readonly transcriptEnabled: boolean;
-}
+} & ProviderSelection;
 
 /** An actionable error raised before a child is started with an unusable workspace. */
 export class WorkspaceConfigurationError extends Error {
@@ -36,6 +41,7 @@ export class WorkspaceConfigurationError extends Error {
  * @param launchDirectory - Directory from which the repository launcher was invoked.
  * @returns The one canonical workspace and the source of that selection.
  * @throws WorkspaceConfigurationError If arguments are invalid or the path is unusable.
+ * @throws ProviderConfigurationError If provider/model arguments are unsupported.
  */
 export function resolveWorkspace(
   arguments_: readonly string[],
@@ -45,12 +51,13 @@ export function resolveWorkspace(
 }
 
 /**
- * Resolve the workspace and transcript opt-out from order-independent CLI arguments.
+ * Resolve workspace, persistence, and provider selection from order-independent CLI arguments.
  *
  * @param arguments_ - TUI arguments after the Node entry point.
  * @param launchDirectory - Directory from which the repository launcher was invoked.
- * @returns Canonical workspace selection and whether local persistence remains enabled.
+ * @returns Canonical workspace, persistence choice, and validated provider/model selection.
  * @throws WorkspaceConfigurationError If an option is unknown, repeated, or incomplete.
+ * @throws ProviderConfigurationError If the provider/model pair is unsupported.
  */
 export function resolveApplicationConfiguration(
   arguments_: readonly string[],
@@ -93,15 +100,20 @@ export function resolveApplicationConfiguration(
       source: configuredPath === undefined ? 'launch-directory' : 'command-line',
     },
     transcriptEnabled: !parsed.noTranscript,
+    ...resolveProviderSelection(parsed.provider, parsed.model),
   };
 }
 
 function parseApplicationArguments(arguments_: readonly string[]): {
   readonly workspace: string | undefined;
   readonly noTranscript: boolean;
+  readonly provider: string | undefined;
+  readonly model: string | undefined;
 } {
   let workspace: string | undefined;
   let noTranscript = false;
+  let provider: string | undefined;
+  let model: string | undefined;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === '--no-transcript') {
@@ -129,13 +141,45 @@ function parseApplicationArguments(arguments_: readonly string[]): {
       index += 1;
       continue;
     }
+    if (argument === '--provider') {
+      if (provider !== undefined) {
+        throw new WorkspaceConfigurationError(
+          `The --provider option may be provided only once. ${usage()}`,
+        );
+      }
+      const value = arguments_[index + 1];
+      if (value === undefined || value.length === 0 || value.startsWith('--')) {
+        throw new WorkspaceConfigurationError(
+          `The --provider option requires exactly one value. ${usage()}`,
+        );
+      }
+      provider = value;
+      index += 1;
+      continue;
+    }
+    if (argument === '--model') {
+      if (model !== undefined) {
+        throw new WorkspaceConfigurationError(
+          `The --model option may be provided only once. ${usage()}`,
+        );
+      }
+      const value = arguments_[index + 1];
+      if (value === undefined || value.length === 0 || value.startsWith('--')) {
+        throw new WorkspaceConfigurationError(
+          `The --model option requires exactly one value. ${usage()}`,
+        );
+      }
+      model = value;
+      index += 1;
+      continue;
+    }
     throw new WorkspaceConfigurationError(
-      `Unknown argument ${JSON.stringify(argument)}. ${usage()}`,
+      `Unknown command-line argument. ${usage()}`,
     );
   }
-  return {workspace, noTranscript};
+  return {workspace, noTranscript, provider, model};
 }
 
 function usage(): string {
-  return 'Usage: ./scripts/run-tui [--workspace PATH] [--no-transcript]';
+  return 'Usage: ./scripts/run-tui [--workspace PATH] [--no-transcript] [--provider mock|openai] [--model MODEL]';
 }

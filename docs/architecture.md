@@ -37,10 +37,13 @@ and stream values, an explicit asynchronous operation port, and a strict determi
 changing the launched `MockSession` runtime or TUI. CAH-021 adds `ProviderSession`, one strict
 fake-backed turn, an injected-provider runtime seam, and bounded usage evidence. CAH-022 adds four
 validated hard limits, per-session accounting, deterministic deadline and cleanup supervision, and
-transcript-v3 loop-limit evidence with v1/v2/v3 replay. The launched `main()` composition remains the
-deterministic mock and protocol v1 is unchanged. CAH-023 is the next dependency-ready unit and will
-add and activate the OpenAI Responses adapter. Tool execution, workspace reads, policy, and broader
-agent behavior remain target architecture.
+transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
+an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
+SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
+protocol v1 is unchanged. CAH-024 is implementation-ready but still planned; it will add the first
+M2 primitive, an immutable Python workspace boundary, without file reads or protocol changes. Tool
+execution, workspace discovery and reads, policy, and broader agent behavior remain target
+architecture.
 
 ## Product boundary
 
@@ -95,7 +98,8 @@ CAH-003 implements that launch as one shell-free argument array:
 PREVALIDATED_LINUX_UV run --project REPOSITORY_ROOT --frozen
   --no-cache --no-sync --offline --no-env-file --no-progress --no-python-downloads
   --python VENV_PYTHON
-  -- python -m code_assist_harness.runtime --workspace CANONICAL_WORKSPACE
+  -- python -E -m code_assist_harness.runtime --provider PROVIDER [--model EXACT_SNAPSHOT]
+     --workspace CANONICAL_WORKSPACE
 ```
 
 The line breaks above are explanatory only; Node passes each token as a separate argument with
@@ -104,7 +108,10 @@ real path, and rejects a path under `/mnt` or a name ending in `.exe`. It also r
 `REPOSITORY_ROOT/.venv/pyvenv.cfg` and an executable `VENV_PYTHON` at `.venv/bin/python`. A failed
 preflight does not invoke `uv`, create `.venv`, or otherwise mutate the repository. The harness
 repository is `uv`'s project and child working directory, while the target repository is a distinct,
-canonical `--workspace` value.
+canonical `--workspace` value. `PROVIDER` defaults to `mock`; `openai` requires the exact
+`gpt-5.6-luna` model. TypeScript validates the pair before child construction, and
+Python validates it again before SDK import. These launch values are configuration arguments, not
+NDJSON fields.
 
 The explicit interpreter and launch flags keep the prepared environment fixed: `--frozen`
 prevents lockfile updates, `--no-sync` avoids synchronizing the existing environment, and the
@@ -165,7 +172,7 @@ still drains the bounded mock, while user-requested cancellation wakes its curre
 The [walking-skeleton guide](walking-skeleton.md) follows these exact functions and both terminal
 paths using normalized protocol examples checked by the Python and TypeScript test suites.
 
-Tests and later composition roots may instead inject a `Provider` into `run_runtime`:
+An explicit OpenAI launch, or a deterministic test injecting a `Provider`, instead selects:
 
 ```text
 validated session.start -> ProviderSessionRunner creates ProviderSession + fresh limit tracker
@@ -175,9 +182,10 @@ validated session.start -> ProviderSessionRunner creates ProviderSession + fresh
   -> one completed, failed, or cancelled terminal after supervised provider cleanup
 ```
 
-This provider-backed path is implemented and network-free with `FakeProvider`. It is not selected by
-`main()`, the launcher, or the TUI. Runtime shutdown, stdin EOF, and outer-task cancellation tear down
-active provider work without fabricating a user-cancellation terminal when teardown wins.
+Default tests exercise this path network-free with `FakeProvider`; explicit OpenAI selection routes
+the launcher and `main()` through the concrete adapter. Runtime shutdown, stdin EOF, and outer-task
+cancellation tear down active provider work without fabricating a user-cancellation terminal when
+teardown wins.
 
 CAH-010 keeps one-session lifecycle meaning separate from process effects and conversation history.
 `task.submitted`, `cancel.requested`, `approval.requested`, and `approval.resolved` are trusted domain
@@ -198,6 +206,7 @@ dependency-resolution changes commit `uv.lock`.
 | Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
+| Workspace path containment | Python workspace boundary | Planned in CAH-024: one immutable canonical root resolves contained, workspace-relative targets; later tools recheck at access time. |
 | Context selection | Python context subsystem | Context items retain their source path, line range, and inclusion reason. |
 | Tool validation and execution policy | Python tool and safety subsystems | The model and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
@@ -224,7 +233,9 @@ src/code_assist_harness/
 ├── provider/
 │   ├── models.py       Immutable provider-neutral requests, events, usage, and failures
 │   ├── port.py         Single-consumer async operation and cleanup protocols
-│   └── fake.py         Ordered request scripts, logical gates, and cancellation checkpoints
+│   ├── fake.py         Ordered request scripts, logical gates, and cancellation checkpoints
+│   ├── openai_config.py SDK-free provider, model, environment, and credential validation
+│   └── openai_responses.py Strict SDK translation, event automaton, and resource cleanup
 ├── protocol/
 │   ├── models.py       Strict Pydantic v2 wire models
 │   ├── codec.py        Two-stage parsing and safe serialization
@@ -233,11 +244,17 @@ src/code_assist_harness/
 ```
 
 The provider package remains independent of orchestration. `provider_session.py` consumes its port
-through harness-owned values and `runtime.py` selects that runner only when a caller injects a
-provider. The launched mock therefore remains honest while tests prove the real orchestration seam.
-CAH-022 now supplies the safety budget to injected provider sessions, and CAH-023 will select the
-concrete OpenAI adapter at the composition root. Future `core/`, `context/`, `tools/`, and `safety/`
-paths remain conceptual and will be introduced only by their owning stories.
+through harness-owned values. `runtime.py` keeps the mock default, but an explicit validated OpenAI
+selection lazily imports the concrete adapter and supplies the CAH-022 safety budget to
+`ProviderSessionRunner`. Future `core/`, `context/`, `tools/`, and `safety/` paths remain conceptual
+and will be introduced only by their owning stories.
+
+CAH-024 plans one sibling module; it is not part of the implemented tree above:
+
+```text
+src/code_assist_harness/
+└── workspace.py        Planned immutable root, contained target resolution, and relative labels
+```
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 
@@ -248,6 +265,7 @@ tui/
 │   ├── bootstrap.ts
 │   ├── check-node-version.ts
 │   ├── node-version.ts
+│   ├── provider-configuration.ts
 │   ├── workspace.ts
 │   ├── protocol.ts
 │   ├── protocol-stream.ts
@@ -263,8 +281,10 @@ tui/
 `scripts/run-tui` resolves and validates both the Node and npm executable paths, rejecting Windows
 paths even when a Linux-looking symlink hides them, then rejects unsupported Node versions before
 npm and its TypeScript loader run. It preserves the caller's canonical launch directory and
-forwards `--workspace` as separate arguments. `cli.ts` repeats Node validation, resolves one
-workspace, and creates `PythonRuntimeSupervisor`. The canonical repository gate invokes
+forwards launch options as separate arguments. `cli.ts` repeats Node validation, resolves one
+workspace, validates the provider/model pair, and creates `PythonRuntimeSupervisor`. The supervisor
+always forwards `--provider`; `--model` is forwarded only for OpenAI. The canonical repository gate
+invokes
 `check-node-version.ts` before every npm-backed policy or TUI stage, reusing the same supported-range
 assertion.
 `run-application.tsx` projects supervisor state into `app.tsx`, routes `SIGHUP` and `SIGTERM` through
@@ -277,9 +297,10 @@ Escape binding, and visible feedback.
 
 Shared golden JSON fixtures live under `protocol/fixtures/`. Python and TypeScript protocol types
 are intentionally hand-maintained at first. The CAH-010 lifecycle fixtures contain domain facts and
-complete validated wire envelopes without making the fixture schema part of protocol v1. Schema
-generation is deferred until contract drift demonstrates that its additional machinery is
-worthwhile.
+complete validated wire envelopes without making the fixture schema part of protocol v1. The
+separate runtime-configuration fixture keeps provider names and the OpenAI model aligned across
+languages; it is not a wire-message definition. Schema generation is deferred until contract drift
+demonstrates that its additional machinery is worthwhile.
 
 ## Agent loop
 
@@ -297,9 +318,12 @@ The explicit loop performs these bounded steps:
 
 At most one provider operation is active for a session. CAH-020 implements the structural
 `Provider` and `ProviderOperation` protocols: one harness-owned request starts a single-consumer
-stream with explicit awaited cancellation and cleanup. Its immutable event union covers text
-deltas, completed text, serialized tool requests, usage, normal completion, and normalized failure.
-Cancellation closes iteration instead of fabricating a failure event.
+stream with explicit awaited cancellation and cleanup. Ordinary `cancel()` and `wait_closed()` calls
+remain provider-owned cleanup barriers; the required session-only `force_cancel_cleanup()` escape
+hatch authoritatively cancels and reaps operation-owned local work after that barrier exceeds the
+harness grace. Its immutable event union covers text deltas, completed text, serialized tool requests,
+usage, normal completion, and normalized failure. Cancellation closes iteration instead of
+fabricating a failure event.
 
 The first implementation is a strict deterministic fake. It matches ordered requests, emits
 scripted events, exposes named logical delay and cancellation checkpoints, and fails on mismatches,
@@ -338,10 +362,17 @@ completes its wire write, reducer acceptance, and transcript-observer attempt be
 terminal is selected. An ordinary later sink failure does not roll back an earlier accepted view, and
 the deadline does not bound local sink latency.
 
-CAH-023 is the next unit and will add the first real adapter against foreground OpenAI Responses
-streaming; SDK objects remain inside that adapter. The launched M0 `MockSession` is still a separate
-runtime fixture rather than a provider consumer. Default validation never makes a live model or
-network request.
+CAH-023 implements the first real adapter against foreground OpenAI Responses streaming. It maps one
+provider-neutral text request to `background=false` and `store=false`, accepts only the reviewed event
+automaton, rejects terminal state-changing C0/C1 text controls while preserving TAB/LF layout, and
+normalizes SDK failures to fixed provider failures. Completed usage must reconcile input plus output
+to total, and output tokens cannot exceed the request's fixed 8,192-token generation cap. Python and
+TypeScript wire schemas mirror the text invariant before terminal state changes. Every operation
+lazily owns one SDK client and stream plus one shielded resource-cleanup task. Provider-specific
+configuration is confined to the SDK-free
+validation, composition, and adapter modules; SDK objects, raw responses, and cleanup state remain
+inside the adapter itself. The default `MockSession` is still a separate runtime fixture rather than a
+provider consumer, and default validation never makes a live model or network request.
 
 ## Concurrency and cancellation
 
@@ -361,13 +392,19 @@ Provider cleanup has exactly one loop-owned task per session. A deadline watcher
 cancellation mode without waiting for the publication lock; the finalizer joins that same task and
 never invokes the provider cleanup API concurrently. Each `cancel()` or `wait_closed()` await is
 raced against one fixed five-second local grace through the injected monotonic waiter. Cleanup
-completion wins an exact tie; otherwise grace expiry cancels and reaps the local cleanup awaitable
-and emits at most one payload-free `provider_cleanup_failed` runtime error without rewriting the
-selected outcome. The loop also cancels and joins any pending local provider read. These in-process
-joins require the provider awaitables to propagate task cancellation; stronger process isolation is
-required for an implementation that suppresses it. CAH-023 will activate the bounded path with a
-concrete adapter. Later units add tool supervision to the same loop. Small, bounded filesystem
-operations may run directly; blocking work moves to a worker thread when needed.
+completion wins an exact tie. Otherwise grace expiry first cancels and reaps the loop-owned barrier
+task, then invokes the operation's required `force_cancel_cleanup()` method to cancel and await every
+provider-owned local cleanup or SDK task without shielding. No provider-owned task may remain after
+that force-reap returns, but remote resource release stays explicitly unconfirmed and the loop emits
+at most one payload-free `provider_cleanup_failed` runtime error without rewriting the selected
+outcome. The loop also cancels and joins any pending local provider read. These in-process joins
+require provider awaitables to propagate task cancellation; stronger process isolation is required
+for an implementation that suppresses it. The OpenAI adapter supplies its own single-owner
+stream/client cleanup beneath this loop-owned grace. Ordinary joiners shield that owner; force-reap
+cancels it directly. Genuine cleanup-owner cancellation stops the remaining sequential closes,
+whereas a close coroutine that independently raises `CancelledError` is a bounded cleanup failure and
+the other close is still attempted. Later units add tool supervision to the same loop. Small, bounded
+filesystem operations may run directly; blocking work moves to a worker thread when needed.
 
 CAH-006 implements mock cancellation as a lifecycle operation rather than an exception leaked to the
 TUI. Each `MockSession` owns an `asyncio.Event` and a state lock. A matching request selects
@@ -441,6 +478,11 @@ documentation, respects ignored paths and size limits, and preserves provenance 
 item. The context builder must be able to explain why an item was included and enforce a total
 budget before calling a provider.
 
+CAH-024 is the planned foundation for that subsystem. The Python harness will own an immutable
+boundary around the canonical launch root and return only contained targets with workspace-relative
+labels. Instruction discovery, content reads, ignored-path policy, context budgeting, and
+execution-time race protection remain outside that unit.
+
 Evaluation scenarios will check whether known relevant files were selected, how much context was
 used, and whether unnecessary reads occurred. These mechanisms are target behavior for the
 read-only assistant milestone, not part of the initial scaffold.
@@ -509,16 +551,18 @@ failure path. Python checks include pytest, Ruff linting, formatting, and public
 TypeScript checks include type checking, linting, and tests; visible Ink changes include a render
 or reducer test. `./scripts/check` is the canonical fail-fast gate for those layers, protocol
 fixtures, local documentation links and anchors, top-level Python/Node process-network guards,
-current M0 source-network policy, and the genuine Node-to-Python boundary. The real Python child
+the source policy that isolates SDK/network imports to the concrete adapter, and the genuine
+Node-to-Python boundary. The real Python child
 retains its runtime-selector sanitization and therefore relies on the source policy rather than the
 ambient `PYTHONPATH` guard. CI installs from both committed locks and invokes the same command. No
-default test or evaluation makes a network request; the guards are defense in depth rather than an
+default test or evaluation makes a network request; the optional `live_provider` smoke requires
+explicit flags, the exact model, and a credential. The guards are defense in depth rather than an
 operating-system sandbox for native subprocesses.
 
-CAH-007 and each unit completed going forward link a visual lesson under `docs/lessons/assets/`.
-This prospective rule does not change the evidence contract of units that were already Done. The
-PowerPoint is rendered and inspected slide by slide and overflow-tested; visual flair remains
-subordinate to accurate architecture, status, evidence, legibility, and caveats.
+Retained presentation files through CAH-022 are frozen historical artifacts under
+`docs/lessons/assets/`. They may diverge from later design corrections and are not authoritative.
+Starting with CAH-023, the Markdown lesson and its compact architecture diagram are the only lesson
+artifacts. No presentation is added or revised unless the user explicitly reverses this freeze.
 
 ## Delivery sequence
 
@@ -528,7 +572,7 @@ The architecture is delivered as vertical slices rather than as disconnected sub
 | --- | --- | --- |
 | M0 | Mock runtime through the real Node–Python boundary | Tasks stream, cancel, and terminate authoritatively across the protocol. |
 | M1 | Explicit loop with fake and OpenAI providers | One bounded model conversation can complete or cancel. |
-| M2 | Repository context and native read tools | The agent can inspect, explain, and form grounded plans. |
+| M2 | Repository context and native read tools | CAH-024 is planned as the first boundary unit; the completed milestone lets the agent inspect, explain, and form grounded plans. |
 | M3 | Approval, edit, subprocess, and diff workflow | Approved changes and validation are controlled and auditable. |
 | M4 | Evaluation, replay, and failure hardening | Behavioral regressions are measurable and reproducible. |
 | M5 | Packaging and executor/provider extension points | The core can support other interfaces and isolation models. |

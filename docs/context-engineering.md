@@ -1,6 +1,7 @@
 # Context Engineering
 
-> Status: proposed design. Repository discovery and context selection are not yet implemented.
+> Status: proposed design. CAH-024 is the planned first implementation unit; repository discovery,
+> native reads, and context selection are not yet implemented.
 
 Context engineering is the process of selecting the smallest useful, attributable view of a
 workspace for a model turn. The MVP will not load the entire repository, create embeddings, or use
@@ -51,6 +52,11 @@ Each tool input and result is validated with Pydantic v2 at the model boundary. 
 against the explicit workspace, symlink escapes are rejected, ignored or prohibited locations are
 excluded, and file/count/byte limits are enforced before content enters context. Binary files and
 files over configured size limits return structured explanations rather than unbounded data.
+
+CAH-024 will supply the earlier, tool-independent path primitive for this flow: an immutable Python
+boundary around the already selected canonical root plus contained, workspace-relative target
+resolution. It will not read content or expose any of the tools above. Later read tools remain
+responsible for rechecking the target when they perform filesystem access.
 
 ## Provenance and attribution
 
@@ -115,13 +121,16 @@ quality is an optional smoke evaluation outside default checks.
 
 ## Implementation stories
 
-### Future story — Establish the workspace boundary
+### Planned CAH-024 — Establish the workspace boundary
 
 > As a user, I want every context operation rooted in the selected workspace so that inspection
 > cannot wander into unrelated files.
 
-Complete this story when canonical paths, symlinks, missing paths, and workspace-relative reporting
-have meaningful tests.
+The [implementation-ready story](../user-stories/cah-024-establish-workspace-boundary.md) ends at
+immutable Python path values and deterministic validation. Complete it when canonical-root,
+relative-path, missing-target, symlink-containment, and workspace-relative reporting behavior has
+meaningful tests. Instruction discovery, file reads, model tool schemas, and execution-time race
+protection remain later work.
 
 ### Future story — Discover repository instructions
 

@@ -210,6 +210,50 @@ def test_semantic_string_fields_reject_empty_values(value: dict[str, object]) ->
         validator(value)
 
 
+def test_assistant_text_accepts_supported_layout_and_unicode() -> None:
+    text = "first line\n\tsecond line café 👩‍💻"
+
+    assert validate_event(_session_event("assistant.delta", {"text": text})).payload.text == text
+    assert (
+        validate_event(_session_event("assistant.completed", {"text": text})).payload.text == text
+    )
+
+
+def test_session_task_accepts_unicode_scalar_text() -> None:
+    task = "Explain café 👩‍💻"
+
+    command = validate_command(_command("session.start", {"task": task}))
+
+    assert command.payload.task == task
+
+
+@pytest.mark.parametrize("task", ["unsafe\ud800text", "unsafe\udffftext"])
+def test_session_task_rejects_lone_surrogates(task: str) -> None:
+    with pytest.raises(ValidationError):
+        validate_command(_command("session.start", {"task": task}))
+
+
+@pytest.mark.parametrize("code_point", [*range(0x20), *range(0x7F, 0xA0)])
+@pytest.mark.parametrize("event_type", ["assistant.delta", "assistant.completed"])
+def test_assistant_text_rejects_unsupported_terminal_controls(
+    code_point: int,
+    event_type: str,
+) -> None:
+    value = _session_event(event_type, {"text": f"unsafe{chr(code_point)}text"})
+    if code_point in {0x09, 0x0A}:
+        assert validate_event(value).payload.text == f"unsafe{chr(code_point)}text"
+        return
+
+    with pytest.raises(ValidationError):
+        validate_event(value)
+
+
+@pytest.mark.parametrize("event_type", ["assistant.delta", "assistant.completed"])
+def test_assistant_text_rejects_lone_surrogates(event_type: str) -> None:
+    with pytest.raises(ValidationError):
+        validate_event(_session_event(event_type, {"text": "unsafe\ud800text"}))
+
+
 def test_wire_models_forbid_extra_envelope_and_payload_fields() -> None:
     envelope_extra = _command("runtime.shutdown", {})
     envelope_extra["unexpected"] = True

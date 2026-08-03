@@ -53,6 +53,19 @@ class ProviderOperation(Protocol):
         """
         ...
 
+    async def force_cancel_cleanup(self) -> None:
+        """Authoritatively stop and reap operation-owned work after cleanup grace expires.
+
+        This session-only escape hatch is distinct from ordinary cancellation. Implementations
+        must cancel and await every operation-owned cleanup or SDK task without shielding, close
+        the event stream logically, and prevent later events. Returning confirms only that no
+        local provider-owned task can continue; it does not claim that remote resources closed.
+
+        The method is idempotent and safe before, during, or after :meth:`cancel` and
+        :meth:`wait_closed`. Caller cancellation must propagate.
+        """
+        ...
+
 
 @runtime_checkable
 class Provider(Protocol):

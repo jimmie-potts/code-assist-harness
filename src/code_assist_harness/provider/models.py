@@ -57,6 +57,29 @@ def _require_non_empty_string(
     return text
 
 
+def _require_terminal_safe_text(
+    value: object,
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+) -> str:
+    """Reject terminal controls while retaining TAB and LF as layout characters.
+
+    Provider text is rendered by the terminal UI after crossing the protocol. Tabs and line feeds
+    are part of normal assistant formatting; every other C0 or C1 control could alter terminal state
+    or rewrite visible output and therefore fails at the provider-domain boundary.
+    """
+    text = _require_string(value, field_name)
+    if not allow_empty and not text:
+        raise ValueError(f"{field_name} must not be empty")
+    if any(
+        (ord(character) < 32 and character not in {"\t", "\n"}) or 127 <= ord(character) <= 159
+        for character in text
+    ):
+        raise ValueError(f"{field_name} must not contain unsupported terminal controls")
+    return text
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderMessage:
     """One ordered model-facing conversation message.
@@ -136,31 +159,35 @@ class ProviderRequest:
 
 @dataclass(frozen=True, slots=True)
 class ProviderTextDelta:
-    """One non-empty fragment of assistant text."""
+    """One non-empty, terminal-safe fragment of assistant text.
+
+    TAB and LF are accepted for layout. Other C0 and C1 controls are rejected before text can cross
+    into protocol or terminal state.
+    """
 
     kind: ClassVar[Literal["text.delta"]] = "text.delta"
     text: str
 
     def __post_init__(self) -> None:
-        """Reject empty deltas so stream progress is always observable."""
-        _require_non_empty_string(self.text, "provider text delta")
+        """Reject empty or terminal-unsafe deltas before they become observable."""
+        _require_terminal_safe_text(self.text, "provider text delta")
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderTextCompleted:
     """The provider's complete assistant text observation.
 
-    Empty text is legal for a tool-call-only response. The session may retain that candidate long
-    enough to classify the next observation; usage and successful completion still require accepted
-    non-empty deltas.
+    Empty text is legal for a tool-call-only response. TAB and LF are accepted for layout, but other
+    C0 and C1 controls are rejected. The session may retain that candidate long enough to classify
+    the next observation; usage and successful completion still require accepted non-empty deltas.
     """
 
     kind: ClassVar[Literal["text.completed"]] = "text.completed"
     text: str
 
     def __post_init__(self) -> None:
-        """Require text without imposing a later output-budget policy."""
-        _require_string(self.text, "provider completed text")
+        """Require terminal-safe text without imposing a later output-budget policy."""
+        _require_terminal_safe_text(self.text, "provider completed text", allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

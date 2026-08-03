@@ -11,8 +11,10 @@ const SESSION_ID_PATTERN = /^ses_[A-Za-z0-9_-]{1,64}$/u;
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 const nonEmptyStringSchema = z.string().min(1);
+const sessionTaskSchema = z.string().min(1).refine(hasOnlyUnicodeScalars);
 const errorCodeSchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/u);
 const safeMessageSchema = z.string().min(1).max(1024).refine(hasNoTerminalControls);
+const assistantTextSchema = z.string().min(1).refine(hasOnlySupportedAssistantText);
 const commandIdSchema = z.string().regex(COMMAND_ID_PATTERN);
 const sessionIdSchema = z.string().regex(SESSION_ID_PATTERN);
 const sequenceSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -31,7 +33,7 @@ const sessionStartCommandSchema = z.strictObject({
   type: z.literal('session.start'),
   command_id: commandIdSchema,
   timestamp: timestampSchema,
-  payload: z.strictObject({task: nonEmptyStringSchema}),
+  payload: z.strictObject({task: sessionTaskSchema}),
 });
 
 const sessionCancelCommandSchema = z.strictObject({
@@ -88,7 +90,7 @@ const assistantDeltaEventSchema = z.strictObject({
   sequence: sequenceSchema,
   timestamp: timestampSchema,
   correlation_id: commandIdSchema.optional(),
-  payload: z.strictObject({text: nonEmptyStringSchema}),
+  payload: z.strictObject({text: assistantTextSchema}),
 });
 
 const assistantCompletedEventSchema = z.strictObject({
@@ -98,7 +100,7 @@ const assistantCompletedEventSchema = z.strictObject({
   sequence: sequenceSchema,
   timestamp: timestampSchema,
   correlation_id: commandIdSchema.optional(),
-  payload: z.strictObject({text: nonEmptyStringSchema}),
+  payload: z.strictObject({text: assistantTextSchema}),
 });
 
 const sessionCompletedEventSchema = z.strictObject({
@@ -415,6 +417,33 @@ function hasNoTerminalControls(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0) ?? 0;
     if (codePoint < 32 || (codePoint >= 127 && codePoint <= 159)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasOnlyUnicodeScalars(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasOnlySupportedAssistantText(value: string): boolean {
+  if (!hasOnlyUnicodeScalars(value)) {
+    return false;
+  }
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    const unsupportedC0 = codePoint < 32 && codePoint !== 9 && codePoint !== 10;
+    if (
+      unsupportedC0 ||
+      (codePoint >= 127 && codePoint <= 159)
+    ) {
       return false;
     }
   }

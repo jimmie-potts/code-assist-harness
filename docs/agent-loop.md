@@ -1,8 +1,8 @@
 # Agent Loop
 
-> Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn through
-> an injected runtime seam and the CAH-020 deterministic fake; CAH-022 hard-bounds that injected path.
-> The launched `main()` path and TUI remain on `MockSession`, with no live adapter. CAH-023 is next.
+> Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn,
+> CAH-022 hard-bounds it, and CAH-023 activates it through an explicitly selected OpenAI Responses
+> adapter. The launched `main()` path and TUI still default to `MockSession`.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
 cancellation, tool policy, and event emission visible to a learner and testable independently of a
@@ -22,9 +22,10 @@ The Python harness owns:
 - Emitting one ordered, authoritative session event stream.
 - Selecting exactly one terminal outcome.
 
-A real provider adapter will own translation between the implemented provider-neutral types and its
-SDK. OpenAI SDK objects must not escape that adapter. The deterministic fake implements the same
-port without an SDK or network access. The TUI will display events and send commands; it does not
+A provider adapter owns translation between the implemented provider-neutral types and its SDK. The
+OpenAI implementation also owns its SDK client, stream automaton, and resource cleanup; none escapes
+the adapter. The deterministic fake implements the same port without an SDK or network access. The TUI
+displays events and sends commands; it does not
 decide that a turn is complete or that an action is safe.
 
 ## Vocabulary
@@ -59,16 +60,16 @@ cooperative cancellation event and serializes delta writes, completion, and canc
 state lock. The [walking-skeleton guide](walking-skeleton.md) traces this path from the Ink keypress
 through its authoritative Python terminal event and back to rendering.
 
-CAH-021 adds a parallel composition seam for tests and later adapters. When `run_runtime` receives an
-injected `Provider`, `ProviderSessionRunner` creates one `ProviderSession` instead of a `MockSession`.
+CAH-021 adds a parallel provider composition seam. When `run_runtime` receives a `Provider`,
+`ProviderSessionRunner` creates one `ProviderSession` instead of a `MockSession`.
 CAH-022 gives each created session a fresh mutable limit tracker under one immutable limits value. The
 session starts at most one operation and claims its stream exactly once when admission succeeds. Each
 accepted lifecycle publication is a shielded, ordered, non-interleaved transaction under the session
 decision lock: protocol write, Python reduction, and transcript-observer attempt settle before
 cancellation or teardown may select an outcome. An ordinary later sink or observer failure does not
-roll back an earlier accepted view. The slice is real provider-neutral orchestration, but `main()`
-deliberately injects no provider, so it does not alter the visible mock or the TypeScript protocol-v1
-projection.
+roll back an earlier accepted view. CAH-023 keeps the mock default but lets `main()` supply the
+concrete adapter only after the TUI and Python composition roots validate `--provider openai --model
+gpt-5.6-luna`. Provider selection does not alter the TypeScript protocol-v1 projection.
 
 ## Bounded loop
 
@@ -113,7 +114,10 @@ ends normally with `ProviderCompleted` or `ProviderFailed`. `cancel()` is idempo
 cleanup; after it returns, the operation cannot emit another event. Cancellation ends iteration
 without inventing a provider failure because the session layer already owns the user's cancellation
 intent. `wait_closed()` lets the caller await natural completion, failure, or cancellation cleanup
-without requesting cancellation.
+without requesting cancellation. `force_cancel_cleanup()` is a required session-only fallback after
+the five-second cleanup grace: it cancels and reaps all operation-owned local work without shielding,
+closes the stream logically, and prevents later events. It confirms local task termination, not remote
+resource release.
 
 The deterministic `FakeProvider` is the first implementation. It consumes an ordered tuple of
 `FakeProviderExchange` values. Each exchange pairs one exact `ProviderRequest` with explicit emit,
@@ -151,8 +155,45 @@ and retryable observation. It has no raw exception, response, header, environmen
 field; retryability does not authorize the loop to retry. Malformed tool arguments remain serialized
 text at this boundary so later tool validation can return a structured harness result. Provider
 contract tests run without vendor modules, framework packages, API keys, or network access. CAH-021
-consumes this port for one fake-backed turn, and CAH-022 enforces its four configurable hard limits.
-CAH-023 will next target the OpenAI Responses API at this boundary.
+consumes this port for one turn, CAH-022 enforces its four configurable hard limits, and CAH-023 maps
+the same port to OpenAI Responses without changing its types.
+
+## OpenAI Responses adapter
+
+`openai_config.py` validates provider, exact model ID, environment names, and
+`OPENAI_API_KEY` without importing the SDK. The mock ignores ambient provider credentials. OpenAI is
+constructed only after explicit selection; every other `OPENAI_*` variable is rejected with a fixed
+message rather than being inherited as hidden SDK routing. `SSLKEYLOGFILE` is stripped by the normal
+supervisor and rejected again at the provider boundary; Python starts with `-E` so remaining ambient
+`PYTHON*` settings cannot alter the child interpreter.
+
+`openai_responses.py` maps the ordered conversation and caller-supplied instructions into one
+foreground text request with `background=false`, `store=false`, reasoning effort `none`,
+current-turn reasoning context, a generated-token cap, no tools, and no tool choice.
+`Provider.start()` remains synchronous, lazy, and I/O-free. Consuming the operation creates one async
+client and one stream, validates the exact lifecycle/item/text/completion sequence, and exposes only
+provider-neutral text, usage, completion, or fixed failure values. One optional opaque empty
+reasoning envelope before the message is validated and suppressed. Tool, reasoning text/summary,
+multimodal, duplicate, missing, or inconsistent observations fail closed without retaining raw values.
+Assistant text preserves TAB/LF layout and rejects every other C0/C1 terminal control before the
+fragment is retained or emitted; both wire validators enforce the same invariant before rendering.
+Message items must move from `in_progress` to `completed`, and the completed response must echo the
+reviewed reasoning effort `none` and context `current_turn` before completion is trusted.
+An SDK create or read awaitable that independently raises `CancelledError` becomes a bounded provider
+failure; only cancellation selected by the operation remains cancellation control flow.
+
+Natural termination and cancellation converge on one operation-owned, shielded cleanup task that
+attempts both stream and client close. A cleanup failure becomes one safe adapter exception consumed
+by the existing `ProviderSession` cleanup boundary; it never changes the already selected session
+failure. A close coroutine that independently raises `CancelledError` is treated as a bounded cleanup
+failure so the other resource is still attempted; only cancellation of the cleanup owner remains task
+control flow and stops the remaining sequential closes. Ordinary `cancel()` and `wait_closed()`
+joiners shield the owner. Only `ProviderSession`, after its cleanup grace expires, calls the
+provider-neutral force-reap hook to cancel and await the owner directly. SDK objects, exceptions,
+request IDs, headers, and raw response bodies remain inside the adapter. The credential is confined
+to the provider-specific validation, composition, and adapter boundary and never enters a
+provider-neutral or protocol value. Deterministic SDK fakes cover this path by default; the separately
+selected live smoke remains outside the canonical gate and default CI.
 
 ## Implemented one-turn grammar
 
@@ -166,7 +207,8 @@ A successful stream must contain one or more non-empty `ProviderTextDelta` obser
 candidate until provider completion validates the entire grammar and `wait_closed()` has been
 attempted. Only then does the session emit `assistant.completed` followed by `session.completed`.
 A missing, duplicate, out-of-order, empty, mismatched, or early-ended success observation becomes the
-safe `provider_invalid_response` failure.
+safe `provider_invalid_response` failure. TAB and LF are the only admitted C0 layout characters;
+another C0 or any C1 control makes the provider observation invalid before publication.
 
 Empty completed text has one deliberately narrow non-success use: the session may retain it as a
 candidate until a following tool request arrives. That request still becomes `tool_unavailable` and
@@ -181,7 +223,10 @@ request is counted before any handling; the first admitted request still becomes
 triggers operation cancellation, and never exposes or parses its arguments.
 
 Optional usage is bounded to non-negative JavaScript-safe integers and recorded outside lifecycle
-state as `model.usage_observed`. It consumes neither a protocol-v1 sequence number nor a reducer
+state as `model.usage_observed`. For a completed OpenAI response, input plus output must equal total,
+reasoning tokens cannot exceed output tokens, and output tokens cannot exceed the same fixed 8,192
+generation cap sent in the request. A violation becomes `invalid_response` before usage or completion
+evidence is admitted. Valid usage consumes neither a protocol-v1 sequence number nor a reducer
 transition. The version-3 writer stores the observation before the terminal record, and replay of
 versions 1, 2, and 3 exposes it through a separate evidence projection. Usage admission shares the
 decision lock, so an admitted evidence write settles before cancellation competes, while a terminal
@@ -196,12 +241,14 @@ replayable transcript prefix when teardown wins.
 Provider cleanup uses exactly one loop-owned task per session. The deadline watcher may start that
 task in cancellation mode, and the finalizer joins the same task instead of invoking cleanup again.
 Every `cancel()` or `wait_closed()` await is supervised by a fixed five-second local grace. A cleanup
-task already complete when the grace wakes wins the tie; otherwise its local awaitable is cancelled
-and reaped. The loop also cancels and awaits any pending local read. A cleanup failure or grace expiry
-emits at most one start-correlated, payload-free `provider_cleanup_failed` diagnostic before any
-selected terminal and cannot rewrite that outcome. These bounds require cancellation-responsive
-provider awaitables; an implementation that suppresses task cancellation requires stronger process
-isolation.
+task already complete when the grace wakes wins the tie. Otherwise the loop cancels and reaps its
+local barrier task, then invokes required `force_cancel_cleanup()` to cancel and await the actual
+provider-owned cleanup and SDK tasks without shielding. The loop also cancels and awaits any pending
+local read. A cleanup failure or grace expiry emits at most one start-correlated, payload-free
+`provider_cleanup_failed` diagnostic before any selected terminal and cannot rewrite that outcome.
+Force-reap guarantees no provider-owned local task remains; remote release remains unconfirmed. These
+bounds require cancellation-responsive provider awaitables; an implementation that suppresses task
+cancellation requires stronger process isolation.
 
 ## State and terminal outcomes
 
@@ -244,7 +291,7 @@ every provider or executor stopping immediately after cancellation.
 
 ## Limits and failures
 
-CAH-022 implements an immutable four-field `LoopLimits` configuration for injected provider-backed
+CAH-022 implements an immutable four-field `LoopLimits` configuration for provider-backed
 sessions. It rejects booleans and out-of-range values rather than clamping or disabling a budget:
 
 | Field | Default | Allowed range | Accounting point |
@@ -358,9 +405,10 @@ tests prove fresh trackers and deadline capture before transcript setup. See the
 > As an explicitly configured user, I want the bounded provider-neutral turn to use OpenAI Responses
 > so that the first real model capability is available without leaking SDK types into the harness.
 
-Complete this story when one text-only foreground Responses stream is explicitly configured with the
-allowlisted `gpt-4.1-mini-2025-04-14` snapshot, `background=false`, and `store=false`; its request
-omits tools and rejects reasoning/tool events; one exact assistant-text trace and SDK failures are
-normalized behind the provider port; foreground cancellation suppresses pending observations and
-joins operation-owned stream/client cleanup; default tests use SDK fakes with network denied; and a
-separately selected credentialed smoke test remains outside the canonical gate and default CI.
+This story is complete. The TUI and Python composition roots default to mock and require the explicit
+OpenAI provider/model pair. SDK-free configuration rejects unsupported models, credentials, and
+ambient OpenAI routing before lazy adapter construction. The adapter implements the reviewed
+text-only stream automaton, fixed failure normalization, cancellation, and shared stream/client
+cleanup behind the provider port. Deterministic SDK-fake tests run with network denied; the minimal
+credentialed smoke requires separate explicit selection and remains outside the canonical gate and
+default CI.
