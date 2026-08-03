@@ -6,17 +6,12 @@
 - **Implementation status:** Planned; no reusable workspace boundary or native repository read is
   implemented yet
 - **Story:** [CAH-024](../../user-stories/cah-024-establish-workspace-boundary.md)
-- **Visual companion:** [Workspace boundary](assets/cah-024-workspace-boundary.pptx)
+- **Visual companion:** None; the Markdown lesson and compact text diagram are authoritative
 - **Related architecture:** [ADR 0002](../adr/0002-ink-python-process-boundary.md),
   [Context engineering](../context-engineering.md), and [Safety model](../safety-model.md)
 
 > This lesson describes an accepted implementation plan. Every code block is explicitly labeled
 > pseudocode and is not evidence of shipped behavior.
-
-> **Frozen-deck warning:** The historical deck is not authoritative evidence and will not be
-> revised. Slides 4-6 use the obsolete names `WorkspacePathError`, `WorkspacePath`, and “5 fixed
-> error classes.” The contract below governs: one `WorkspaceBoundaryError`, one
-> `ResolvedWorkspacePath`, and five stable error codes.
 
 ## Quick summary
 
@@ -109,6 +104,9 @@ are rejected because this unit supports future reads, not future creates. Root i
 before and after resolution to detect ordinary replacement. The original directory is not held
 open, so inode reuse or a swap between checks can still evade detection; that residual risk remains
 explicit.
+
+The planned public surface uses one `WorkspaceBoundaryError`, one `ResolvedWorkspacePath`, and five
+stable error codes. It does not create separate exception classes for each filesystem observation.
 
 ## Practical walkthrough
 

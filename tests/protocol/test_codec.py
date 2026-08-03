@@ -245,6 +245,13 @@ def test_failure_messages_reject_terminal_controls_before_entering_trusted_state
     _assert_failure(parse_event_line(_json_line(value)), ProtocolParseErrorCode.INVALID_PAYLOAD)
 
 
+@pytest.mark.parametrize("event_type", ["assistant.delta", "assistant.completed"])
+def test_assistant_text_controls_are_invalid_payloads(event_type: str) -> None:
+    value = _session_event(event_type, {"text": "unsafe\x1b]52;c;clipboard\x07"})
+
+    _assert_failure(parse_event_line(_json_line(value)), ProtocolParseErrorCode.INVALID_PAYLOAD)
+
+
 def test_utc_timestamp_normalizes_an_aware_instant_to_millisecond_z() -> None:
     eastern = timezone(timedelta(hours=-4))
     instant = datetime(2026, 7, 16, 8, 34, 56, 789_999, tzinfo=eastern)

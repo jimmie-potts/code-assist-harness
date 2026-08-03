@@ -21,6 +21,7 @@ from .models import (
     ProviderTextCompleted,
     ProviderTextDelta,
     ProviderUsageReported,
+    _require_terminal_safe_text,
 )
 from .openai_config import OpenAIProviderConfiguration, validate_openai_environment
 from .port import ProviderCancellationResult, ProviderOperation
@@ -593,20 +594,32 @@ class _ResponsesAutomaton:
             raise InvalidSDKObservation
         self._require_item_coordinates(event)
         _require_absent_or_empty_list(_optional_field(event, "logprobs"))
-        delta = _required_string(_field(event, "delta"))
-        self._text_fragments.append(delta)
+        try:
+            delta = _require_terminal_safe_text(_field(event, "delta"), "OpenAI text delta")
+        except (TypeError, ValueError):
+            raise InvalidSDKObservation from None
+        observation = ProviderTextDelta(delta)
+        self._text_fragments.append(observation.text)
         self._state = "delta_or_done"
-        return (ProviderTextDelta(delta),)
+        return (observation,)
 
     def _text_done(self, event: object) -> tuple[ProviderStreamEvent, ...]:
         self._require_state("delta_or_done")
         self._require_item_coordinates(event)
         _require_absent_or_empty_list(_optional_field(event, "logprobs"))
-        text = _required_string(_field(event, "text"), allow_empty=True)
-        if text != "".join(self._text_fragments):
+        try:
+            text = _require_terminal_safe_text(
+                _field(event, "text"),
+                "OpenAI completed text",
+                allow_empty=True,
+            )
+        except (TypeError, ValueError):
+            raise InvalidSDKObservation from None
+        observation = ProviderTextCompleted(text)
+        if observation.text != "".join(self._text_fragments):
             raise InvalidSDKObservation
         self._state = "content_part_done"
-        return (ProviderTextCompleted(text),)
+        return (observation,)
 
     def _content_part_done(self, event: object) -> tuple[ProviderStreamEvent, ...]:
         self._require_state("content_part_done")

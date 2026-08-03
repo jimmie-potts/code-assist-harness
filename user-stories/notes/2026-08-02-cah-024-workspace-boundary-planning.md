@@ -137,26 +137,22 @@ outgrows host-path snapshots. CAH-024 must not imply those controls already exis
   fixed boundary surface.
 - Exact error-table assertions and distinctive temporary path values prove messages do not leak.
 - The Markdown lesson locates CAH-024 between runtime selection and future context/read tools while
-  showing provider, tool, and evidence boundaries as unchanged. The frozen deck is not planned
-  evidence.
+  showing provider, tool, and evidence boundaries as unchanged. No presentation is planned evidence
+  for CAH-024.
 - Focused tests and `./scripts/check` must pass before the story moves from Planned to Done.
 
-The six-slide planned visual companion was duplicated from the established CAH-023 lesson pattern
-and edited through artifact-tool. Every source and final slide was inspected individually, the
-template-fidelity check passed with zero issues, and the presentation overflow test reported
-`Test passed. No overflow detected.` These checks validate the historical planning artifact only;
-they are not evidence that `WorkspaceBoundary` or any read behavior exists. The deck is now frozen
-and may contradict later design corrections; this note, the story, and the Markdown lesson govern.
-Its known obsolete terms are `WorkspacePathError`, `WorkspacePath`, and “5 fixed error classes”;
-the authoritative contract uses one `WorkspaceBoundaryError`, one `ResolvedWorkspacePath`, and five
-stable error codes.
+A six-slide planned companion was generated and inspected during branch work, then removed before
+merge under the presentation freeze. It is not a retained artifact and is not evidence that
+`WorkspaceBoundary` or any read behavior exists. This note, the story, and the Markdown lesson govern
+the planned contract: one `WorkspaceBoundaryError`, one `ResolvedWorkspacePath`, and five stable
+error codes.
 
 ## Lesson format handoff
 
-CAH-024 is the final unit with a historical visual lesson. All committed presentation files are
-frozen. Starting with CAH-025, each implementation-ready story keeps its concise Markdown learning
-companion and embedded architecture diagram, but no PowerPoint deck is part of the unit. Historical
-decks and their validation evidence remain unchanged even when later design corrections diverge.
+Retained presentation files through CAH-022 are frozen. Starting with CAH-023, each
+implementation-ready story keeps its concise Markdown learning companion and embedded architecture
+diagram, but no PowerPoint deck is part of the unit. Historical retained decks and their validation
+evidence remain unchanged even when later design corrections diverge.
 
 ## Implementation handoff
 

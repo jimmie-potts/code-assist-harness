@@ -140,7 +140,9 @@ alter the request. The supervised child removes `SSLKEYLOGFILE` and starts Pytho
 adapter construction also rejects that TLS secret-export selector before client creation. The adapter
 fixes the official endpoint, disables environment proxy trust, redirects, SDK retries, and background
 mode, and sets `store=false` for the request. Its closed failure table never exposes SDK exceptions,
-bodies, headers, request IDs, model candidates, or credentials.
+bodies, headers, request IDs, model candidates, or credentials. Assistant text preserves TAB/LF
+layout but rejects every other C0/C1 control at the provider-domain boundary; the Python and
+TypeScript wire validators repeat that check before text can enter terminal state.
 
 Each OpenAI operation lazily owns one client and stream. Natural termination and cancellation share
 one shielded adapter cleanup task that attempts both closes, beneath the harness's five-second local

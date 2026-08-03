@@ -81,13 +81,10 @@ The written lesson was replaced with an implementation-backed, compact system-de
 Its architecture diagram locates CAH-023 between TUI configuration, the Python composition root,
 CAH-021/022 loop ownership, the provider port, the Responses API, the tool boundary, and evidence.
 
-The linked visual companion
-[`docs/lessons/assets/cah-023-openai-responses-adapter.pptx`](../../docs/lessons/assets/cah-023-openai-responses-adapter.pptx)
-uses the same architecture position and focuses on configuration admission, stream validation,
-cleanup/cancellation, and deterministic evidence. All six slides were rendered at 2560 by 1440,
-inspected individually and as a montage, and re-rendered after accuracy fixes. The bundled presentation
-overflow checker reported `Test passed. No overflow detected.`, PPTX ZIP integrity passed, and no
-temporary render or inspection artifact remains in the repository.
+A six-slide companion was generated and inspected during branch work, but it was removed before
+merge when the presentation freeze was applied to CAH-023 onward. It is not a retained artifact or
+delivery evidence. The authoritative Markdown lesson carries the same architecture position in its
+compact text diagram.
 
 ## Validation evidence
 

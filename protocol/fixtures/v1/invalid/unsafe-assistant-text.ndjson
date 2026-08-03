@@ -1,0 +1,1 @@
+{"protocol_version":1,"type":"assistant.delta","session_id":"ses_unsafe-text","sequence":1,"timestamp":"2026-07-16T13:00:00.000Z","correlation_id":"cmd_unsafe-text","payload":{"text":"unsafe\u001b]52;c;clipboard\u0007"}}

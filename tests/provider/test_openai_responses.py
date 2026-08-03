@@ -202,11 +202,12 @@ def _success_events(
     queued: bool = False,
     usage: tuple[int, int] | None = (11, 5),
     reasoning: bool = False,
+    text_fragments: tuple[str, str] = ("Bounded ", "answer."),
 ) -> list[dict[str, object]]:
     response_id = "resp_fake_023"
     reasoning_id = "rs_fake_023"
     item_id = "msg_fake_023"
-    text = "Bounded answer."
+    text = "".join(text_fragments)
     part = {"type": "output_text", "text": text, "annotations": []}
     message = {
         "type": "message",
@@ -294,7 +295,7 @@ def _success_events(
                 "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
-                "delta": "Bounded ",
+                "delta": text_fragments[0],
                 "logprobs": [],
             },
             {
@@ -303,7 +304,7 @@ def _success_events(
                 "output_index": message_output_index,
                 "content_index": 0,
                 "item_id": item_id,
-                "delta": "answer.",
+                "delta": text_fragments[1],
                 "logprobs": [],
             },
             {
@@ -464,6 +465,57 @@ def test_optional_opaque_reasoning_prefix_is_validated_but_never_published() -> 
         ProviderCompleted(),
     ]
     assert RAW_SECRET not in repr(observations)
+
+
+def test_supported_text_layout_crosses_the_adapter_without_broadening_controls() -> None:
+    async def scenario():
+        stream = _FakeStream(_success_events(text_fragments=("first line\n", "\tsecond line")))
+        provider, _responses, _client, _created = _provider_with(stream)
+        return await _collect(provider.start(_request()))
+
+    observations = asyncio.run(scenario())
+
+    assert observations[:3] == [
+        ProviderTextDelta("first line\n"),
+        ProviderTextDelta("\tsecond line"),
+        ProviderTextCompleted("first line\n\tsecond line"),
+    ]
+    assert observations[-1] == ProviderCompleted()
+
+
+@pytest.mark.parametrize(
+    "unsafe_delta",
+    [
+        "rewrite\rline",
+        "\x1b]52;c;clipboard-payload\x07",
+        "color\x9b31mred",
+    ],
+)
+def test_terminal_control_delta_fails_before_crossing_provider_boundary(
+    unsafe_delta: str,
+) -> None:
+    async def scenario():
+        events = _success_events()
+        events[4]["delta"] = unsafe_delta
+        stream = _FakeStream(events)
+        provider, _responses, client, _created = _provider_with(stream)
+        observations = await _collect(provider.start(_request()))
+        return observations, stream, client
+
+    observations, stream, client = asyncio.run(scenario())
+
+    assert observations == [
+        ProviderFailed(
+            ProviderFailure(
+                code="invalid_response",
+                message="OpenAI returned an invalid response.",
+                retryable=False,
+            )
+        )
+    ]
+    assert unsafe_delta not in repr(observations)
+    assert stream.close_calls == 1
+    assert client.close_calls == 1
 
 
 @pytest.mark.parametrize(

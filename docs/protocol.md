@@ -129,7 +129,9 @@ Command and correlation IDs match `cmd_[A-Za-z0-9_-]{1,64}`. Session IDs match
 `ses_[A-Za-z0-9_-]{1,64}`. Sequence values start at 1 and cannot exceed JavaScript's largest safe
 integer, `9007199254740991`, so Python and TypeScript preserve the same value. Error codes use
 `[a-z][a-z0-9_.-]{0,63}`; visible error messages are 1–1024 characters and reject C0/C1 terminal
-controls. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the terminating LF.
+controls. Assistant text is non-empty valid UTF-8, preserves TAB and LF for layout, and rejects every
+other C0/C1 control. Encoders and readers enforce a 64-KiB JSON-object limit, excluding the
+terminating LF.
 
 ## Version 1 message set
 
@@ -147,8 +149,8 @@ All objects are strict: undeclared envelope or payload fields are invalid.
 | `runtime.ready` | Runtime | `workspace: non-empty string` |
 | `runtime.error` | Runtime | `code`, `message`, and `recoverable` |
 | `session.started` | Session | Empty object |
-| `assistant.delta` | Session | `text: non-empty string` |
-| `assistant.completed` | Session | `text: non-empty string` |
+| `assistant.delta` | Session | `text: non-empty terminal-safe string; TAB/LF allowed` |
+| `assistant.completed` | Session | `text: non-empty terminal-safe string; TAB/LF allowed` |
 | `session.completed` | Session | Empty object |
 | `session.cancelled` | Session | Empty object |
 | `session.failed` | Session | `code` and `message` |
@@ -218,11 +220,13 @@ terminal. An ordinary later failure does not roll back an earlier accepted view.
 event/deadline tie, the deadline wins and the observation is not published.
 
 CAH-023 maps OpenAI text, normalized failure, and optional usage observations into these existing
-events and transcript evidence. Provider configuration, SDK lifecycle/item events, stream/client
-cleanup, credentials, and raw responses never become protocol messages. Adapter failures therefore
-reuse the existing bounded `session.failed` and `runtime.error` shapes; no NDJSON command, event,
-golden wire fixture, or protocol-version change was required. The separate runtime-configuration
-fixture locks TypeScript/Python provider and model constants rather than extending the wire protocol.
+events and transcript evidence. Provider-domain values reject terminal state-changing text controls,
+and both wire validators mirror that rule before an assistant event enters trusted state. Provider
+configuration, SDK lifecycle/item events, stream/client cleanup, credentials, and raw responses never
+become protocol messages. Adapter failures therefore reuse the existing bounded `session.failed` and
+`runtime.error` shapes; the stricter payload validation preserves protocol version 1 and is locked by
+a shared invalid fixture. The separate runtime-configuration fixture locks TypeScript/Python provider
+and model constants rather than extending the wire protocol.
 
 Transcript compatibility is a separate local-storage contract, not an NDJSON protocol revision. The
 writer now emits transcript version 3, replay accepts internally consistent versions 1, 2, and 3, and

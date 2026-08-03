@@ -157,6 +157,14 @@
       "path": "invalid/unsafe-error-message.ndjson"
     },
     {
+      "id": "unsafe-assistant-text",
+      "direction": "event",
+      "classification": "invalid_payload",
+      "reason": "Assistant text contains terminal controls that could alter terminal state.",
+      "format": "ndjson_line",
+      "path": "invalid/unsafe-assistant-text.ndjson"
+    },
+    {
       "id": "extra-field",
       "direction": "event",
       "classification": "invalid_payload",

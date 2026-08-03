@@ -172,6 +172,8 @@ client and one stream, validates the exact lifecycle/item/text/completion sequen
 provider-neutral text, usage, completion, or fixed failure values. One optional opaque empty
 reasoning envelope before the message is validated and suppressed. Tool, reasoning text/summary,
 multimodal, duplicate, missing, or inconsistent observations fail closed without retaining raw values.
+Assistant text preserves TAB/LF layout and rejects every other C0/C1 terminal control before the
+fragment is retained or emitted; both wire validators enforce the same invariant before rendering.
 Message items must move from `in_progress` to `completed`, and the completed response must echo the
 reviewed reasoning effort `none` and context `current_turn` before completion is trusted.
 An SDK create or read awaitable that independently raises `CancelledError` becomes a bounded provider
@@ -200,7 +202,8 @@ A successful stream must contain one or more non-empty `ProviderTextDelta` obser
 candidate until provider completion validates the entire grammar and `wait_closed()` has been
 attempted. Only then does the session emit `assistant.completed` followed by `session.completed`.
 A missing, duplicate, out-of-order, empty, mismatched, or early-ended success observation becomes the
-safe `provider_invalid_response` failure.
+safe `provider_invalid_response` failure. TAB and LF are the only admitted C0 layout characters;
+another C0 or any C1 control makes the provider observation invalid before publication.
 
 Empty completed text has one deliberately narrow non-success use: the session may retain it as a
 candidate until a following tool request arrives. That request still becomes `tool_unavailable` and

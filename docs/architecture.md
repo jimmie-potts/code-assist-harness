@@ -361,11 +361,13 @@ the deadline does not bound local sink latency.
 
 CAH-023 implements the first real adapter against foreground OpenAI Responses streaming. It maps one
 provider-neutral text request to `background=false` and `store=false`, accepts only the reviewed event
-automaton, and normalizes SDK failures to fixed provider failures. Every operation lazily owns one SDK
-client and stream plus one shielded resource-cleanup task. Provider-specific configuration is confined
-to the SDK-free validation, composition, and adapter modules; SDK objects, raw responses, and cleanup
-state remain inside the adapter itself. The default `MockSession` is still a separate runtime fixture
-rather than a provider consumer, and default validation never makes a live model or network request.
+automaton, rejects terminal state-changing C0/C1 text controls while preserving TAB/LF layout, and
+normalizes SDK failures to fixed provider failures. Python and TypeScript wire schemas mirror the text
+invariant before terminal state changes. Every operation lazily owns one SDK client and stream plus one
+shielded resource-cleanup task. Provider-specific configuration is confined to the SDK-free
+validation, composition, and adapter modules; SDK objects, raw responses, and cleanup state remain
+inside the adapter itself. The default `MockSession` is still a separate runtime fixture rather than a
+provider consumer, and default validation never makes a live model or network request.
 
 ## Concurrency and cancellation
 
@@ -547,11 +549,10 @@ default test or evaluation makes a network request; the optional `live_provider`
 explicit flags, the exact model, and a credential. The guards are defense in depth rather than an
 operating-system sandbox for native subprocesses.
 
-All committed presentation files are frozen historical artifacts. Existing visual lessons remain
-under `docs/lessons/assets/`, but they may diverge from later design corrections and are not
-authoritative. Starting with CAH-025, the Markdown lesson and its compact architecture diagram are
-the only lesson artifacts. No presentation is added or revised unless the user explicitly reverses
-this freeze.
+Retained presentation files through CAH-022 are frozen historical artifacts under
+`docs/lessons/assets/`. They may diverge from later design corrections and are not authoritative.
+Starting with CAH-023, the Markdown lesson and its compact architecture diagram are the only lesson
+artifacts. No presentation is added or revised unless the user explicitly reverses this freeze.
 
 ## Delivery sequence
 

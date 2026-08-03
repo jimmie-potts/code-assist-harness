@@ -24,9 +24,11 @@ The TypeScript application lives in `tui/`, with source in `tui/src/` and tests 
 language's generated output the unreviewed source of truth during the first implementation.
 Evaluation scenarios belong in `evals/`. Architecture guidance belongs in `docs/`, accepted
 decisions in `docs/adr/`, unit learning companions in `docs/lessons/`, and dependency-ordered
-delivery work in `user-stories/`. All committed presentation files are frozen historical artifacts;
-the existing lesson decks remain under `docs/lessons/assets/`. Markdown lessons are authoritative.
-Do not add or revise presentation files unless the user explicitly reverses this freeze.
+delivery work in `user-stories/`. Retained presentation files are frozen historical artifacts; the
+lesson decks through CAH-022 remain under `docs/lessons/assets/`. Starting with CAH-023, Markdown
+lessons and their compact text diagrams are the only lesson artifacts. Markdown lessons are
+authoritative. Do not add or revise presentation files unless the user explicitly reverses this
+freeze.
 
 Do not add empty planned directories. Introduce a path with the story that first uses it. Project
 metadata, Python dependencies, and tool settings are defined in `pyproject.toml`; commit `uv.lock`
@@ -127,10 +129,10 @@ Every implementation-ready story, including documentation-only work, must keep i
 consistent with the story status and delivered evidence. The additional behavioral checks below
 apply when the story changes executable behavior.
 
-All committed presentation files under `docs/lessons/assets/` are frozen historical artifacts.
-They may diverge from later design corrections and are not authoritative evidence. Starting with
-CAH-025, units include only the Markdown lesson and its compact text diagram. Do not add, revise, or
-retrofit presentation files unless the user explicitly reverses the presentation freeze.
+All retained presentation files under `docs/lessons/assets/` are frozen historical artifacts. They
+may diverge from later design corrections and are not authoritative evidence. Starting with CAH-023,
+units include only the Markdown lesson and its compact text diagram. Do not add, revise, or retrofit
+presentation files unless the user explicitly reverses the presentation freeze.
 
 A behavioral story is complete only when:
 
@@ -164,9 +166,9 @@ link them to their source files, and explain each sample line-by-line or in smal
 junior engineer can connect syntax to behavior. Planned lessons may use clearly labeled pseudocode,
 but must not present it as shipped code.
 
-Existing linked PPTX companions retain their historical validation evidence, but all committed
-presentations are frozen and may differ from later design corrections. CAH-025 and later require
-only the Markdown lesson. The written lesson is the authoritative learning artifact.
+Retained PPTX companions through CAH-022 keep their historical validation evidence, but they are
+frozen and may differ from later design corrections. CAH-023 and later require only the Markdown
+lesson. The written lesson is the authoritative learning artifact.
 
 Starting with CAH-022, keep new lessons concise and centered on system design, agentic-loop design,
 and harness ownership. Every new written lesson includes a compact architecture diagram that

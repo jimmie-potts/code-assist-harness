@@ -349,35 +349,39 @@ def test_presentations_are_frozen_and_markdown_is_authoritative() -> None:
         / "notes"
         / "2026-08-02-cah-024-workspace-boundary-planning.md"
     ).read_text(encoding="utf-8")
+    cah_023_lesson = (
+        REPOSITORY_ROOT / "docs" / "lessons" / "cah-023-openai-responses-adapter.md"
+    ).read_text(encoding="utf-8")
     agents_compact = " ".join(agents.split())
     architecture_compact = " ".join(architecture.split())
     lesson_readme_compact = " ".join(lesson_readme.split())
     cah_024_story_compact = " ".join(cah_024_story.split())
     cah_024_lesson_compact = " ".join(cah_024_lesson.split())
     cah_024_note_compact = " ".join(cah_024_note.split())
+    cah_023_lesson_compact = " ".join(cah_023_lesson.split())
 
     assert "Markdown lessons are authoritative" in agents_compact
-    assert "All committed presentation files are frozen historical artifacts" in agents_compact
+    assert "Retained presentation files are frozen historical artifacts" in agents_compact
     assert "Do not add or revise presentation files" in agents_compact
     assert "Every new written lesson includes a compact architecture" in agents_compact
-    assert (
-        "All committed presentation files are frozen historical artifacts" in architecture_compact
-    )
-    assert "Starting with CAH-025" in architecture_compact
+    assert "Retained presentation files through CAH-022" in architecture_compact
+    assert "Starting with CAH-023" in architecture_compact
     assert "No presentation is added or revised" in architecture_compact
-    assert (
-        "All committed presentation files are frozen historical artifacts" in lesson_readme_compact
-    )
-    assert "Starting with CAH-025" in lesson_readme_compact
+    assert "Retained visual PowerPoint companions through CAH-022" in lesson_readme_compact
+    assert "Starting with CAH-023" in lesson_readme_compact
     assert "Do not add or revise presentations" in lesson_readme_compact
     assert "do not add or revise presentation files while the freeze is active" in template
-    assert "The frozen visual companion remains unchanged" in cah_024_story_compact
-    assert "is not implementation or completion evidence" in cah_024_story_compact
-    assert "Frozen-deck warning" in cah_024_lesson_compact
+    assert "**Visual companion:** None" in cah_023_lesson_compact
+    assert "**Visual companion:** None" in cah_024_lesson_compact
+    assert "No presentation is part of CAH-024" in cah_024_story_compact
     assert "one `WorkspaceBoundaryError`" in cah_024_lesson_compact
     assert "`ResolvedWorkspacePath`" in cah_024_lesson_compact
     assert "five stable error codes" in cah_024_lesson_compact
-    assert "The frozen deck is not planned evidence" in cah_024_note_compact
+    assert "No presentation is planned evidence for CAH-024" in cah_024_note_compact
+
+    lesson_decks = (REPOSITORY_ROOT / "docs" / "lessons" / "assets").glob("cah-*.pptx")
+    deck_units = {int(path.name.split("-", maxsplit=2)[1]) for path in lesson_decks}
+    assert all(unit < 23 for unit in deck_units)
 
 
 def test_review_follow_up_requires_thread_resolution() -> None:

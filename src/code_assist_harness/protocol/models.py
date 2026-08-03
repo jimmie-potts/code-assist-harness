@@ -50,6 +50,20 @@ def _validate_safe_message(value: str) -> str:
     return value
 
 
+def _validate_assistant_text(value: str) -> str:
+    """Admit normal text layout without allowing terminal state-changing controls."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("assistant text must be valid UTF-8") from None
+    if any(
+        (ord(character) < 32 and character not in {"\t", "\n"}) or 127 <= ord(character) <= 159
+        for character in value
+    ):
+        raise ValueError("assistant text contains an unsupported terminal control")
+    return value
+
+
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 """A semantic wire string that must contain at least one character."""
 
@@ -65,6 +79,13 @@ SafeMessage = Annotated[
     AfterValidator(_validate_safe_message),
 ]
 """A bounded single-line failure message without C0 or C1 terminal controls."""
+
+_AssistantText = Annotated[
+    str,
+    StringConstraints(min_length=1),
+    AfterValidator(_validate_assistant_text),
+]
+"""Non-empty assistant text allowing TAB/LF but no other C0 or C1 controls."""
 
 CommandId = Annotated[
     str,
@@ -144,9 +165,9 @@ class EmptySessionPayload(_WireModel):
 
 
 class AssistantTextPayload(_WireModel):
-    """Wire payload containing one non-empty assistant text value."""
+    """Wire payload containing terminal-safe assistant text."""
 
-    text: NonEmptyString
+    text: _AssistantText
 
 
 class SessionFailedPayload(_WireModel):

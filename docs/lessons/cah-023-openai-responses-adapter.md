@@ -5,7 +5,7 @@
 - **Lesson status:** Verified against implementation
 - **Implementation status:** Done
 - **Story:** [CAH-023](../../user-stories/cah-023-add-openai-responses-adapter.md)
-- **Visual companion:** [OpenAI Responses adapter](assets/cah-023-openai-responses-adapter.pptx)
+- **Visual companion:** None; the Markdown lesson and compact text diagram are authoritative
 - **Related architecture:** [ADR 0001](../adr/0001-own-the-agent-loop.md),
   [Agent loop](../agent-loop.md), and [Safety model](../safety-model.md)
 
@@ -94,6 +94,8 @@ Three invariants hold the boundary together:
    rejected before SDK import or client construction. The normal child also starts Python with `-E`.
 2. **Validation before meaning.** Sequence, response identity, item identity, indices, text snapshots,
    message statuses, model, reasoning mode, and usage must reconcile before completion is trusted.
+   Assistant text admits TAB/LF layout but rejects every other C0/C1 terminal control before it can
+   become a provider-neutral event.
 3. **Cleanup before terminal release.** A natural terminal is buffered until stream and client close
    have both been attempted. Cancellation and natural completion share the same cleanup task; an
    independently raised close-time `CancelledError` is failure evidence, not owner cancellation.
@@ -159,16 +161,23 @@ def _text_delta(self, event: object) -> tuple[ProviderStreamEvent, ...]:
         raise InvalidSDKObservation
     self._require_item_coordinates(event)
     _require_absent_or_empty_list(_optional_field(event, "logprobs"))
-    delta = _required_string(_field(event, "delta"))
-    self._text_fragments.append(delta)
+    try:
+        delta = _require_terminal_safe_text(_field(event, "delta"), "OpenAI text delta")
+    except (TypeError, ValueError):
+        raise InvalidSDKObservation from None
+    observation = ProviderTextDelta(delta)
+    self._text_fragments.append(observation.text)
     self._state = "delta_or_done"
-    return (ProviderTextDelta(delta),)
+    return (observation,)
 ```
 
 The state check rejects a delta outside the open text phase; the automaton's global sequence check
 rejects repeated sequence numbers. Coordinate checks bind the delta to the expected message and
-content part. Only the validated string becomes a provider-neutral event; the SDK event never leaves
-this module.
+content part. The provider-domain validator rejects unsafe C0/C1 controls before
+`ProviderTextDelta` is constructed; the adapter translates that rejection to
+`InvalidSDKObservation` before the fragment is retained or emitted. The value constructor repeats
+the invariant as defense in depth. Only validated text crosses the port, and the SDK event never
+leaves this module.
 
 ### Failure path: cancellation owns blocked work
 
@@ -207,6 +216,7 @@ not timing against a network service.
 | --- | --- | --- | --- |
 | Non-string/unsupported provider, model, or ambient SDK/TLS logging | Composition root | Fixed startup error before SDK import | configuration and runtime tests |
 | Out-of-order, mismatched, tool, or reasoning-text event | Adapter automaton | `invalid_response`; no raw payload | parameterized malformed-stream tests |
+| OSC, CSI, carriage return, or another unsupported text control | Provider value plus adapter automaton | `invalid_response`; unsafe fragment never reaches protocol/TUI | domain and hostile-delta tests |
 | Provider exception after partial text | Adapter failure table | One fixed provider failure | closed-table exception tests |
 | Create or stream read independently raises `CancelledError` | Operation lifecycle | fixed provider failure; acquired resources close | hostile SDK-cancellation tests |
 | Cancellation during create or next event | Operation lifecycle | owned task reaped; no later event | blocked-create/read tests |
@@ -255,11 +265,15 @@ conformance evidence before allowlisting.
 3. Explain why an independent close-time `CancelledError` is cleanup failure but task cancellation of
    the cleanup owner remains control flow.
 4. Run the adapter tests and identify which ones prove “no HTTP by default.”
+5. Compare TAB/LF with carriage return and OSC-52, then explain why rejection preserves the exact
+   delta/completion reconciliation rule.
 
 ## Key takeaways
 
 - The adapter owns vendor translation; the harness owns agent-loop truth.
 - Every external observation is validated before it gains domain meaning.
+- Terminal-safe assistant text is a provider-domain and protocol invariant, not a React rendering
+  decision.
 - Strict local evidence is cheap and deterministic; broader production capability adds operational
   ownership as well as resilience.
 

@@ -132,8 +132,8 @@ are intentionally not exposed.
 9. Focused tests include a happy path and meaningful traversal, symlink-escape, missing-target, and
    stale-root failures without network, provider, subprocess, or timing dependence.
 10. The Markdown lesson remains explicitly planned until implementation, then traces the concrete
-    path, at least one failure test, and the full repository gate. The frozen visual companion
-    remains unchanged and is not implementation or completion evidence.
+    path, at least one failure test, and the full repository gate. No presentation is part of
+    CAH-024; the Markdown lesson and compact text diagram are the only learning artifacts.
 
 ## Validation
 
@@ -159,9 +159,8 @@ are intentionally not exposed.
 Update `README.md`, `docs/architecture.md`, `docs/context-engineering.md`, `docs/safety-model.md`,
 `docs/glossary.md`, the story and lesson indexes, and the backlog with the implemented boundary,
 its canonical-reporting rule, fixed failures, and residual check/use risk. Reconcile the Markdown
-lesson to the exact modules and tests. Retain the frozen
-`docs/lessons/assets/cah-024-workspace-boundary.pptx` unchanged and record its known divergence from
-the authoritative contract.
+lesson to the exact modules and tests. Do not add a presentation; the Markdown diagram carries the
+architecture position.
 
 ## Out of scope
 
@@ -184,8 +183,8 @@ the authoritative contract.
 - Runtime tests prove delegation preserves the current one-root launch contract and removes raw-path
   startup errors.
 - The Markdown lesson locates CAH-024 between runtime workspace selection and future context/read
-  tools while keeping provider, tool, and evidence changes absent. The frozen deck is not planned
-  evidence.
+  tools while keeping provider, tool, and evidence changes absent. No presentation is planned
+  evidence for CAH-024.
 - Focused tests and the repository-wide non-live gate pass before the story moves to Done.
 
 ## Deferred work

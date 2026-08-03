@@ -4,8 +4,9 @@
 
 The open CAH-023 pull request received a second adversarial pass. The fixes preserve the unit's
 single responsibility—strict vendor translation behind the provider port—while closing credential,
-runtime-environment, stream-validation, and cleanup-state gaps. No SDK type or policy decision moved
-into the TUI, protocol, or provider-neutral loop.
+runtime-environment, stream-validation, and cleanup-state gaps. No SDK type or agent-loop policy moved
+into the TUI, protocol, or provider-neutral loop; the wire schemas only mirror the provider-domain
+terminal-text invariant at the untrusted process boundary.
 
 ## Required fixes
 
@@ -63,8 +64,15 @@ release, and the harness continues to own limits, cancellation intent, terminal 
 - The canonical `./scripts/check` gate passed: 663 non-live Python tests, 30 Python protocol-fixture
   tests, and 33 repository-policy tests passed; TypeScript type checking and lint passed; 237 TUI,
   29 TypeScript protocol-fixture, and 4 real Node-to-`uv`-to-Python boundary tests passed.
-- The six-slide visual companion was rebuilt from the existing template through artifact-tool. Every
-  final slide was rendered at high detail and inspected individually; the template plan and fidelity
-  checks passed with zero issues, and the presentation overflow test reported no overflow.
+- A six-slide companion was rebuilt and inspected during branch work, then removed before merge under
+  the presentation freeze. It is not a retained artifact or validation evidence; the Markdown lesson
+  and compact text diagram are authoritative.
+- Hostile OpenAI text containing carriage return, OSC-52, or C1 controls now fails as the fixed
+  `invalid_response` before the fragment crosses the provider boundary. Provider-domain and both wire
+  validators admit TAB/LF layout and reject every other C0/C1 control; deterministic tests cover the
+  safe and hostile paths without HTTP.
+- After the terminal-text and presentation-freeze follow-up, `./scripts/check` passed with 935
+  non-live Python tests, 31 Python protocol-fixture tests, 35 repository-policy/check-script tests,
+  238 TUI tests, 30 TypeScript protocol-fixture tests, and 4 real Node-to-Python boundary tests.
 - GitHub Actions runs the same canonical gate on the published commit; remote status is verified
   separately. The credential-gated live smoke remains supplemental and was not run.

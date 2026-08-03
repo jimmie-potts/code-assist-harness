@@ -122,7 +122,7 @@ See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-
   [visual lesson](../docs/lessons/assets/cah-022-loop-limits.pptx) accompanies the written lesson.
 - [2026-08-01 CAH-023 OpenAI Responses adapter](notes/2026-08-01-cah-023-openai-responses-adapter.md)
   records the configuration gate, strict event automaton, cleanup ownership, deterministic and
-  optional-live validation boundary, and visual lesson evidence.
+  optional-live validation boundary, and Markdown learning evidence.
 - [2026-08-02 CAH-023 adversarial-review hardening](notes/2026-08-02-cah-023-adversarial-review-hardening.md)
   records the credential, environment, stream-validation, and cleanup fixes plus the deliberately
   unchanged model and refusal boundaries.

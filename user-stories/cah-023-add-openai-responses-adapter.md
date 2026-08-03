@@ -163,6 +163,11 @@
   exact echoed reasoning effort `none` and context `current_turn`, and optional non-negative
   safe-integer input/output usage. Any present total usage equals their sum; any present
   reasoning-token detail is already included in output tokens and cannot exceed it.
+- Provider text admits TAB and LF as explicit layout characters but rejects every other C0/C1
+  terminal control before constructing `ProviderTextDelta` or `ProviderTextCompleted`. An unsafe
+  fragment is not retained or published and becomes the same fixed `invalid_response` failure as
+  other malformed SDK observations. Python and TypeScript protocol validators mirror this invariant
+  before assistant text can enter trusted terminal state.
 - `response.failed` or `response.incomplete` may replace the remaining success suffix after
   `response.created` and any valid subsequent prefix, but must retain response identity and sequence.
   A top-level `error` may be the first event or may terminate any valid prefix; its sequence becomes
@@ -288,6 +293,9 @@
 - Run provider-neutral CAH-021 and limit CAH-022 suites unchanged against the adapter-facing port.
 - Exercise the runtime composition root with sanitized fake SDK behavior and assert no secret reaches
   stdout, stderr, protocol events, fixtures, snapshots, or transcripts.
+- Exercise TAB/LF success plus carriage-return, OSC-52, and C1 failure paths. Prove unsafe fragments
+  become the fixed `invalid_response` before publication, both wire validators reject a shared hostile
+  fixture as `invalid_payload`, and stream/client cleanup still runs.
 - Use distinct sentinels for the API key, model/task/instruction text, function arguments, raw
   headers/request IDs, and exception bodies. Failure diagnostics and public evidence must contain
   none of them; intentionally mapped assistant text remains subject to the existing transcript
@@ -310,8 +318,9 @@
 
 Document provider/model selection, the explicit local `dev.env` workflow, request and event mapping, foreground
 cancellation, storage and transcript boundaries, SDK-fake testing, and the opt-in live command.
-Update the agent-loop, architecture, safety, evaluation, README, glossary, and provider lesson. Add
-the required written and visual CAH-023 learning evidence when implemented.
+Update the agent-loop, architecture, safety, evaluation, README, glossary, and provider lesson. The
+Markdown lesson and its compact text diagram are the authoritative CAH-023 learning evidence; no
+presentation is part of the unit.
 
 ## Delivered implementation
 
@@ -330,10 +339,10 @@ the required written and visual CAH-023 learning evidence when implemented.
 - Deterministic SDK fakes cover request mapping, successful and malformed streams, failure
   normalization, partial output, terminal races, cancellation, and resource-close failures without
   HTTP. The separately registered live smoke remains explicit and supplemental.
-- The linked lesson and visual companion locate the adapter inside the TUI, harness, provider, tool,
-  and evidence boundaries and focus on loop ownership rather than SDK mechanics.
+- The linked Markdown lesson and compact text diagram locate the adapter inside the TUI, harness,
+  provider, tool, and evidence boundaries and focus on loop ownership rather than SDK mechanics.
 
-Detailed validation and presentation evidence is recorded in the original
+Detailed validation evidence is recorded in the original
 [CAH-023 implementation note](notes/2026-08-01-cah-023-openai-responses-adapter.md) and its
 [Luna/local-environment migration note](notes/2026-08-01-cah-023-luna-dev-environment.md). The
 [adversarial-review hardening note](notes/2026-08-02-cah-023-adversarial-review-hardening.md) records

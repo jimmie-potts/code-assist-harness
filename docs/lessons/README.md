@@ -28,11 +28,10 @@ scale, risk, regulations, existing platform capabilities, operational maturity, 
 ownership. Prefer an official product or project reference when naming a tool, and explain the
 capability it represents so the lesson remains useful if the vendor changes.
 
-All committed presentation files are frozen historical artifacts. Existing visual PowerPoint
-companions remain under `assets/`, but they may diverge from later design corrections and are not
-authoritative. Starting with CAH-025, the Markdown lesson and its compact architecture diagram are
-the only lesson artifacts. Do not add or revise presentations unless the user explicitly reverses
-this freeze.
+Retained visual PowerPoint companions through CAH-022 are frozen historical artifacts under
+`assets/`. They may diverge from later design corrections and are not authoritative. Starting with
+CAH-023, the Markdown lesson and its compact architecture diagram are the only lesson artifacts. Do
+not add or revise presentations unless the user explicitly reverses this freeze.
 
 ## Lesson sequence
 
@@ -57,7 +56,7 @@ this freeze.
 
 CAH-023 completes the M1 learning sequence by locating the first real-provider adapter behind the
 harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024 is
-the planned first M2 boundary unit and the final unit with a historical visual companion.
+the planned first M2 boundary unit. Both use Markdown-only lessons with compact text diagrams.
 
 ## Required lesson structure
 
@@ -80,8 +79,8 @@ Every unit lesson contains:
 11. Practical exercises that work without a live model or network unless explicitly opt-in.
 12. A concise takeaway list and a lesson-local glossary.
 13. Further reading that links the story, local architecture, and named production references.
-14. Retain any linked historical PPTX without revising it. Starting with CAH-025, do not add a
-    presentation; the Markdown architecture diagram carries placement.
+14. Retain any linked historical PPTX through CAH-022 without revising it. Starting with CAH-023, do
+    not add a presentation; the Markdown architecture diagram carries placement.
 
 Use [the lesson template](lesson-template.md) when a new implementation-ready story is added.
 
