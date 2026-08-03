@@ -192,11 +192,13 @@ closed grammar is validated before final text can be published or a tool call ca
 
 Bounded provider continuation state that the harness preserves byte-for-byte but never interprets
 as instructions, assistant text, or policy. Planned CAH-036 stores each accepted OpenAI reasoning
-item as one canonical full replay envelope—including its required ID and item fields, not only the
-encrypted content—and reconstructs it on later stateless `store=false` requests even while the
-configured reasoning context remains `current_turn`. Every request uses the exact Responses include
-value `reasoning.encrypted_content` so even the first accepted reasoning item carries that replay
-payload. SDK objects still stop at the adapter boundary.
+item as one canonical six-key replay envelope—including its required ID and item fields, not only the
+encrypted content. Omitted or null optional `content` and `status` become null markers and are omitted
+again on input replay. CAH-032 carries the payload as one bounded, content-suppressed item at its exact
+history position rather than a separate request field. CAH-036 reconstructs it on later stateless
+`store=false` requests even while the configured reasoning context remains `current_turn`. Every
+request uses the exact Responses include value `reasoning.encrypted_content` so even the first
+accepted reasoning item carries that replay payload. SDK objects still stop at the adapter boundary.
 
 ## NDJSON
 
@@ -249,8 +251,9 @@ and closes the stream logically without claiming remote resources were released.
 
 The immutable harness-owned input for exactly one model turn. CAH-020 represents a non-empty ordered
 conversation plus ordered caller-supplied repository instructions. Planned CAH-032 adds already
-selected repository context, strict local tool definitions, and matched call/result history under a
-fixed canonical byte bound. The request deliberately excludes provider credentials, SDK values,
+selected repository context, strict local tool definitions, positional opaque continuation, and
+matched call/result history under a fixed canonical byte bound. The request deliberately excludes
+provider credentials, SDK values,
 provider-specific response objects, instruction discovery, context-selection policy, and inclusion
 reports. A plain runtime task defaults context scope to `.` with empty focus and search inputs.
 Explicit OpenAI selection authorizes the bounded, policy-admitted repository content in that request

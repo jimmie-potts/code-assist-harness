@@ -26,7 +26,7 @@ start another model turn, publish protocol events, or persist transcript evidenc
 - Replace optimistic text publication with a provider-neutral staged turn collector.
 - Add immutable accepted final-text and one-tool-call outcomes, and return the existing immutable
   normalized `ProviderFailure` value for a provider-declared failure.
-- Admit one optional bounded opaque provider continuation and at most one usage value.
+- Admit one optional CAH-032 `ProviderOpaqueContinuation` and at most one usage value.
 - Validate the entire observation grammar through its legal `ProviderCompleted` or `ProviderFailed`
   terminal before exposing an outcome.
 - Keep cancellation, the absolute provider-work deadline, and provider resource cleanup under the
@@ -57,12 +57,11 @@ start another model turn, publish protocol events, or persist transcript evidenc
   exactly one bounded `ProviderToolCall`; mixed text/call, duplicate calls, post-terminal values, and
   unsupported observations select the fixed `provider_invalid_response` failure.
 - One optional `ProviderOpaqueContinuation` may appear only first. It contains one SDK-free,
-  non-empty `payload` string whose strict UTF-8 encoding is at most 65,536 bytes. The provider adapter
-  owns the payload's replay format; the core preserves the complete payload byte-for-byte and never
-  parses or interprets it. The limit applies to the full serialized replay envelope, not merely an
-  encrypted-content field. Its `repr` and diagnostics reveal no payload. It is absent from protocol,
-  transcripts, logs, and failure messages, and it counts toward CAH-032's 512-KiB canonical request
-  projection when replayed later.
+  CAH-032-validated `payload` string whose strict UTF-8 encoding is at most 65,536 bytes. The provider
+  adapter owns the payload's replay format; the core preserves the complete payload byte-for-byte and
+  never parses or interprets it. CAH-032 owns construction, safe representation, ordered-history item
+  counting, and canonical request projection. This collector only enforces first-position response
+  grammar and keeps the value absent from protocol, transcripts, logs, and failure messages.
 - At most one validated `ProviderUsageReported` may appear, after completed text or the call and
   before the legal `ProviderCompleted` or `ProviderFailed` terminal. Usage is non-authoritative
   evidence carried only by an accepted success outcome; the collector neither reports nor persists

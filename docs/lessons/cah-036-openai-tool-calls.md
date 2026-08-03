@@ -18,8 +18,9 @@
 
 CAH-036 maps the proven neutral loop to OpenAI Responses local function calling. Every request is a
 complete stateless replay, including every stored reasoning-item field and its exact input projection,
-and explicitly asks the API to return encrypted reasoning for later replay. Every response must match
-one exact message-or-call grammar before the loop sees it.
+and explicitly asks the API to return encrypted reasoning for later replay. Omitted or null optional
+reasoning `content`/`status` become canonical null markers and are omitted again on input replay.
+Every response must match one exact message-or-call grammar before the loop sees it.
 
 ## Learning objectives
 
@@ -57,7 +58,8 @@ misconception is also that `parallel_tool_calls=false` validates output count; t
 
 - **Stateless replay:** send complete locally owned ordered history every turn.
 - **Replay-payload selection:** request `reasoning.encrypted_content` on every turn, including turn one.
-- **Opaque reasoning envelope:** canonical full replay item preserved by core, parsed only by adapter.
+- **Opaque reasoning envelope:** canonical six-key replay item preserved by core, parsed only by the
+  adapter; null marks an absent optional input field.
 - **Strict adapter grammar:** `[reasoning?, function_call]` or `[reasoning?, message]` only.
 - **Egress consent:** explicit OpenAI selection authorizes bounded admitted repository content.
 - **Semantic result:** compact function-output JSON interpreted by the model, not SDK lifecycle.
@@ -70,8 +72,8 @@ Ink TUI              Python harness domain                     OpenAI Responses
                          ^                                      ^       |
                          | atomic final/call                    |       v
                     CAH-033 admission <--- CAH-036 strict SDK mapper
-                         ^                  full replay: context + calls/results
-                         |                  + every full opaque reasoning envelope
+                         ^                  full replay: one ordered neutral history
+                         |                  + opaque? -> call -> result positions
                   local read registry
 
 Request: store=false, parallel_tool_calls=false,
@@ -87,7 +89,7 @@ before CAH-033 exposes an atomic outcome.
 ## Practical walkthrough
 
 1. Map selected instructions and explicitly untrusted repository evidence.
-2. Map strict local function definitions and complete neutral history.
+2. Map strict local function definitions and the complete positional neutral history.
 3. Set stateless/sequential options, request encrypted reasoning replay, and omit continuation IDs.
 4. Reconcile exactly one of the two legal output-item sequences.
 5. Canonicalize the complete reasoning replay item into one bounded opaque neutral value.
@@ -109,10 +111,18 @@ sdk_request = {
 ```
 
 The exact one-element `include` appears unchanged on every request, not only follow-up turns.
-`map_all_items` reconstructs every prior reasoning item's ID, empty summary, encrypted content,
-completed status, and type from its canonical opaque envelope. An empty output content list remains
-empty; a null output content value becomes an omitted input key because that input field is optional
-but non-nullable. It then preserves each call and function output. There is no `previous_response_id`.
+`map_all_items` reconstructs every prior reasoning item's ID, empty summary, encrypted content, and
+type from its canonical opaque envelope at that history position. The canonical envelope always has
+six keys: omitted or null output `content`/`status` is stored as null and omitted from the later input;
+an empty content list and a completed status remain present. It then preserves each call and function
+output. There is no `previous_response_id` or separate continuation field.
+
+```json
+{"content":null,"encrypted_content":"opaque-token","id":"rs_1","status":null,"summary":[],"type":"reasoning"}
+```
+
+This fixed canonical shape makes absence deterministic without requiring the provider to send either
+optional field.
 
 ### Planned pseudocode: semantic result
 
@@ -131,6 +141,8 @@ fixed transport value, never a policy decision.
 | two calls despite parallel=false | invalid response | output-count mutation |
 | encrypted-content include missing on any turn | outbound contract failure | turn-one-through-four snapshots |
 | reasoning item omitted on replay | request mismatch | exact turn-two snapshot |
+| completed reasoning omits `content` or `status` | canonical null marker, then omitted input key | optional-field cross-product |
+| reasoning has non-empty content, wrong status, missing required field, or extra key | invalid response | no opaque/call/text/usage escapes |
 | full reasoning envelope exceeds bound | invalid response | safe redacted representation |
 | result error mapped to SDK failure | mapping test fails | fixed transport status |
 | source content sentinel excluded | sentinel absent | request snapshot |
@@ -176,14 +188,16 @@ security control; do not imply path policy already scans file contents.
 3. Explain why `current_turn` does not authorize dropping prior opaque output.
 4. Show why tool-error JSON still uses a completed transport item.
 5. Teach back what explicit OpenAI selection authorizes and what it does not protect.
+6. Map omitted, null, and present `content`/`status` through canonical storage and input replay.
 
 ## Key takeaways
 
 - The adapter translates; the harness admits, dispatches, and continues.
 - Every stateless request asks for `reasoning.encrypted_content`; otherwise later full replay is not
   guaranteed to be constructible.
-- Stateless replay preserves every required reasoning field in order and handles optional content by
-  one exact, tested null-to-omitted mapping.
+- Stateless replay preserves every required reasoning field in order and handles optional fields
+  through exact, tested null-to-omitted mappings for both `content` and `status`, while retaining
+  empty content and completed status when present.
 - Explicit provider selection permits bounded egress, but M2 does not scan admitted content for secrets.
 
 ## Glossary

@@ -147,13 +147,14 @@ and dynamic extension remain M3 or later.
 
 ### Planned CAH-032 — Define the provider-neutral tool contract
 
-> As an agent-loop developer, I want selected context, definitions, calls, and results represented
-> without provider or MCP types so that adapters cannot become the orchestrator.
+> As an agent-loop developer, I want selected context, definitions, opaque continuation, calls, and
+> results represented without provider or MCP types so that adapters cannot become the orchestrator.
 
 The [implementation-ready story](../user-stories/cah-032-define-provider-tool-contract.md) defines
-the strict portable schema subset, exact call/result history, context projection, request bounds,
-registry-to-definition bridge, pre-Pydantic exact-key gate, and strict-fake behavior. It does not
-parse or dispatch a call.
+the strict portable schema subset, exact positional continuation/call/result history, context
+projection, request bounds, registry-to-definition bridge, pre-Pydantic exact-key gate, and
+strict-fake behavior. Each continuation is one bounded item in the same ordered history, not an adapter
+side channel; multiple call turns may each contribute one. The story does not parse or dispatch a call.
 
 ### Planned CAH-033 — Admit one complete tool-aware response
 
@@ -181,10 +182,10 @@ values; it does not inherit bare `LoopLimits()` defaults.
 The [implementation-ready story](../user-stories/cah-036-map-openai-tool-calls.md) maps the same
 definitions, full stateless history, calls, results, and selected context through the strict OpenAI
 adapter. Full replay under `store=false` reconstructs every required field from each accepted
-canonical reasoning-item envelope—even with `current_turn` reasoning context—and applies the one
-reviewed null-content-to-omitted-input mapping. Every request sets exactly
-`include=["reasoning.encrypted_content"]`, including turn one, so the API returns the opaque payload
-needed for any later replay. It disables parallel calls,
+canonical reasoning-item envelope—even with `current_turn` reasoning context—and applies the
+reviewed null-to-omitted-input mapping for each optional `content` and `status` field. Every request
+sets exactly `include=["reasoning.encrypted_content"]`, including turn one, so the API returns the
+opaque payload needed for any later replay. It disables parallel calls,
 rejects hosted/MCP tool types, and leaves dispatch and continuation decisions in the harness. Explicit
 OpenAI selection authorizes
 bounded admitted repository-content egress for that session; it is not content-level secret

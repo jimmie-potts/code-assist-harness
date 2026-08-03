@@ -134,9 +134,10 @@ rather than lifecycle state. A version-3 mock tape may omit loop evidence.
 CAH-020 through CAH-023 are complete. The harness now owns one bounded provider turn with
 deterministic fake and explicitly configured OpenAI paths; the SDK remains isolated behind the
 provider port. Planned M2 stories CAH-032 through CAH-036 extend that same seam with provider-neutral
-tool definitions, calls, and correlated results; atomic full-response admission before publication
-or dispatch; one explicit round trip; bounded sequential iteration; and strict OpenAI Responses
-tool-call translation. Parallel calls and framework-owned orchestration remain excluded.
+tool definitions, positional opaque continuation, calls, and correlated results; atomic full-response
+admission before publication or dispatch; one explicit round trip; bounded sequential iteration; and
+strict OpenAI Responses tool-call translation. Parallel calls and framework-owned orchestration remain
+excluded.
 
 ### E3 - Repository context and read-only tools
 

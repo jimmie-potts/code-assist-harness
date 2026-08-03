@@ -31,10 +31,10 @@ does not register or dispatch model-callable tools.
 - Define the shared model-facing string admission rule used by later path and query request models:
   after JSON parsing, require an exact strict UTF-8 encode/decode round-trip before policy or
   filesystem work.
-- Load only `.gitignore` files on the supplied lexical ancestor chain and the resolved canonical
-  target ancestor chain. Evaluate each view independently, with rules interpreted relative to the
-  directory that owns each file and ordered from root to nearest; an ignored decision in either view
-  denies the target.
+- Walk the supplied lexical ancestor chain and the resolved canonical target ancestor chain from root
+  to leaf. Load only `.gitignore` files whose owning directory is still traversable, interpret rules
+  relative to that directory, and evaluate each view independently; an ignored ancestor or target in
+  either view denies the target.
 - Keep all behavior native Python, local, deterministic, and side-effect free apart from bounded
   reads of policy files: no subprocess, shell, network, provider, protocol, transcript, or TUI
   change.
@@ -58,18 +58,30 @@ does not register or dispatch model-callable tools.
   root; each nested `.gitignore` applies only below its owning directory. Within a file, later rules
   win; across files, the nearest applicable file is evaluated later. Git-style `!` negation may
   re-include a normally ignored path when its parent traversal is available.
+- `GitIgnoreSpec` supplies matching, but the policy owns traversal semantics. Each view walks proper
+  directory ancestors from root to leaf, evaluates each directory label with the policy files
+  available before entering it, and loads that directory's `.gitignore` only after the directory is
+  admitted. If an ancestor remains ignored, the view denies immediately: policy files inside or below
+  that directory are neither opened nor charged, and a later negation for the leaf cannot rescue it.
+  Thus `private/` followed by `!private/keep.py` still denies `private/keep.py`, while
+  `private/*` followed by `!private/keep.py` may admit it because `private/` itself stays traversable.
+  Only after every proper ancestor admits does the final target match decide that view.
 - Ignore admission has two independent views. The lexical view matches the normalized supplied
   workspace-relative path against root-to-nearest policy files on its supplied ancestor chain,
   without replacing that label with a symlink target. The canonical view matches the
   `WorkspaceBoundary` target-relative label against policy files on the resolved target's canonical
-  ancestor chain. Each view computes normal Git precedence only within that view. The target is
-  admitted only when neither final view is ignored; negation in one view cannot cancel an ignored
-  decision in the other.
+  ancestor chain. Each view verifies ancestor traversability and computes normal Git precedence only
+  within that view. The target is admitted only when neither view has an ignored ancestor or final
+  target; negation in one view cannot cancel an ignored decision in the other. Lexical ancestor
+  denial occurs before target resolution; canonical ancestor denial occurs after resolution but
+  before content I/O.
 - Policy-file count and byte limits apply to the union of the two applicable ancestor chains.
   Policy inputs that resolve to the same canonical regular file are loaded and charged once, even
-  though their rules may be evaluated against both labels. The root policy therefore does not consume
-  the budget twice merely because every request has two views. A lexical denial short-circuits before
-  resolving the requested target or loading its canonical-chain policy files.
+  though their rules may be evaluated against both labels. A shared read/parse cache does not reuse a
+  view-relative match result: each view attaches the cached rules at that view's owning-directory
+  scope and performs its own ancestor walk. The root policy therefore does not consume the budget
+  twice merely because every request has two views. A lexical denial short-circuits before resolving
+  the requested target or loading its canonical-chain policy files.
 - The final ignored decision is non-overridable. No public input, provider argument, configuration,
   or future approval may request `include_ignored`. A hard-denied path can never be re-included by a
   negation rule.
@@ -163,9 +175,10 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 1. One typed Python policy composes CAH-024 containment, the exact hard denylist, and applicable root
    plus nested `GitIgnoreSpec` rules for both the supplied lexical and resolved canonical ancestor
    chains in deterministic precedence order.
-2. Normal Git ignore negation works within each view, but either view's ignored decision wins; no
-   cross-view negation, caller override, or pattern can re-include an ignored-in-the-other-view or
-   hard-denied path.
+2. Every proper ancestor remains traversable in both views before a leaf negation can take effect.
+   Normal Git ignore negation works within each view only under that rule, either view's ignored
+   ancestor or target wins, and no cross-view negation, caller override, or pattern can re-include an
+   ignored-in-the-other-view or hard-denied path.
 3. Policy files enforce 64-KiB per-file, 16-file, 256-KiB aggregate, strict-UTF-8, and no-NUL limits
    with fixed safe failures.
 4. Direct ignored targets fail explicitly; traversal consumers can omit ignored and denied
@@ -181,10 +194,10 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 
 | Contract or risk | Planned test | Layer | Expected evidence |
 | --- | --- | --- | --- |
-| Nested ignore precedence | Combine root and nested ignores with later negations in each view | Unit | Each view receives the exact root-to-nearest final decision before the two decisions are combined |
+| Ancestor traversal and nested precedence | Compare `private/` plus `!private/keep.py` with the traversable-parent control `private/*` plus `!private/keep.py`; put an invalid nested policy below the ignored directory | Unit | The ignored parent denies direct access, its nested policy is never opened or charged, and leaf negation works only in the traversable-parent control |
 | Relative pattern scope | Repeat a filename inside and outside a nested policy directory | Unit | Nested rule affects only its subtree |
-| Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only the alias, only the target, both, and neither, including an opposing negation | Policy/boundary integration | Either ignored view denies; access requires both views to admit, lexical denial performs no target resolution, and neither label or rule leaks |
-| Dual-chain policy budget | Share root and aliased policy files across both chains, then cross the unique-file count and aggregate-byte edges | Unit | Canonically identical policy inputs are charged once; the union still fails closed above 16 files or 256 KiB |
+| Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; access requires both complete walks to admit, lexical denial performs no target resolution, canonical denial performs no content I/O, and neither label nor rule leaks |
+| Dual-chain policy budget | Share root and aliased policy files across both chains, give the two view owners different labels, then cross the unique-file count and aggregate-byte edges | Unit | Canonically identical policy inputs are read/charged once but their cached rules are scoped and evaluated in both views; the union still fails closed above 16 files or 256 KiB |
 | Non-overridable denial | Try ignore negation and a fabricated override for every denylist class | Unit/schema | Generic unavailable result; unsupported override rejected |
 | Exact policy limits | Exercise 65,535/65,536/65,537 bytes, 16/17 files, aggregate edge | Unit | Success at limits and fixed failure above |
 | Strict text | Use invalid UTF-8 and NUL in applicable `.gitignore` files | Unit | `repository_policy_invalid` with no decoder or content leak |
@@ -197,8 +210,12 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 - Add focused policy tests for GitIgnoreSpec semantics, nested scope, negation, directory patterns,
   denylist precedence, canonical symlinks, stale roots, and exact safe errors. Exercise the complete
   lexical/canonical ignore truth table and prove an opposing negation cannot override the other
-  view's ignored decision. A boundary spy proves lexical denial short-circuits before target
-  resolution.
+  view's ignored decision. Direct-access regressions prove `private/` plus `!private/keep.py` denies
+  in both lexical and canonical views, while `private/*` plus `!private/keep.py` admits only when the
+  other view also admits. A boundary spy proves lexical ancestor denial starts no target resolution;
+  an I/O spy proves canonical ancestor denial starts no content access.
+- Put an invalid or oversized `.gitignore` below an already ignored directory and prove it is never
+  opened or charged and cannot replace `repository_path_ignored` with `repository_policy_invalid`.
 - Test every numeric policy boundary below, at, and above; test the shared constants as public
   reviewed defaults rather than duplicated literals. For the two-chain policy budget, prove shared
   canonical policy files are charged once and distinct files across the union are all charged.
@@ -234,9 +251,9 @@ presentation.
 1. Every acceptance criterion has deterministic happy, boundary, and adversarial failure evidence.
 2. All policy and shared numeric limits pass below/at/above tests, and model-facing path/query
    strings pass strict Unicode-scalar/UTF-8 boundary tests before filesystem access.
-3. GitIgnoreSpec precedence in both lexical and canonical views, lexical pre-resolution denial,
-   either-view-denies combination, canonical-only public labels, hard-deny dominance, and no ignored
-   override are proved.
+3. GitIgnoreSpec precedence and ancestor traversability in both lexical and canonical views, lexical
+   pre-resolution denial, canonical pre-I/O denial, either-view-denies combination, canonical-only
+   public labels, hard-deny dominance, and no ignored override are proved.
 4. Public contracts are immutable, typed, documented, and emit only the fixed safe failures.
 5. Focused tests and the canonical offline `./scripts/check` pass without a model, subprocess, or
    network.

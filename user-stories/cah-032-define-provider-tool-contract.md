@@ -18,13 +18,14 @@
 ## Single responsibility
 
 CAH-032 extends the provider port and strict fake with the complete provider-neutral request and
-history values needed for tool-assisted turns, including an immutable projection of CAH-030 context.
-It does not parse or dispatch a call, run a second model turn, map OpenAI SDK events, or expose MCP.
+history values needed for tool-assisted turns, including an ordered opaque-continuation carrier and
+an immutable projection of CAH-030 context. It does not parse or dispatch a call, run a second model
+turn, map OpenAI SDK events, or expose MCP.
 
 ## Scope
 
 - Add immutable provider-neutral values for one function-like tool definition, one requested call,
-  and one tool result.
+  one tool result, and a bounded opaque-continuation item type.
 - Extend `ProviderRequest` with ordered model input history and an ordered tuple of available tool
   definitions while preserving text-only requests.
 - Add a pure projection from CAH-030's package into ordered provider request context without sending
@@ -38,8 +39,8 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
   its exact key set against the portable definition before native Pydantic validation can apply a
   default. Keep the native request models and their direct-Python defaults unchanged.
 - Add exact canonicalization plus strict Unicode-scalar/UTF-8 validation and bounded,
-  content-suppressed representations for identifiers, descriptions, schemas, arguments, and result
-  envelopes.
+  content-suppressed representations for identifiers, descriptions, schemas, arguments,
+  continuations, and result envelopes.
 
 ## Locked contract
 
@@ -102,10 +103,19 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
   bytes, float, extra key, malformed JSON, lone surrogate, or oversized envelope fails before it
   enters history. Results contain no exception, absolute path, credential, raw OS error, or provider
   object, and their ordinary representation suppresses `output_json`.
+- `ProviderOpaqueContinuation` contains one non-empty `payload` string owned by the active provider
+  adapter. Construction requires an exact strict Unicode-scalar/UTF-8 round-trip, rejects literal
+  NUL, performs no normalization, and caps the encoded payload at 65,536 bytes inclusive. Core code
+  preserves exact equality but never parses or interprets the value. Its ordinary representation,
+  validation errors, strict-fake mismatches, logs, protocol, and transcripts reveal no payload.
 - Provider request input is an immutable ordered tuple whose admitted item types are user/assistant
-  messages, prior tool calls, and matching tool results. A tool result must follow its one unmatched
-  call; duplicate IDs, orphan results, unresolved prior calls, and text after an unresolved call are
-  rejected at construction.
+  messages, opaque continuations, prior tool calls, and matching tool results. A continuation is a
+  positional provider-output item, not a separate request field or adapter side channel: it must
+  immediately precede the provider-produced call or assistant message it belongs to. It is invalid at
+  history start or end, before a user message, result, or second continuation, or while a prior call
+  remains unresolved. A tool result must follow its one unmatched call; duplicate IDs, orphan results,
+  unresolved prior calls, and text after an unresolved call are rejected at construction. The M2
+  round-trip order is therefore original input, optional continuation, call, matching result.
 - `ProviderRequest.repository_context` is the exact immutable ordered `ContextItem` tuple projected
   from one successful CAH-030 package. It inherits that package's 24-item and 96-KiB content bounds;
   the inclusion report remains harness evidence and never becomes model input. The existing
@@ -155,17 +165,20 @@ It does not parse or dispatch a call, run a second model turn, map OpenAI SDK ev
 | Canonical parameter schema | 16 KiB (16,384 UTF-8 bytes) and 32 root properties |
 | Call ID | 1-256 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}` |
 | Serialized call arguments | 16 KiB (16,384 UTF-8 bytes) |
+| Opaque continuation payload | 64 KiB (65,536 UTF-8 bytes), non-empty |
 | Error code / message | code matches `[a-z][a-z0-9_]{0,63}`; non-empty message is at most 1,024 UTF-8 bytes |
 | Complete canonical tool-result envelope | 64 KiB (65,536 UTF-8 bytes), including escaping, keys, punctuation, and wrapper |
 | Ordered conversation/history items | 16 per request |
 | Complete provider-neutral request projection | 512 KiB (524,288 UTF-8 bytes) |
 
 Every byte bound uses the strict UTF-8 rules above. Construction rejects a value above its bound
-rather than truncating it, and ordinary representations omit schema, argument, result, and message
-content. The complete request bound is the length of one compact, sorted-key JSON projection using
-the same serializer options over messages, context, definitions, calls, and results. It is a
-deterministic admission proxy, not a provider token count or a claim about an adapter's exact wire
-bytes.
+rather than truncating it, and ordinary representations omit schema, argument, result, continuation,
+and message content. A continuation counts as one of the 16 history items. Its tagged projection is
+exactly `{"kind":"opaque_continuation","payload":<string>}`. The complete request bound is the
+length of one compact, sorted-key JSON projection using the same serializer options over messages,
+context, definitions, continuations, calls, and results; the tagged continuation and its JSON
+escaping are charged exactly once. It is a deterministic admission proxy, not a provider token count
+or a claim about an adapter's exact wire bytes.
 
 ## Reviewability budget
 
@@ -179,15 +192,16 @@ bytes.
 
 ## Acceptance criteria
 
-1. Tool definitions, calls, and results are immutable, typed, SDK-free provider-domain values.
-2. Tool-aware history enforces exact call/result pairing and order while existing text-only requests
-   remain valid.
+1. Tool definitions, calls, results, and opaque continuations are immutable, typed, SDK-free
+   provider-domain values.
+2. Tool-aware history enforces exact continuation position and call/result pairing while existing
+   text-only requests remain valid; no continuation uses a separate request field or side channel.
 3. Definitions require unique names, the exact keyword/type table, and canonical schema bytes;
    mutable input cannot mutate a constructed request and the bridge owns all descriptor conversion.
 4. Calls use the exact call-ID grammar and preserve argument bytes without parsing; results use the
    exact canonical success/error envelopes and status always agrees with the sole top-level key.
-5. The strict fake matches exact tool definitions and history, emits scripted call requests, and
-   reports structural mismatches without content leakage.
+5. The strict fake matches exact tool definitions and history, including opaque payload equality,
+   emits scripted call requests, and reports structural mismatches without content leakage.
 6. The pure registry-to-definition bridge maps all four operations exactly or fails atomically
    before provider work, without reverse imports or a duplicate catalog.
 7. One successful CAH-030 package projects into exact ordered request context; reports are omitted,
@@ -197,7 +211,10 @@ bytes.
 9. An already decoded model-facing argument object must contain exactly every canonical required key
    before native Pydantic validation runs; omitted defaulted fields and extras fail while direct
    Python callers retain the native request models' defaults.
-10. No dispatch, extra model turn, OpenAI mapping, MCP transport, protocol, or TUI behavior is added.
+10. Continuations are non-empty strict Unicode-scalar/UTF-8 values bounded at 65,536 bytes, count once
+    toward both history-item and request-projection limits, and never enter representations or
+    diagnostics.
+11. No dispatch, extra model turn, OpenAI mapping, MCP transport, protocol, or TUI behavior is added.
 
 ## Acceptance-to-test matrix
 
@@ -205,11 +222,11 @@ bytes.
 | --- | --- |
 | 1, 3 | Constructor/property tests cover every numeric bound below/at/above, immutability, defensive copying, all rows and constraints in the keyword table, title/default bridge filtering, canonical property/required order, compact sorted-key snapshot bytes, and every unsupported keyword/shape. |
 | 4, 8 | Call tests exercise the ID grammar's first/last/invalid characters and lengths 1/256/257; string tests accept unchanged multibyte scalars and reject high/low lone surrogates plus literal NUL before fake/provider work. Result snapshots prove byte-for-byte CAH-031 success reuse and the exact error envelope, then reject status/key mismatch, extras, floats, malformed/noncanonical JSON, and 65,537-byte output without leaks. |
-| 2 | Table tests cover valid text-only and call/result histories plus orphan, duplicate, unresolved, and out-of-order failures. |
-| 5 | Strict-fake tests accept one exact tool request and reject changed order, definition, call, and result fields with content-safe mismatch text. |
+| 2, 10 | Table tests cover valid text-only, `continuation? -> call -> result`, `continuation? -> assistant`, and multiple separated continuation/call/result groups in one history; reject start/end, orphan, duplicate, unresolved, reordered, and wrongly followed continuations; and prove 16/17-item plus 65,535/65,536/65,537-byte boundaries, NUL/lone-surrogate rejection, multibyte counting, safe `repr`, and exact per-item single-charge request projections at 524,287/524,288/524,289 bytes. |
+| 5 | Strict-fake tests accept one exact tool request and reject changed order, definition, continuation payload, call, and result fields with only a structural mismatch path. |
 | 6, 9 | `build_provider_tool_definitions` tests compare all four descriptors and exact generated schema snapshots, then inject duplicate, drifted, and unsupported shapes and assert atomic failure before provider start; an import test forbids `from_descriptor`/reverse imports. Argument-gate tests use a native model with a default, prove an omitted defaulted key and an extra key fail before a spy `model_validate` call, prove the exact key set reaches native validation unchanged, and prove direct native construction still applies the default. |
 | 7 | Context-projection tests assert exact order/provenance/content, report omission, inherited bounds, legacy compatibility, and mixed-representation rejection. |
-| 10 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
+| 11 | Integration tests assert fake observation alone executes no registry tool and starts no second provider exchange; import-policy checks remain green. |
 
 ## Validation
 
@@ -220,6 +237,8 @@ bytes.
   65,536/65,537, and insertion-order-independent canonicalization.
 - Run deterministic argument-key tests that prove missing and additional model-facing keys fail
   before native Pydantic validation/default application while direct native callers retain defaults.
+- Prove continuation order, item counting, tagged canonical request projection, exact strict-fake
+  equality, 65,536-byte payload admission, and content-suppressed failures without parsing payloads.
 - Re-run existing text-only adapter/session tests unchanged or with narrow construction updates.
 - Run the canonical network-free repository gate.
 
@@ -243,7 +262,8 @@ changes are permitted.
 ## Definition of done
 
 - Exact constructors, schema table/canonicalization, pre-Pydantic argument-key gate, call-ID grammar,
-  result envelopes, and fake behavior have happy and meaningful failure tests.
+  result envelopes, ordered opaque continuations, and fake behavior have happy and meaningful failure
+  tests.
 - Existing text-only provider behavior remains compatible and the provider port remains SDK-free.
 - Production-code churn does not exceed 600 lines; any broader schema or orchestration concern is
   split out.
@@ -253,7 +273,8 @@ changes are permitted.
 
 ## Planned evidence
 
-- Provider-domain tests for immutable definition/call/result values and ordered history grammar.
+- Provider-domain tests for immutable definition/call/result/continuation values and ordered history
+  grammar.
 - Strict-fake tests proving exact content-safe request matching and script completion.
 - Import-policy evidence that SDK and MCP types remain outside the provider-neutral contract.
 

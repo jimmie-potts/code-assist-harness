@@ -425,8 +425,10 @@ default CI.
 > harness-owned values so that no provider or transport owns loop semantics.
 
 This [planned story](../user-stories/cah-032-define-provider-tool-contract.md) adds immutable,
-SDK-free selected context, strict function-tool definitions, calls, results, and ordered history to
-the provider port and strict fake. Its pure exact-key gate rejects omitted model-facing fields before
+SDK-free selected context, strict function-tool definitions, a bounded positional opaque-continuation
+item type, calls, results, and ordered history to the provider port and strict fake. Each continuation
+is one content-suppressed history item immediately before its call or assistant item,
+not a separate request field. Its pure exact-key gate rejects omitted model-facing fields before
 native Pydantic can apply defaults while leaving direct-Python model defaults unchanged. The full
 canonical request projection is capped at 512 KiB. It performs no dispatch and admits no second turn.
 An MCP adapter may later translate into these values, but MCP transport and remote trust are separate
@@ -455,7 +457,8 @@ This [planned story](../user-stories/cah-034-run-one-read-tool-round-trip.md) im
 fake-backed model turns around one native read dispatch. It preserves the exact selected context and
 registry-derived catalog, gates exact model-facing keys before native Pydantic validation, dispatches
 only after CAH-033 accepts the complete first response, and replays one canonical correlated result
-envelope into the follow-up request. Synchronous native reads are bounded and non-preemptive;
+envelope into the follow-up request after appending `continuation? -> call -> result` to the single
+ordered history. Synchronous native reads are bounded and non-preemptive;
 cancellation is checked before and after execution, and a late result is discarded when cancellation
 wins.
 
@@ -480,10 +483,12 @@ seconds, 4,096 output bytes, and three observed calls instead of inheriting one-
 
 This [planned story](../user-stories/cah-036-map-openai-tool-calls.md) maps exact local function
 definitions, scoped instructions, untrusted repository evidence, streamed calls, and full stateless
-call/result replay behind the existing adapter. With `store=false`, replay includes each bounded
+call/result replay behind the existing adapter. Each opaque history item maps back to a reasoning item
+at the same position. With `store=false`, replay includes each bounded
 canonical full reasoning-item envelope from accepted prior turns—even while reasoning context remains
-`current_turn`—so required IDs and item fields are not reduced to encrypted content alone. The core
-harness never interprets those envelopes. To ensure every accepted reasoning item has the payload
+`current_turn`—so required IDs and item fields are not reduced to encrypted content alone. Optional
+`content` and `status` use canonical null markers and are omitted on input replay only when null. The
+core harness never interprets those envelopes. To ensure every accepted reasoning item has the payload
 needed for later replay, every request—including turn one—sets exactly
 `include=["reasoning.encrypted_content"]`. The adapter sets `parallel_tool_calls=false`, omits
 `previous_response_id`, and rejects hosted or remote-MCP tools. Explicit OpenAI selection authorizes

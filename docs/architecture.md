@@ -502,14 +502,18 @@ one request/call/result/response round trip, bounded iteration, and strict OpenA
 translation. A response is fully buffered and validated before final text is published or a tool is
 dispatched. Decoded model arguments must contain the exact advertised key set before native Pydantic
 validation can apply defaults; direct Python callers keep the unchanged native models and defaults.
+Opaque provider continuation is a bounded, content-suppressed item in the same ordered request
+history immediately before its call or assistant item, so neither core nor an adapter side channel
+loses its replay position.
 Synchronous native handlers are bounded and non-preemptive, with cancellation/deadline
 checks before and after execution; each provider-facing result is one canonical compact JSON
 success-or-error envelope capped at 65,536 bytes inclusive, with oversize output rejected rather
 than truncated. OpenAI stateless replay under `store=false` preserves bounded canonical full
 reasoning-item envelopes—including required IDs and item fields, not only encrypted content—even with
-`current_turn` reasoning context. Every such request sets exactly
-`include=["reasoning.encrypted_content"]`, including the initial turn, so an accepted reasoning item
-contains the opaque payload required for the next stateless request.
+`current_turn` reasoning context. Omitted or null optional `content` and `status` use canonical null
+markers and are omitted again only in the adapter's non-nullable input projection. Every such request
+sets exactly `include=["reasoning.encrypted_content"]`, including the initial turn, so an accepted
+reasoning item contains the opaque payload required for the next stateless request.
 
 This is function calling, not an MCP implementation or a claim of direct registry compatibility. A
 future generalized registry port may snapshot and re-admit remote catalogs only after server trust,

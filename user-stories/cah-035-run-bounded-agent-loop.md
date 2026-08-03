@@ -58,9 +58,10 @@ TUI behavior, or parallel execution.
   native Pydantic validation, dispatch, result validation, and compact-envelope rendering order.
   Synchronous tools remain bounded and non-preemptive; cancellation and deadline checks occur
   immediately before and after dispatch, and a late result is discarded.
-- One immutable logical history contains initial input/context, every accepted opaque continuation,
-  call, and matching result. Before each provider start, CAH-032 validates the full projection under
-  512 KiB. No item is silently truncated, summarized, deduplicated, reset, or evicted.
+- One immutable logical history contains initial input/context and appends every accepted call turn as
+  `continuation? -> call -> matching result`. The continuation is CAH-032's positional item in that
+  tuple, never a parallel field. Before each provider start, CAH-032 validates all 16-item and 512-KiB
+  bounds. No item is silently truncated, summarized, deduplicated, reset, or evicted.
 - The absolute provider-work deadline is captured once. Model starts, observed calls, accepted
   assistant bytes, and complete request size remain cumulative. Limits are checked before costly
   work; the operation crossing a bound never starts or publishes.
@@ -114,7 +115,7 @@ TUI behavior, or parallel execution.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1, 3 | Table-driven strict-fake cases complete with final text on turns one through four and assert exact states, immutable history, publication order, and one terminal. |
+| 1, 3 | Table-driven strict-fake cases complete with final text on turns one through four and assert exact states, immutable positional continuation/call/result history, publication order, and one terminal. |
 | 2 | Scripts exercise zero through three successful calls and instrument maximum provider/tool concurrency as one. |
 | 4 | One fresh-session script returns a fourth admitted call and proves tool-limit precedence/no dispatch; a separate seeded model-turn ledger proves zero-start fifth-turn defense in depth. |
 | 5 | Seeded boundaries exhaust deadline, UTF-8 output, calls, turns, and 524,287/524,288/524,289-byte requests; counters and replayed opaque/call/result items never reset. |

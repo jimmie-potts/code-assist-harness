@@ -165,8 +165,9 @@ provider, registry, or loop behavior.
 The [implementation-ready story](../user-stories/cah-026-define-repository-read-contracts.md) owns
 nested Git-compatible ignore evaluation through PathSpec, a non-overridable credential/VCS denylist,
 shared text rules, and fixed safe failures. Ignore rules are evaluated independently against both the
-normalized supplied path and its resolved canonical target, with either ignored decision denying
-access. It performs no user-requested read operation itself.
+normalized supplied path and its resolved canonical target. Each view admits every directory prefix
+before loading deeper policy or evaluating the leaf, and either view's ignored ancestor or target
+denies access. It performs no user-requested read operation itself.
 
 ### Planned CAH-027 through CAH-029 — Add bounded native read operations
 

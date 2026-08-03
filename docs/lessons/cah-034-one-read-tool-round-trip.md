@@ -51,7 +51,7 @@ success/error is model-facing JSON; the provider transport completed normally in
 
 - **Dispatch:** invoke the registered implementation after validation.
 - **Safe envelope:** fixed compact JSON containing validated result or fixed error.
-- **Full replay:** resend original history plus call/result in exact order.
+- **Full replay:** resend original history plus `continuation? -> call -> result` in exact order.
 - **Late result:** work that returns after cancellation/deadline selected another outcome.
 - **Aggregate usage:** checked sum persisted once after successful final text.
 
@@ -61,7 +61,7 @@ success/error is model-facing JSON; the provider transport completed normally in
 Ink TUI                Python harness                              Provider
  final text <--- publish accepted turn <---------------------- turn 2 final
                        ^                                      /
-                       | full input + call + result + opaque
+                       | full input + [opaque? -> call -> result]
                  CAH-034 two-turn owner
                        |
           lookup -> decode -> key gate -> Pydantic -> dispatch -> render JSON
@@ -80,7 +80,8 @@ result; a programmer defect fails the session. No third turn exists in this teac
 2. Admit the first response; charge its one call before lookup/decoding.
 3. Validate and run one bounded synchronous native tool.
 4. Render exact compact success/error JSON and build the matching result.
-5. Replay context, definitions, optional opaque state, call, and result into turn two.
+5. Append optional opaque state, call, and result to the one history tuple in that exact order, then
+   replay it with unchanged context and definitions into turn two.
 6. Admit final text, publish its chunks, then persist one checked usage aggregate.
 
 ## Implementation code samples
@@ -105,12 +106,14 @@ A late native result is discarded after the second check.
 ### Planned pseudocode: one follow-up
 
 ```python
-history = (*original_history, call, result)
+turn_items = (opaque, call, result) if opaque is not None else (call, result)
+history = (*original_history, *turn_items)
 final_turn = await collect_one_turn(provider.start(request.with_history(history)))
 require_final_text(final_turn)
 ```
 
-The code is intentionally not a `while` loop.
+The code is intentionally not a `while` loop. `opaque` is the CAH-032 positional history item, not a
+separate request field.
 
 ## Failure scenarios to study
 

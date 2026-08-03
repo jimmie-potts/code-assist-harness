@@ -258,8 +258,9 @@ perform filesystem access or eliminate time-of-check-to-time-of-use races.
 
 [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) owns the shared admission
 policy. It applies Git-compatible ignore rules independently to the normalized supplied path and the
-resolved canonical target; either ignored view denies, so a symlink alias cannot bypass policy on
-either name. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
+resolved canonical target; each view requires every parent directory to remain traversable before a
+leaf negation or nested policy can apply. Either view's ignored ancestor or target denies, so a
+symlink alias cannot bypass policy on either name. [CAH-027](../user-stories/cah-027-list-files-and-stat-path.md),
 [CAH-028](../user-stories/cah-028-read-bounded-text-file.md), and
 [CAH-029](../user-stories/cah-029-search-repository-text.md) reuse it immediately before access and
 return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
@@ -271,7 +272,8 @@ remain M3 work.
 > so that neither the provider nor an MCP transport can execute or continue work directly.
 
 CAH-031 limits registration to four read capabilities. CAH-032 defines strict context/tool exchange
-values without dispatch. CAH-033 admits a complete response before either publication or dispatch,
+values, including a bounded positional opaque-continuation item type, without dispatch. CAH-033
+admits a complete response before either publication or dispatch,
 CAH-034 proves one validation-and-result round trip, and CAH-035 generalizes it only to four model
 turns and three sequential calls with cumulative limits. CAH-036 requests
 `reasoning.encrypted_content` on every stateless OpenAI turn so replay is available, but keeps that

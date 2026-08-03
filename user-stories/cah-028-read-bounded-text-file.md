@@ -113,7 +113,7 @@ bounded read failure all retain their exact shared codes and messages.
 | Source size | Use 262,143/262,144/262,145-byte valid files | Unit | Success at limit and `repository_source_too_large` above |
 | Return limits | Exercise 32-KiB default, 65,536 hard max, overlong first line, and 399/400/401 lines | Unit | Whole-line output, explicit truncation, above-hard input rejection |
 | Strict UTF-8 | Use multibyte boundary, invalid bytes, BOM, and decoded NUL | Unit | Exact valid text or fixed `repository_not_text`; no replacement |
-| Policy and containment | Directly request ignored, denied, escaping, stale, directory, and FIFO targets | Policy/boundary integration | Exact shared safe error and no path/content/OS leak |
+| Policy and containment | Directly request ignored, denied, escaping, stale, directory, and FIFO targets, including an ignored parent followed by a negated child | Policy/boundary integration | Parent traversal cannot be bypassed by direct leaf access; exact shared safe error and no path/content/OS leak |
 | Race-aware recheck | Replace an admitted target before open at an injected deterministic seam | Unit integration | Final policy/boundary check prevents stale authorization |
 
 ## Validation

@@ -23,8 +23,8 @@ native capability, implement MCP, or create protocol/transcript schemas.
 
 ## Scope
 
-- Map CAH-032 strict local definitions, context, history, calls, and results to exact Responses API
-  request items on every turn.
+- Map CAH-032 strict local definitions, context, positional opaque continuations, calls, and results
+  from the single ordered history tuple to exact Responses API request items on every turn.
 - Request the replay payload on every stateless turn with the exact Responses include value
   `reasoning.encrypted_content`.
 - Reconcile streamed Responses events into CAH-033's atomic final-text or one-call grammar.
@@ -47,8 +47,9 @@ native capability, implement MCP, or create protocol/transcript schemas.
   `previous_response_id`, and never retain a response ID for continuation. The include is present on
   turns one through four, including the initial turn, so any accepted reasoning output item contains
   the encrypted replay payload required by a later stateless request. No other include value is sent.
-  Prior neutral calls map to `function_call` input items and matching results to
-  `function_call_output` items with the exact bounded call ID.
+  Each neutral opaque continuation maps back to its reasoning input item at the same history position;
+  prior neutral calls map to `function_call` input items and matching results to
+  `function_call_output` items with the exact bounded call ID. No separate continuation field exists.
 - `ProviderToolResult.output_json` maps byte-for-byte to `function_call_output.output`. Tool semantic
   success or error lives exclusively inside CAH-034's compact JSON payload. An SDK lifecycle
   `status`, when required by a typed input object, is one fixed transport-completion value for both
@@ -56,22 +57,32 @@ native capability, implement MCP, or create protocol/transcript schemas.
   whether to continue.
 - Reasoning remains `{"effort":"none","context":"current_turn"}`. That option does not authorize
   dropping prior response items in stateless mode. The adapter accepts one completed reasoning item
-  only when its closed replay shape has exactly `type="reasoning"`, a non-empty strict-UTF-8 `id`,
-  `summary=[]`, `content` equal to `null` or `[]`, non-empty strict-UTF-8 `encrypted_content`, and
-  `status="completed"`; missing, extra, or different fields fail closed.
-- The adapter projects all six fields into compact sorted-key JSON with `ensure_ascii=false`,
-  separators `(",", ":")`, and `allow_nan=false`, then stores that complete canonical string as
-  `ProviderOpaqueContinuation.payload`. Its UTF-8 encoding is capped at 65,536 bytes inclusive. The
-  bound charges the ID, field names, empty/null values, status, escaping, punctuation, and encrypted
+  only when required output fields have exactly `type="reasoning"`, a non-empty strict-UTF-8 `id`,
+  `summary=[]`, and non-empty strict-UTF-8 `encrypted_content`. The only optional fields are `content`
+  and `status`: omitted or explicit `null` normalizes to a canonical `null`; `content=[]` and
+  `status="completed"` remain distinct present values. A non-empty or wrong-type `content`, another
+  status, a missing required field, or any extra field fails closed. The optional-field normalization
+  preserves CAH-023's admitted omitted/null/empty `content` and omitted/null/completed `status` cases.
+  Requiring `encrypted_content` and rejecting extra keys are deliberate CAH-036 strengthenings for
+  canonical replay, not claims that CAH-023 already enforced the same closed shape.
+- The adapter projects exactly six canonical keys—`type`, `id`, `summary`, `content`,
+  `encrypted_content`, and `status`—into compact sorted-key JSON with `ensure_ascii=false`, separators
+  `(",", ":")`, and `allow_nan=false`, using the null markers above, then stores that complete string
+  as `ProviderOpaqueContinuation.payload`. For omitted optional fields, the exact shape is
+  `{"content":null,"encrypted_content":"opaque-token","id":"rs_1","status":null,"summary":[],"type":"reasoning"}`.
+  Its UTF-8 encoding is capped at 65,536 bytes inclusive.
+  The bound charges the ID, all field names and null/empty values, escaping, punctuation, and encrypted
   content—not only the encrypted content.
 - On every later stateless request, the adapter parses its own opaque payload, revalidates the exact
   closed shape and byte-for-byte canonical reserialization, and builds one input replay item in the
-  original history position. It preserves `id`, `summary`, `type`, `encrypted_content`, and `status`
-  exactly; output `content=[]` remains an empty input list, while output `content=null` maps to an
-  omitted input key because the installed input contract makes `content` optional but non-nullable.
-  Exact snapshots cover both forms. The stored envelope and emitted replay projection both count
-  toward the 512-KiB request bound. Core code preserves the envelope but never parses, interprets,
-  logs, transcribes, renders, or includes it in safe diagnostics.
+  original CAH-032 history position. It always preserves `id`, `summary`, `type`, and
+  `encrypted_content`; canonical `content=null` or `status=null` becomes an omitted input key because
+  each input field is optional but non-nullable, while `content=[]` or `status="completed"` remains
+  present. Exact snapshots cover all four canonical optional-field combinations. CAH-032's tagged
+  history projection charges the opaque payload and its JSON escaping exactly once toward the 512-KiB
+  request bound; reconstructing the adapter input item does not add a second core charge. Core code
+  preserves the envelope but never parses, interprets, logs, transcribes, renders, or includes it in
+  safe diagnostics.
 - The only accepted completed Responses output-item sequences are exactly
   `[reasoning?, function_call]` or `[reasoning?, message]`. The optional reasoning item is first and
   has the one admitted complete replay shape. The function call is the only call; the message is
@@ -120,8 +131,9 @@ native capability, implement MCP, or create protocol/transcript schemas.
    `parallel_tool_calls=false`, and exactly `include=["reasoning.encrypted_content"]`, and omits
    `previous_response_id`.
 2. Every turn sends complete ordered stateless history, including every required field from prior
-   canonical reasoning-item envelopes, the exact null-to-omitted content mapping, and matched
-   function-call/function-output items.
+   canonical reasoning-item envelopes, exact null-to-omitted mappings for optional `content` and
+   `status`, retained `[]`/`"completed"` values, and matched function-call/function-output items at
+   their original positions.
 3. The adapter accepts only `[reasoning?, function_call]` or `[reasoning?, message]`, reconciles every
    streamed/terminal field, and exposes one atomic CAH-033 outcome after completion.
 4. Function output carries CAH-034 compact JSON unchanged; SDK lifecycle status does not represent
@@ -132,8 +144,10 @@ native capability, implement MCP, or create protocol/transcript schemas.
    omit inclusion-report, excluded-source, and host-path data.
 7. Explicit OpenAI selection is the sole M2 repository-egress consent; setup/runtime documentation
    clearly warns that admitted content receives no content-level secret scan.
-8. Existing text behavior, cancellation, deadline, cleanup, model allowlist, credentials, normalized
-   failures, protocol/TUI, transcripts, and harness-owned loop policy remain intact.
+8. Existing text behavior—including CAH-023's optional reasoning `content`/`status` cases—plus
+   cancellation, deadline, cleanup, model allowlist, credentials, normalized failures, protocol/TUI,
+   transcripts, and harness-owned loop policy remain intact; the required encrypted payload and
+   closed replay keys are the documented CAH-036 strengthening.
 9. Default evidence is exhaustive, credential-free, and network-free; no remote MCP/hosted tool or
    SDK type enters core domain APIs.
 
@@ -141,8 +155,8 @@ native capability, implement MCP, or create protocol/transcript schemas.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1-2 | Exact request snapshots cover turns one through four, definitions/options, calls/results, all stored reasoning fields, both null-to-omitted and empty-list content replay forms, the exact one-element `include=["reasoning.encrypted_content"]` on every turn, and explicit absence of response continuation/storage fields. An invocation spy checks every provider start; request-object mutations remove, misspell, or add an include value and fail exact mapping evidence. |
-| 3 | SDK-fake success cases cover both exact item sequences with/without reasoning and usage, asserting one atomic neutral outcome only after completed response reconciliation; boundary snapshots cover 65,535/65,536/65,537-byte full canonical replay envelopes. |
+| 1-2 | Exact request snapshots cover turns one through four, definitions/options, positional opaque/call/result history, all stored reasoning fields, the four canonical `content`/`status` combinations and their null-to-omitted replay, the exact one-element `include=["reasoning.encrypted_content"]` on every turn, and explicit absence of response continuation/storage fields. An invocation spy checks every provider start; request-object mutations remove, misspell, or add an include value and fail exact mapping evidence. |
+| 3 | SDK-fake success cases cover both exact item sequences with/without reasoning and usage plus the nine omitted/null/present `content` and `status` input combinations, asserting one atomic neutral outcome only after completed response reconciliation. Mutation tables reject missing required fields, extras, invalid optional values, and tampered stored envelopes with no continuation/call/text/usage effect; boundary snapshots cover 65,535/65,536/65,537-byte six-key canonical replay envelopes. |
 | 4 | Success/error function-output snapshots prove identical fixed transport status and byte-exact compact JSON; mutations cannot alter loop decisions. |
 | 5 | Single-field tables mutate response/item IDs, indices, types, order, names, statuses, deltas/done, completed snapshots, usage, duplicates, mixed/parallel shapes, early EOF, and post-terminal events; no value escapes. |
 | 6 | Context snapshots cover empty/legacy/new context, nested instruction order, focus/search provenance, full replay, and distinctive excluded sentinels absent from SDK arguments. |
@@ -193,8 +207,9 @@ and the future MCP seam. Do not add or revise a presentation.
 ## Planned evidence
 
 - Exact request snapshots for local definitions, context framing, full call/result/reasoning replay,
-  `store=false`, `parallel_tool_calls=false`, `include=["reasoning.encrypted_content"]` on turns one
-  through four, and no previous response ID.
+  both optional-field null-to-omitted mappings, retained empty/completed values, `store=false`,
+  `parallel_tool_calls=false`, `include=["reasoning.encrypted_content"]` on turns one through four,
+  and no previous response ID.
 - Exhaustive SDK event success/mutation, cleanup, cancellation, and late-observation tests.
 - Configuration and policy evidence for explicit bounded egress, absent secret-scanning warning,
   unsupported hosted/MCP denial, and SDK isolation.

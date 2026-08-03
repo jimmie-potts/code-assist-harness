@@ -106,8 +106,11 @@ is likely to cross the ceiling.
   admission uses deterministic UTF-8 bytes and item counts; provider token usage remains evidence.
 - Optional provider usage is session-aggregate evidence. It is retained only when the session admits
   final assistant text; tool-only turns do not publish per-turn usage records.
-- Tool definitions, calls, and results are immutable provider-neutral values with explicit call-ID
-  correlation. Provider adapters translate them but do not dispatch tools or decide policy.
+- Tool definitions, opaque continuations, calls, and results are immutable provider-neutral values
+  with explicit ordered position and call-ID correlation. A continuation is one non-empty,
+  content-suppressed history item capped at 65,536 UTF-8 bytes; it immediately precedes its call or
+  assistant item, counts once toward the 16-item/512-KiB request limits, and never uses an adapter side
+  channel. Provider adapters translate these values but do not dispatch tools or decide policy.
 - Decoded model arguments must contain exactly the advertised required keys before native Pydantic
   validation can apply defaults. Native request models remain unchanged so trusted direct Python
   callers retain their defaults.
@@ -127,10 +130,12 @@ is likely to cross the ceiling.
   `include=["reasoning.encrypted_content"]` so an accepted reasoning item contains the opaque replay
   payload. The adapter preserves each complete reasoning item as a bounded canonical opaque replay
   envelope—including its required ID and item fields, not only encrypted content—and reconstructs the
-  required input fields on later turns even while reasoning context remains `current_turn`. The one
-  optional output `content=null` form maps to an omitted non-nullable input key; an empty list remains
-  empty. Core code never interprets that provider continuation state. `parallel_tool_calls=false`
-  keeps the adapter aligned with the one-call grammar.
+  required input fields on later turns even while reasoning context remains `current_turn`. Completed
+  output `content` and `status` may each be omitted or null; either form becomes a canonical null
+  marker and then an omitted non-nullable input key. `content=[]` and `status="completed"` remain
+  present. The fixed six-key canonical payload keeps all four combinations bounded and exact. Core
+  code never interprets that provider continuation state. `parallel_tool_calls=false` keeps the
+  adapter aligned with the one-call grammar.
 
 ### Repository context and reads
 
@@ -139,9 +144,12 @@ is likely to cross the ceiling.
 - Repository enumeration honors nested `.gitignore` semantics through the small `pathspec`
   `GitIgnoreSpec` dependency plus a non-overridable harness denylist for VCS internals and local
   credential-bearing files. Ignore rules are evaluated independently against the normalized supplied
-  path and its resolved canonical target; either ignored view wins, and a negation in one view cannot
-  re-include a path ignored in the other. The bounded union of applicable policy files charges a
-  canonically identical policy input once. M2 has no ignored-path override.
+  path and its resolved canonical target. Each view walks directory prefixes root-to-leaf, loads a
+  nested policy only after its directory admits, and denies when any ancestor or the target remains
+  ignored; a leaf negation cannot cross an ignored parent, and a negation in one view cannot re-include
+  a path ignored in the other. The bounded union of reachable policy files charges a canonically
+  identical policy input once, while both views still attach and evaluate its cached rules at their
+  own owner-relative scopes. M2 has no ignored-path override.
 - `search_text` is literal, case-sensitive UTF-8 search with deterministic path and line order. Its
   one-line query grammar rejects every separator recognized by Python `str.splitlines()`, including
   VT, FF, FS/GS/RS, NEL, and Unicode line/paragraph separators in addition to CR/LF. Regex, ranking,

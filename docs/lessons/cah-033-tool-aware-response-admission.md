@@ -94,7 +94,8 @@ also carry its legal first-position opaque continuation. The collector discards 
 and returns only the existing bounded failure code, safe message, and retryability. A malformed
 prefix followed by failure remains
 `provider_invalid_response`; failure cannot make earlier invalid grammar valid. The optional opaque
-value is first, at most 65,536 UTF-8 bytes, and included in later request-size accounting.
+value is the CAH-032 bounded history value, appears first in the response grammar, and is inserted at
+that same position before its call when later replayed.
 
 ## Practical walkthrough
 

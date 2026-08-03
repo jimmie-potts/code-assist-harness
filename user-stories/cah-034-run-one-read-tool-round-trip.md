@@ -62,8 +62,11 @@ another tool capability, or new transcript schema.
   exception, OS text, secret, or unbounded content. Rendering or envelope overflow fails the session
   safely instead of truncating JSON.
 - The follow-up request is a full immutable replay of original input plus the exact admitted call,
-  its matching result, optional first-turn opaque continuation, and the same definitions/context.
-  It is reconstructed under CAH-032's 512-KiB bound before `Provider.start()`.
+  its matching result, optional first-turn opaque continuation, and the same definitions/context. The
+  single CAH-032 history tuple appends them exactly as
+  `..., continuation? -> ProviderToolCall -> ProviderToolResult`; no separate continuation field or
+  adapter side channel exists. It is reconstructed under CAH-032's 16-item and 512-KiB bounds before
+  `Provider.start()`.
 - The follow-up must be CAH-033's accepted non-empty final-text outcome. A second call is charged as
   another observed call, then fails through the existing fixed `tool_call_limit_exceeded` session
   path and starts no third turn. Invalid grammar, context overflow, provider failure, cancellation,
@@ -99,7 +102,8 @@ another tool capability, or new transcript schema.
 2. Validation runs in the locked order, and every known failure produces its exact bounded compact
    JSON envelope without executing a rejected later stage.
 3. The follow-up request replays the original input, optional opaque continuation, exact call/result,
-   unchanged context, and unchanged definitions in provider-neutral order.
+   unchanged context, and unchanged definitions in the single provider-neutral history order
+   `continuation? -> call -> result`.
 4. One accepted follow-up final answer publishes staged chunks through existing events and selects
    one completed session; a second call or invalid response starts no third turn.
 5. Synchronous tools are never represented as preemptible: cancellation/deadline is checked before
@@ -115,7 +119,7 @@ another tool capability, or new transcript schema.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1, 3-4 | One strict-fake/native-fixture integration asserts two exact requests, one dispatch, full replay, ordered final events, one terminal, and zero third starts. |
+| 1, 3-4 | One strict-fake/native-fixture integration asserts two exact requests—including `[user, opaque, call, result]` when continuation is present—one dispatch, full replay, ordered final events, one terminal, and zero third starts. |
 | 2 | Parameterized malformed/non-object JSON, omitted defaulted keys, additional keys, unknown tool, invalid input/result, every CAH-026 access error, oversized rendering, and programmer defect asserts the exact envelope or safe session failure plus stage counters. A spy proves the raw-key gate rejects before native Pydantic validation/default application. |
 | 5 | Logical checkpoints select cancellation/deadline immediately before dispatch and while a bounded synchronous fake runs; post-return checks discard distinctive late-result sentinels. |
 | 6 | Two-turn tables cover no usage, usage on either/both turns, exact checked sums, aggregate overflow, rejected turn two, cancellation, and one transcript-v3 aggregate write. |

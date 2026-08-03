@@ -54,6 +54,8 @@ against corrupted/seeded state.
 - **Reachable stop:** failure possible from a fresh legal session.
 - **Defense in depth:** redundant guard tested through seeded internal state.
 - **Sequentiality:** at most one active provider or tool operation.
+- **Positional replay:** append each optional continuation immediately before its call and matching
+  result in one immutable history tuple.
 
 ## Architecture and design
 
@@ -63,7 +65,7 @@ Ink TUI                 Python harness loop                     Provider
                            ^        |
                            |        +---- next request -------> model
                            |                    ^
-                    APPEND RESULT <---- bounded replay
+         APPEND opaque? -> call -> result <---- bounded replay
                            ^
                     VALIDATE + TOOL ----> native read registry
 
@@ -80,7 +82,8 @@ unreachable normally and tested by seeding the turn ledger immediately before ad
 1. Validate the full request and charge a model start.
 2. Collect one atomic CAH-033 outcome.
 3. Publish and finish on final text.
-4. Otherwise charge the call, validate, dispatch, and append its result.
+4. Otherwise charge the call, validate, dispatch, and append optional continuation, call, and result
+   in that exact order.
 5. Repeat while all cumulative checks pass.
 6. Persist one checked usage aggregate only after successful final text.
 
@@ -95,10 +98,14 @@ while True:
     if isinstance(outcome, AcceptedFinalText):
         return await publish_final(outcome, aggregate_usage)
     ledger.admit_tool_call()
-    history += (outcome.call, dispatch_one(outcome.call))
+    result = dispatch_one(outcome.call)
+    if outcome.continuation is not None:
+        history += (outcome.continuation,)
+    history += (outcome.call, result)
 ```
 
-Every helper has a single admission or transition responsibility.
+Every helper has a single admission or transition responsibility. The opaque value remains in the
+same CAH-032 history tuple immediately before its call; there is no adapter side channel.
 
 ### Planned pseudocode: fifth-turn defense
 

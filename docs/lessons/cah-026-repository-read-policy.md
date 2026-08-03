@@ -27,7 +27,8 @@ After completing this unit, you should be able to:
 - explain admission order and why lexical plus canonical checks are both required;
 - explain why JSON parsing alone does not guarantee Unicode-scalar text and where the harness rejects
   lone surrogates;
-- apply nested `.gitignore` precedence independently to lexical and canonical path views;
+- apply nested `.gitignore` precedence and ancestor-traversability rules independently to lexical and
+  canonical path views;
 - distinguish a hard deny from a repository ignore; and
 - design fixed failures that do not become an existence or secret oracle.
 
@@ -52,6 +53,12 @@ symlink resolves to an otherwise admitted `src/generated/`, or a harmless alias 
 canonically ignored subtree. CAH-026 evaluates root-to-nearest rules separately against both names.
 Either ignored result wins; a `!` negation in one view cannot grant access denied by the other.
 
+Git also does not let a negated leaf jump across an excluded parent. With `private/` followed by
+`!private/keep.py`, the file remains ignored because Git cannot traverse `private/`; no policy below
+that directory is available. By contrast, `private/*` leaves the directory itself traversable, so a
+later `!private/keep.py` may re-include the file. The harness must walk and admit every ancestor, not
+ask only for the leaf's final matcher result.
+
 A common misconception is that approval makes any read safe. Here, ignored and hard-denied decisions
 have no override field. Future approval cannot broaden this boundary.
 
@@ -65,6 +72,10 @@ does not normalize spelling, because normalization could change which repository
 - **Admission pipeline:** validate, lexical hard deny and ignore, canonicalize only if admitted,
   canonical hard deny and ignore, apply operation limits, then repeat immediately before I/O.
 - **GitIgnoreSpec:** maintained Git-compatible matching for root and nested `.gitignore` files.
+- **Ancestor traversability:** every proper directory prefix must admit before the policy may load its
+  nested rules or let a leaf negation take effect.
+- **Shared policy cache:** read and charge a canonically identical policy file once, but attach and
+  evaluate its rules independently at each view's owner-relative scope.
 - **Dual-view ignore:** preserve the normalized supplied label and the resolved target label as
   independent ignore-policy inputs; one view cannot re-include the other.
 - **Hard denylist:** conservative VCS and credential names that ignore negation cannot re-include.
@@ -82,11 +93,11 @@ Ink TUI ---- NDJSON ----> Python harness <---- provider may request tools later
                               |
                    supplied lexical label
                               |
-              hard deny + lexical GitIgnoreSpec --deny--> fixed safe error
+           hard deny + lexical ancestor walk --deny--> fixed safe error
                               |
                     CAH-024 resolve target
                               |
-             hard deny + canonical GitIgnoreSpec --deny--> fixed safe error
+          hard deny + canonical ancestor walk --deny--> fixed safe error
                               |
                    [CAH-026 admitted target]
                               |
@@ -105,11 +116,13 @@ snapshot, not durable authorization.
 1. Define immutable decisions, shared limits, the scalar-text admission helper, and fixed errors.
 2. Admit path/query strings as unchanged Unicode scalar text, then apply the exact credential/VCS
    denylist to supplied path components.
-3. Preserve the normalized supplied label, load its applicable lexical-chain policies, and deny
-   before target resolution when its root-to-nearest `GitIgnoreSpec` result is ignored.
+3. Preserve the normalized supplied label and walk its directory prefixes root-to-leaf. Before
+   entering each directory, apply the policies available at that point; load its nested policy only
+   after it admits. Deny before target resolution if any ancestor or the leaf is ignored.
 4. Resolve an admitted lexical path with CAH-024 and repeat the hard denylist on canonical components.
-5. Load canonical-chain policies not already charged to the bounded union, evaluate the canonical
-   label independently, and deny if that final view is ignored.
+5. Walk the canonical chain by the same rule. Reuse cached rules for policy files already read and
+   charged, read only newly reachable files, and still attach every applicable rule set at the
+   canonical view's owner-relative scope before denying any ignored ancestor or leaf before I/O.
 6. Re-run admission before use, then test negation, nested scope, aliases, staleness, and every limit
    boundary.
 
@@ -118,31 +131,41 @@ snapshot, not durable authorization.
 No implementation exists yet. This is planned pseudocode:
 
 ```text
+def admit_ignore_view(label, policy_cache):
+    policies = scoped_rules(load_or_reuse_root_policy(policy_cache), owner=".")
+    for directory in label.proper_directory_prefixes():
+        deny_if_ignored(policies.check(directory.as_directory()))
+        cached = load_or_reuse_nested_policy(directory, policy_cache)
+        policies.extend(scoped_rules(cached, owner=directory))
+    deny_if_ignored(policies.check(label))
+
 validate_unicode_scalar_utf8(request.path)
 validate_relative(request.path)
 deny_if_sensitive(request.path.components)
 lexical = normalized_relative_label(request.path)
-lexical_policies = bounded_policies_for(lexical.ancestors)
-deny_if_ignored(lexical_policies.check(lexical))
+admit_ignore_view(lexical, bounded_union)
 resolved = boundary.resolve_existing(request.path)
 deny_if_sensitive(resolved.relative_path.components)
-canonical_policies = extend_bounded_union(resolved.ancestors)
-deny_if_ignored(canonical_policies.check(resolved.relative_path))
+admit_ignore_view(resolved.relative_path, bounded_union)
 return admit(resolved)
 ```
 
-The string check runs before every filesystem or policy call. The two hard-deny checks then close
-different alias/oracle gaps. Resolution supplies the canonical label while the lexical label remains
-available only for admission. Lexical ignore matching happens before target resolution so an ignored
-alias cannot become an existence probe. Canonical matching then catches safe-looking aliases whose
-targets are ignored. Each view resolves its own precedence, and reaching access requires both to
-admit. A caller repeats this sequence immediately before access.
+The string check runs before every filesystem or policy call. In each ignore view, a denied directory
+stops the walk before its `.gitignore` is opened, so unreachable policy cannot re-include descendants
+or consume the budget. The cache reads and charges a canonically identical file once; it does not
+cache an admission decision. Lexical and canonical walks each attach those rules to their own
+owner-relative label and evaluate independently. Lexical walking happens before target resolution so
+an ignored alias cannot become an existence probe. Canonical walking then catches safe-looking aliases
+whose targets or ancestors are ignored. Reaching access requires every ancestor plus the leaf in both
+views to admit. A caller repeats this sequence immediately before access.
 
 ## Failure scenarios to study
 
 - **Negated credential:** `.gitignore` says `!.env`; the hard deny still returns generic unavailable.
-- **Nested precedence:** a lower `.gitignore` negates a normal root pattern; the path is admitted only
-  when parent traversal is available.
+- **Untraversable parent:** root rules `private/` then `!private/keep.py` still deny a direct read;
+  `private/.gitignore` is never loaded.
+- **Traversable-parent control:** `private/*` then `!private/keep.py` may admit the file because the
+  directory remains reachable, provided the other path view also admits.
 - **Alias disagreement:** the lexical alias is ignored but its canonical target is admitted, or the
   reverse; either disagreement still returns `repository_path_ignored`, a lexical denial performs no
   target resolution, and a negation on the admitted side cannot override it.
@@ -196,11 +219,13 @@ provenance; preserve local fail-closed enforcement if the central service is una
 5. Teach back: why can neither model arguments nor approval override this read policy?
 6. Explain why strict UTF-8 round-trip validation rejects surrogates but deliberately does not
    normalize two canonically equivalent path spellings.
+7. Compare `private/` and `private/*`: why can the same leaf negation work only in the second case?
 
 ## Key takeaways
 
 - The Python harness owns final repository-read admission.
-- Lexical and canonical ignore views are independent, and either ignored result denies access.
+- Lexical and canonical ignore views each require a traversable ancestor chain, and either denied
+  ancestor or leaf denies access.
 - Hard denial precedes and dominates Git-style ignore policy.
 - Central policy improves governance but introduces availability and operational cost.
 
@@ -209,6 +234,8 @@ provenance; preserve local fail-closed enforcement if the central service is una
 - **Admission:** The complete decision that permits one bounded capability use.
 - **Hard denylist:** Built-in paths that no lower-trust input can re-include.
 - **Ignore negation:** A `!` rule that reverses a normal ignore match within Git semantics.
+- **Ancestor traversability:** The rule that every parent directory must remain reachable before a
+  descendant or nested policy can affect admission.
 - **Lexical path:** The normalized supplied workspace-relative name before symlinks are resolved.
 - **Existence oracle:** A difference in errors that reveals whether protected data exists.
 

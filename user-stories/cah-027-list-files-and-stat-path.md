@@ -136,7 +136,7 @@ calls, or decide which files belong in model context.
 | Deterministic listing | Vary creation/iteration order for an ordinary target plus lower/higher aliases, then for aliases only; place the eventual winner after `max_items` candidates | Unit | Ordinary target wins with `is_symlink=false`; otherwise lowest original alias wins with `is_symlink=true`; canonical output and truncation are identical on repeated runs |
 | Depth behavior | Build a tree beyond levels 1, 4, and 8 | Unit | Exact direct and recursive membership at each boundary |
 | Item behavior | Request 199/200/201 and 499/500/501 available items | Unit | Exact count and explicit `truncated`; above-hard input rejected |
-| Ignore and denial | Combine nested ignores, negation, VCS/credential paths, and direct requests | Policy integration | Omitted aggregate counts or fixed direct error with no label leak |
+| Ignore and denial | Combine nested ignores, an ignored parent with a negated child, the traversable-parent control, VCS/credential paths, and direct requests | Policy integration | The ignored parent is pruned before descent despite the leaf negation; otherwise omitted aggregate counts or fixed direct errors reveal no label |
 | Symlink and special files | Add internal/escaping/cyclic links plus FIFO where supported | Boundary integration | Internal entries safe, no directory-link recursion, unsafe objects omitted |
 | Traversal hard stop | Generate 10,000 and 10,001 visited children | Unit | Completion at limit and fixed `repository_result_limit` above |
 

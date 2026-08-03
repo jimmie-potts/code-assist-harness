@@ -6,8 +6,8 @@
 - **Implementation status:** Planned; tool-aware provider requests are not implemented
 - **Story:** [CAH-032](../../user-stories/cah-032-define-provider-tool-contract.md)
 - **Learning emphasis:** Core learning unit
-- **Review focus:** Provider-neutral LLM context, definitions, calls, and results plus the strict
-  schema intersection that adapters can map without owning the loop
+- **Review focus:** Provider-neutral LLM context, definitions, opaque continuation, calls, and results
+  plus the strict schema intersection that adapters can map without owning the loop
 - **Visual companion:** None; the Markdown diagram is authoritative
 - **Related architecture:** [Architecture](../architecture.md),
   [Agent loop](../agent-loop.md), and [Tool system](../tool-system.md)
@@ -17,10 +17,10 @@
 
 ## Quick summary
 
-CAH-032 defines immutable, provider-neutral context, canonical tool schemas, calls, and exact result
-envelopes and teaches the strict fake to compare them. The important design idea is an
-anti-corruption boundary: provider integrations translate to harness values rather than exporting
-their own types into the loop.
+CAH-032 defines immutable, provider-neutral context, canonical tool schemas, opaque continuation,
+calls, and exact result envelopes and teaches the strict fake to compare them. The important design
+idea is an anti-corruption boundary: provider integrations translate to harness values rather than
+exporting their own types into the loop.
 
 ## Learning objectives
 
@@ -32,7 +32,8 @@ After this unit, you should be able to:
 - explain why model-facing required keys must be checked before native defaults can apply;
 - validate the exact call-ID grammar and strict Unicode-scalar/UTF-8 boundaries;
 - distinguish CAH-031's canonical success envelope from the canonical error envelope;
-- validate ordered call/result history independently of an SDK; and
+- preserve bounded provider state at its exact ordered history position without interpreting it;
+- validate ordered continuation/call/result history independently of an SDK; and
 - locate function calling and MCP on opposite sides of the same provider-neutral seam.
 
 ## Why this unit matters
@@ -63,12 +64,20 @@ Python callers retain its normal defaults. The bridge that performs schema conve
 harness function—not a `ProviderToolDefinition.from_descriptor` method—so neither the registry nor
 provider-domain class imports and reshapes the other boundary.
 
+Some providers return an opaque state item before a call. It is neither a message nor a tool result,
+but a stateless follow-up must keep its position. CAH-032 therefore models one bounded
+`ProviderOpaqueContinuation` in the same ordered history tuple. A separate request field would lose
+which later call or assistant item it belongs to after several turns; core preserves the payload but
+does not understand it.
+
 ## Key concepts
 
 - **Provider-neutral value:** harness type containing no SDK object.
 - **Definition:** name, description, and strict object schema offered to a model.
 - **Call:** provider observation carrying an ID, registered name, and unparsed JSON.
 - **Result:** bounded success/error output paired to one call ID.
+- **Opaque continuation:** non-empty provider-owned state, capped at 65,536 UTF-8 bytes and preserved
+  immediately before its call or assistant item without parsing or display.
 - **Canonical envelope:** sorted-key compact UTF-8 JSON; success is exactly
   `{"result":...}`, error exactly `{"error":{"code":...,"message":...}}`.
 - **History grammar:** rules preventing orphan, duplicate, or unresolved call/result items.
@@ -80,7 +89,7 @@ provider-domain class imports and reshapes the other boundary.
 ```text
 Ink TUI                 Python harness domain                    Adapters
 task/events      context -> [CAH-032 neutral contract]   OpenAI function calling
-    |              context / definition / call / result <-> future provider adapter
+    |        context / definition / opaque / call / result <-> future provider adapter
     |                           ^
     |                           |
     |                    strict fake provider
@@ -103,12 +112,14 @@ type-specific constraints. Calls use
 `[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}` and preserve raw arguments. Every owned string must round-trip
 strict UTF-8 after JSON parsing; lone surrogates and literal NUL fail without normalization. Result
 status must match its sole top-level envelope key. Ordered history rejects orphan results and
-unresolved calls. New context preserves CAH-030 order/content while omitting its report.
+unresolved calls, and a continuation that does not immediately precede its provider-produced call or
+assistant message. New context preserves CAH-030 order/content while omitting its report.
 
 ## Practical walkthrough
 
-1. Add immutable definition, call, and result values to the provider domain.
-2. Extend request history with legal user/assistant/call/result items.
+1. Add immutable definition, continuation, call, and result values to the provider domain.
+2. Extend one request-history tuple with legal user/assistant/continuation/call/result items; do not
+   add an adapter side channel.
 3. Project one CAH-030 package without its inclusion report.
 4. Call the separate pure bridge to filter Pydantic `title`/`default`, reject every other unsupported
    keyword, require all fields, and canonicalize all definitions atomically.
@@ -126,15 +137,21 @@ context = project_context(context_package)
 definitions = build_provider_tool_definitions(read_file_registry)
 definition = definitions[0]
 call = ProviderToolCall("call_1", "read_file", '{"path":"src/app.py"}')
+opaque = ProviderOpaqueContinuation(canonical_provider_payload)
 result = ProviderToolResult(
     "call_1", status="success", output_json='{"result":{"text":"..."}}'
 )
-request = ProviderRequest(context=context, input=(user, call, result), tools=(definition,))
+request = ProviderRequest(
+    context=context,
+    input=(user, opaque, call, result),
+    tools=(definition,),
+)
 ```
 
 The bridge—not the provider value—converts a registry descriptor. The call preserves untrusted
-arguments. The result reuses CAH-031's exact canonical success envelope and is admitted only after
-the matching call.
+arguments. The opaque payload is one content-suppressed history item immediately before that call and
+counts once toward both the 16-item and 512-KiB request limits. The result reuses CAH-031's exact
+canonical success envelope and is admitted only after the matching call.
 
 ### Exact schema subset
 
@@ -176,6 +193,8 @@ The constructor rejects impossible history before an adapter or model sees it.
 | mutable/malformed schema | definition constructor | reject before request | schema-boundary tests |
 | non-strict or unsupported schema keyword | definition bridge | reject the catalog atomically | portable-subset table |
 | orphan or duplicate call ID | history grammar | reject request | table-driven grammar tests |
+| continuation at start/end, duplicated, reordered, or before the wrong item | history grammar | reject request without exposing payload | positional-history table |
+| continuation above 65,536 bytes or request above 512 KiB | continuation/request constructor | reject atomically | below/at/above byte snapshots |
 | legacy and new context both supplied | request constructor | reject duplicate priority models | compatibility test |
 | request projection above 512 KiB | request constructor | reject without truncation | byte-bound test |
 | raw malformed arguments | later dispatcher, not CAH-032 | preserve bytes without execution | constructor test |
@@ -212,7 +231,7 @@ revocation.
 | --- | --- | --- |
 | Contract | small immutable Python values | versioned cross-service schemas |
 | Providers | strict fake first | multiple adapters and compatibility suites |
-| History | sequential call/result pairs | durable resumable conversations |
+| History | sequential positional continuation/call/result items | durable resumable conversations |
 | Security | bounded local values | schema governance and remote trust |
 | Cost | explicit, narrow seam | migration and interoperability ownership |
 
@@ -224,7 +243,7 @@ features or MCP only when a real reviewed capability requires them and compatibi
 ## Practical exercises
 
 1. Explain why `arguments_json` must not be parsed inside a provider adapter.
-2. Add one history mutation that creates an orphan result and predict the failure.
+2. Move an opaque continuation after its call and predict the constructor failure.
 3. Teach back how function calling differs from tool execution.
 4. Draw the snapshot, re-admission, remote execution, and result-mapping stages a future MCP port
    needs without owning the loop.
@@ -236,6 +255,8 @@ features or MCP only when a real reviewed capability requires them and compatibi
 
 - The harness contract, not an SDK, defines tool meaning inside the loop.
 - Calls and results pair exactly; raw arguments are not validated inputs.
+- Opaque provider state stays in the same ordered history as its call; it is bounded and preserved,
+  never interpreted or stored in evidence.
 - Model-facing required keys are admitted before native Pydantic defaults; local callers keep their
   native defaults.
 - OpenAI maps this neutral seam directly; MCP needs a future generalized registry port with explicit
@@ -247,6 +268,8 @@ features or MCP only when a real reviewed capability requires them and compatibi
 - **Canonical schema:** one stable immutable representation of a reviewed schema.
 - **Call ID:** bounded identifier correlating a call with its result.
 - **History grammar:** allowed ordering and pairing of model input items.
+- **Positional continuation:** opaque provider state whose location next to an output item is part of
+  its meaning.
 
 ## Further reading
 
