@@ -1,10 +1,9 @@
 # Safety Model
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
-> provider-session path, and CAH-023 makes that path available only through explicit, validated OpenAI
-> selection. The 16 dependency-ordered M2 stories CAH-024 through CAH-039 refine the read-only M2
-> boundaries but have not implemented
-> them. The launch still defaults to `MockSession`; this is not a sandbox or a claim that untrusted
+> provider-session path, CAH-023 makes that path available only through explicit, validated OpenAI
+> selection, and CAH-024 implements the first M2 workspace boundary. The remaining 15 M2 stories are
+> planned. The launch still defaults to `MockSession`; this is not a sandbox or a claim that untrusted
 > code can be executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
@@ -60,17 +59,20 @@ safe.
 
 ## Workspace and path safety
 
-The runtime will receive its workspace explicitly; the launch directory is only the default
-selected by the CLI. All model-facing paths are workspace-relative. CAH-024 will turn that existing
-canonical root into an immutable Python boundary, resolve one relative target against a filesystem
-snapshot, and reject absolute paths, traversal, or symlink resolution outside the workspace. It will
-report an accepted target with a workspace-relative label and will not itself read the target.
+The runtime receives its workspace explicitly; the launch directory is only the default selected by
+the CLI. All model-facing paths are workspace-relative. CAH-024 turns that selected canonical root
+into an immutable Python boundary, resolves one relative target against a filesystem snapshot, and
+rejects absolute paths, traversal, or symlink resolution outside the workspace. It reports an
+accepted target with a workspace-relative label. It inspects path metadata for resolution and root
+identity but does not read repository content or authorize later access. Resolution checks each
+canonical prefix from the last contained target, so an escape cannot be hidden by a later symlink
+that returns to the workspace.
 The same CAH-024 lexical primitive bounds a supplied spelling to 4,095 strict-UTF-8 bytes,
 256 normalized components, and 255 UTF-8 bytes per component before root, policy, or filesystem
 inspection. CAH-026 and all native/context/provider request carriers delegate that rule. The numbers
 are harness budgets rather than claims about `PATH_MAX`, `NAME_MAX`, or DrvFS behavior.
 
-That planned snapshot check is necessary but not execution-time authorization. Path checks must be
+That implemented snapshot check is necessary but not execution-time authorization. Path checks must be
 repeated when a later tool accesses a target because files and symlinks can change after validation
 or a proposal. Edit operations also use content-hash or exact-content preconditions. A stale
 proposal returns a conflict and never overwrites newer content. CAH-026 plans the non-overridable
@@ -254,13 +256,14 @@ into secure execution of arbitrary untrusted code.
 > As a user, I want each decision tied to the command or edit I reviewed so that stale approvals
 > cannot authorize changed work.
 
-### Planned CAH-024 — Establish snapshot workspace containment
+### Implemented CAH-024 — Establish snapshot workspace containment
 
 > As a user, I want every repository target interpreted relative to one canonical workspace so that
 > a context operation cannot begin with an outside-workspace path.
 
-CAH-024 introduces the immutable Python boundary and deterministic containment tests. It does not
-perform filesystem access or eliminate time-of-check-to-time-of-use races.
+CAH-024 introduces the immutable Python boundary and deterministic containment tests. It performs
+bounded resolution and filesystem metadata checks, but it does not read repository content,
+authorize a later access, or eliminate time-of-check-to-time-of-use races.
 
 ### Planned CAH-026 through CAH-029 — Recheck workspace targets at read execution
 

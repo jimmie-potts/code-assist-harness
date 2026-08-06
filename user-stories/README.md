@@ -49,9 +49,9 @@ CAH-021 adds the first injected fake-backed turn, strict stream grammar, termina
 serialization, and bounded usage evidence. CAH-022 adds four validated hard limits, fresh per-session
 tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop evidence with
 v1/v2/v3 replay. CAH-023 adds the strict OpenAI Responses adapter plus explicit cross-language
-provider/model configuration while preserving the mock default. M0 and M1 are complete. The 16
-implementation-ready M2 units, CAH-024 through CAH-039 in the dependency order below, all remain
-**Planned**. CAH-024 is the next dependency checkpoint; the sequence then adds shared read policy,
+provider/model configuration while preserving the mock default. M0 and M1 are complete. CAH-024 is
+**Done** as the first of 16 implementation-ready M2 units; the remaining 15 are **Planned**. CAH-026
+is the next checkpoint and adds shared read policy,
 scoped instructions and handlers, attributable context, a typed registry, bounded provider
 definitions, provider-neutral tool exchange, atomic response and argument admission, complete
 result-path instruction coverage through one explicit round trip, the bounded agent loop, strict
@@ -76,7 +76,7 @@ OpenAI tool mapping, and deterministic vertical-slice evaluation.
 | 13 | [CAH-021: Run one provider-neutral turn](cah-021-complete-one-model-turn.md) | [One provider-neutral turn](../docs/lessons/cah-021-one-model-turn.md) | M1 | Done | CAH-020 |
 | 14 | [CAH-022: Enforce loop limits](cah-022-enforce-loop-limits.md) | [Loop limits](../docs/lessons/cah-022-loop-limits.md) | M1 | Done | CAH-021 |
 | 15 | [CAH-023: Add the OpenAI Responses adapter](cah-023-add-openai-responses-adapter.md) | [OpenAI Responses adapter](../docs/lessons/cah-023-openai-responses-adapter.md) | M1 | Done | CAH-022 |
-| 16 | [CAH-024: Establish the workspace boundary](cah-024-establish-workspace-boundary.md) | [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md) | M2 | Planned | CAH-023 |
+| 16 | [CAH-024: Establish the workspace boundary](cah-024-establish-workspace-boundary.md) | [Workspace boundary](../docs/lessons/cah-024-workspace-boundary.md) | M2 | Done | CAH-023 |
 | 17 | [CAH-026: Define repository read contracts and policy](cah-026-define-repository-read-contracts.md) | [Repository read policy](../docs/lessons/cah-026-repository-read-policy.md) | M2 | Planned | CAH-024 |
 | 18 | [CAH-025: Discover scoped repository instructions](cah-025-discover-repository-instructions.md) | [Scoped repository instructions](../docs/lessons/cah-025-repository-instructions.md) | M2 | Planned | CAH-024, CAH-026 |
 | 19 | [CAH-027: List files and inspect path metadata](cah-027-list-files-and-stat-path.md) | [Repository listing and metadata](../docs/lessons/cah-027-list-files-and-stat-path.md) | M2 | Planned | CAH-026 |
@@ -171,7 +171,7 @@ without adding a remote server or network path.
   unchanged model and refusal boundaries.
 - [2026-08-02 CAH-024 workspace-boundary planning](notes/2026-08-02-cah-024-workspace-boundary-planning.md)
   records the E3 story split, the decisions already fixed by the architecture, and the boundary
-  between planned path containment and later filesystem access.
+  between implemented snapshot path containment and later repository-content access.
 - [2026-08-03 M2 read-only assistant planning](notes/2026-08-03-m2-read-only-assistant-planning.md)
   records the 16-story vertical slice, learning priorities, exact loop and tool-exchange defaults,
   review-size policy, and the distinction between local function calling and a future MCP adapter.

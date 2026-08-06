@@ -26,7 +26,7 @@ it for the first time.
 
 ## Delivery timeline
 
-**Last updated:** 2026-08-03 after PR #24 completed M1 and PR #28 review refined M2.
+**Last updated:** 2026-08-06 after PR #28 merged the refined M2 plan and CAH-024 completed.
 
 This is the authoritative delivery timeline. It tracks dependency and outcome checkpoints, not a
 calendar forecast. Add target dates only when the remaining work in a milestone has been decomposed
@@ -37,7 +37,7 @@ stories.
 | ---: | --- | --- | --- | --- | --- |
 | 1 | M0 - Walking skeleton | Done | Completed 2026-07-30 | 9 of 9 stories Done | Complete |
 | 2 | M1 - Conversational core | Done | Completed 2026-08-03 | 6 of 6 stories Done | Complete |
-| 3 | M2 - Read-only coding assistant | Current / Planned | TBD | 16 Planned stories, CAH-024 through CAH-039 in documented dependency order; see the [refined M2 plan](notes/2026-08-03-m2-read-only-assistant-planning.md) | Implement CAH-024 |
+| 3 | M2 - Read-only coding assistant | Current / In progress | TBD | CAH-024 Done and 15 Planned stories through CAH-039 in documented dependency order; see the [refined M2 plan](notes/2026-08-03-m2-read-only-assistant-planning.md) | Implement CAH-026 |
 | 4 | M3 - Controlled coding agent | Not decomposed | TBD | No implementation-ready M3 story | Complete M2, then refine tool, approval, edit, and validation slices |
 | 5 | M4 - Reliability layer | Not decomposed | TBD | No implementation-ready M4 story; deterministic evaluation and transcript foundations already exist | Complete the controlled workflow, then refine reliability expansion |
 | 6 | M5 - Reusable harness | Not decomposed | TBD | No implementation-ready M5 story | Complete the reliability exit, then refine packaging and isolation |
@@ -51,8 +51,8 @@ These ratios count checkpoints, not elapsed time, effort, or remaining complexit
 | Full roadmap progress | 2 of 6 milestone outcomes complete (33%) | The project is entering M2, milestone 3 of 6. |
 | MVP capability progress | 2 of 4 milestones through the M3 controlled-coding outcome complete (50%) | This is a capability-checkpoint count, not a release forecast. |
 | Outcome-level planning | 6 of 6 milestones and 10 of 10 epics have defined outcomes | The product direction is mapped at a useful high level. |
-| Story-level planning | 31 implementation-ready stories: 15 Done and 16 Planned | 48% of the currently refined inventory is Done; this is not a product-completion percentage. |
-| Ready-story runway | The complete 16-story M2 sequence | CAH-024 is next; CAH-026 then supplies shared hard-deny policy before CAH-025, and the remaining M2 stories follow explicit dependencies. |
+| Story-level planning | 31 implementation-ready stories: 16 Done and 15 Planned | 52% of the currently refined inventory is Done; this is not a product-completion percentage. |
+| Ready-story runway | The complete 16-story M2 sequence | CAH-026 is next and supplies shared hard-deny policy before CAH-025; the remaining M2 stories follow explicit dependencies. |
 
 The M0/M1 work in E0 through E2 is decomposed and complete. The complete M2 vertical slice is now
 refined across E2, E3, the read-only kernel of E4, and one E8 evaluation story. M3 through M5 remain
@@ -79,9 +79,9 @@ turn through an injected runtime seam, with strict observation grammar and bound
 CAH-022 puts four validated hard limits, fresh per-session accounting, deterministic deadline and
 cleanup supervision, and transcript-v3 loop evidence around that turn. CAH-023 now activates one
 explicitly configured, text-only OpenAI Responses adapter behind that bounded provider port while
-keeping the mock as the default. M1 is complete. CAH-024 is the next dependency-ready E3 story: it
-plans an immutable Python workspace boundary while leaving repository discovery and reads to the
-now-refined CAH-026, CAH-025, then CAH-027 through CAH-030 units. CAH-026 intentionally precedes
+keeping the mock as the default. M1 is complete. CAH-024 now implements the first dependency-ready E3
+story: an immutable Python workspace boundary while leaving repository discovery and content reads
+to the refined CAH-026, CAH-025, then CAH-027 through CAH-030 units. CAH-026 intentionally precedes
 CAH-025 so instruction discovery reuses pure lexical/hard-deny admission without importing
 ordinary-read limits, errors, or `.gitignore` behavior. CAH-031 through CAH-039, in documented
 dependency order, complete the planned M2 registry, bounded definition bridge,
@@ -156,8 +156,8 @@ workspace.
 
 CAH-024 through CAH-030 are the implementation-ready E3 sequence. They separate the canonical
 workspace boundary, common hard-deny/read policy, scoped repository instructions, listing and metadata,
-bounded text reads, literal search, and attributable context selection. CAH-024 is first and does
-not discover instructions, read file content, register model tools, or claim protection against
+bounded text reads, literal search, and attributable context selection. CAH-024 is Done and does not
+discover instructions, read file content, register model tools, or claim protection against
 filesystem changes after validation. CAH-037 later proves these pieces through the composed M2
 vertical slice.
 

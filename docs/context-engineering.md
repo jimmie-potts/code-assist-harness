@@ -1,8 +1,8 @@
 # Context Engineering
 
 > Status: proposed design refined into CAH-024 through CAH-030, with CAH-037 proving the composed
-> read-only outcome. Repository discovery, native reads, and context selection are not implemented
-> yet.
+> read-only outcome. CAH-024 implements the workspace boundary; repository discovery, native content
+> reads, and context selection are not implemented yet.
 
 Context engineering is the process of selecting the smallest useful, attributable view of a
 workspace for a model turn. The MVP will not load the entire repository, create embeddings, or use
@@ -97,9 +97,10 @@ most 64 complete-envelope object/list levels, with the outer `result` object at 
 `RecursionError`/`ValueError` becomes `invalid_read_tool_result` without partial output or interpreter
 text.
 
-CAH-024 will supply the earlier, tool-independent path primitive for this flow: an immutable Python
+CAH-024 supplies the earlier, tool-independent path primitive for this flow: an immutable Python
 boundary around the already selected canonical root plus contained, workspace-relative target
-resolution. It will not read content or expose any of the tools above. Later read tools remain
+resolution. It does not read repository content or expose any of the tools above. Its bounded
+resolution and identity checks inspect filesystem path metadata. Later read tools remain
 responsible for rechecking the target when they perform filesystem access.
 Its pure lexical seam admits at most 4,095 strict-UTF-8 bytes in the raw supplied spelling,
 256 normalized non-dot components, and 255 UTF-8 bytes per component before `Path` or filesystem
@@ -203,16 +204,16 @@ quality is an optional smoke evaluation outside default checks.
 
 ## Implementation stories
 
-### Planned CAH-024 — Establish the workspace boundary
+### Implemented CAH-024 — Establish the workspace boundary
 
 > As a user, I want every context operation rooted in the selected workspace so that inspection
 > cannot wander into unrelated files.
 
-The [implementation-ready story](../user-stories/cah-024-establish-workspace-boundary.md) ends at
-immutable Python path values and deterministic validation. Complete it when canonical-root,
-relative-path, missing-target, symlink-containment, and workspace-relative reporting behavior has
-meaningful tests. Instruction discovery, file reads, model tool schemas, and execution-time race
-protection remain later work.
+The [implemented story](../user-stories/cah-024-establish-workspace-boundary.md) ends at immutable
+Python path values and deterministic validation. Canonical-root, relative-path, limit,
+missing-target, symlink-containment, stale-root, and workspace-relative reporting behavior have
+focused tests. Instruction discovery, repository-content reads, model tool schemas, and
+execution-time race protection remain later work.
 
 ### Planned CAH-026 — Define repository read contracts and policy
 

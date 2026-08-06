@@ -40,13 +40,14 @@ validated hard limits, per-session accounting, deterministic deadline and cleanu
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
 an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
-protocol v1 is unchanged. The 16 dependency-ordered M2 stories CAH-024 through CAH-039 are
-implementation-ready but still planned as the
-M2 read-only vertical slice. They proceed from workspace and instruction boundaries through native
+protocol v1 is unchanged. CAH-024 adds the first M2 component: one immutable workspace boundary,
+shared bounded path grammar, contained canonical snapshots, and runtime delegation without a protocol
+change. The remaining 15 dependency-ordered M2 stories are implementation-ready and planned. They
+proceed from CAH-026 repository policy and CAH-025 instruction boundaries through native
 reads, attributable context, a typed read registry, provider-neutral function calling, atomic
 tool-aware response admission, a bounded iterative loop, strict OpenAI mapping, and deterministic
-evaluation. CAH-024 remains the first
-dependency checkpoint. Approval, writes, subprocesses, remote MCP, and richer tool UI remain target
+evaluation. CAH-026 is the next dependency checkpoint. Approval, writes, subprocesses, remote MCP,
+and richer tool UI remain target
 architecture for later milestones.
 
 ## Product boundary
@@ -229,7 +230,7 @@ dependency-resolution changes commit `uv.lock`.
 | Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
-| Workspace path containment | Python workspace boundary | Planned in CAH-024: one pure 4,095-byte/256-component/255-byte-name lexical gate feeds an immutable canonical root that resolves contained, workspace-relative targets; later tools delegate the gate and recheck at access time. |
+| Workspace path containment | Python workspace boundary | Implemented in CAH-024: one pure 4,095-byte/256-component/255-byte-name lexical gate feeds an immutable canonical root that resolves contained, workspace-relative snapshots; later tools delegate the gate and recheck at access time. |
 | Context selection | Python context subsystem | Planned in CAH-026, CAH-025, then CAH-027 through CAH-030: context items retain source separately from candidate-owner applicability, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
 | Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel and typed instruction-scope metadata for the native execution-time canonical request scope and returned-path owners; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
@@ -246,6 +247,7 @@ The implemented Python boundary is separated from later domain subsystems:
 ```text
 src/code_assist_harness/
 ├── runtime.py          Command loop, active-session routing, cancellation, and shutdown
+├── workspace.py        Immutable root, bounded path grammar, and contained canonical snapshots
 ├── mock_session.py     Fixed response, cooperative checkpoints, reducer integration, and terminals
 ├── loop_limits.py      Immutable hard limits, per-session counters, and bounded observations
 ├── model_evidence.py   Bounded transcript-only provider usage evidence
@@ -267,17 +269,11 @@ src/code_assist_harness/
 ```
 
 The provider package remains independent of orchestration. `provider_session.py` consumes its port
-through harness-owned values. `runtime.py` keeps the mock default, but an explicit validated OpenAI
-selection lazily imports the concrete adapter and supplies the CAH-022 safety budget to
-`ProviderSessionRunner`. Future `core/`, `context/`, `tools/`, and `safety/` paths remain conceptual
-and will be introduced only by their owning stories.
-
-CAH-024 plans one sibling module; it is not part of the implemented tree above:
-
-```text
-src/code_assist_harness/
-└── workspace.py        Planned immutable root, contained target resolution, and relative labels
-```
+through harness-owned values. `runtime.py` retains the exact CAH-024 `WorkspaceBoundary` selected at
+startup while keeping the mock default; an explicit validated OpenAI selection lazily imports the
+concrete adapter and supplies the CAH-022 safety budget to `ProviderSessionRunner`. Future `core/`,
+`context/`, `tools/`, and `safety/` paths remain conceptual and will be introduced only by their
+owning stories.
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 

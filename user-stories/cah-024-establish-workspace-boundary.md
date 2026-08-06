@@ -1,6 +1,6 @@
 # CAH-024 - Establish the workspace boundary
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / epic:** M2 - Read-only coding assistant / E3 - Repository context and read-only
   tools
 - **Dependencies:** CAH-023
@@ -109,6 +109,9 @@ instructions, expose a tool, or add another agent-loop step.
 - Symlinks are followed. A symlink whose canonical target stays inside the root is accepted; its
   result reports the target's canonical relative path rather than the requested alias. A file or
   directory symlink whose target leaves the root is rejected.
+- Resolution advances from the last contained canonical prefix and checks every next existing
+  prefix. A path that follows a directory symlink outside the root is rejected immediately even if
+  a later outside symlink would point back inside; final-target containment alone is insufficient.
 - Containment is path-component aware. A sibling such as `/workspace-copy` is not inside
   `/workspace`, and string-prefix comparison is prohibited.
 - This unit decides only existence and containment. Future read tools remain responsible for file
@@ -144,7 +147,7 @@ are intentionally not exposed.
 ## Reviewability budget
 
 - **Estimated production-code churn:** 250-400 changed lines.
-- **Delivered production-code churn:** Not started.
+- **Delivered production-code churn:** 387 changed lines (342 additions and 45 deletions).
 - **Counted paths:** additions plus deletions under `src/code_assist_harness/` and `tui/src/`.
 - **Excluded from count:** tests, documentation, fixtures, lockfiles, and generated artifacts.
 - **Planning PR scope:** One contract neighborhood: runtime-selected root and model-facing relative
@@ -167,7 +170,8 @@ are intentionally not exposed.
    256-component, and 255-byte-name endpoints pass pure lexical admission, valid multibyte scalar
    paths round-trip unchanged, and no Unicode normalization occurs.
 5. Component-aware containment rejects symlinked files and directories that resolve outside the
-   root, including missing descendants beneath an escaping directory symlink.
+   root, including missing descendants beneath an escaping directory symlink and a later symlink
+   that would re-enter the workspace after an earlier escape.
 6. Missing and dangling in-workspace paths fail with `workspace_path_not_found`; no create-target or
    closest-existing-ancestor behavior is introduced.
 7. A snapshot check that observes a missing, renamed, replaced, redirected, or type-changed root
@@ -183,22 +187,22 @@ are intentionally not exposed.
 
 ## Acceptance-to-test matrix
 
-| Contract or risk | Planned test | Layer | Expected evidence |
+| Contract or risk | Implemented test | Layer | Expected evidence |
 | --- | --- | --- | --- |
 | Canonical contained path | construct a boundary and resolve `.`, a file, and an internal symlink | unit | immutable values report canonical relative labels without host paths |
 | String, syntax, and work admission | try bytes-valued, lone-surrogate, empty, NUL, absolute, `..`, and sibling-prefix paths; exercise complete bytes 4,094/4,095/4,096, names 254/255/256 bytes, and 255/256/257 normalized components with multibyte controls | unit | exact fixed code and zero `Path`, root, or filesystem calls for invalid strings; endpoints pass only the pure lexical gate, without claiming the host mount can create the longest value |
-| Symlink escape | resolve file, directory, and missing-descendant escapes | unit | `workspace_path_outside` without requested or canonical path leakage |
+| Symlink escape | resolve file, directory, missing-descendant, and escape-then-re-enter paths | unit | first established outside prefix produces `workspace_path_outside` without requested or canonical path leakage |
 | Missing target | resolve missing and dangling in-workspace paths | unit | `workspace_path_not_found` with no raw `OSError` |
 | Root staleness | remove, rename, replace, redirect, and type-change the root | unit | observable replacement produces `stale_workspace_root` |
 | Runtime delegation | start with valid and invalid selected roots | integration | current argv, readiness, protocol, and TUI behavior remain unchanged |
 
 ## Validation
 
-- Add focused `tests/test_workspace.py` coverage for construction, canonical reporting, `.` root
+- Focused `tests/test_workspace.py` coverage exercises construction, canonical reporting, `.` root
   reporting, normal and multibyte-scalar descendants, internal file and directory symlinks,
   bytes-valued and lone-surrogate strings, empty, NUL, absolute and traversal inputs, sibling-prefix
-  escapes, dangling links, missing targets, escaping missing descendants, root removal, observable
-  root replacement, and root type changes.
+  escapes, dangling links, missing targets, escaping missing descendants, escape-then-re-enter
+  chains, root removal, observable root replacement, and root type changes.
 - For lone-surrogate and other pre-admission failures, inject filesystem spies and assert that path
   construction/resolution, existence checks, and stat operations are never reached.
 - Test the pure lexical primitive independently at 4,094/4,095/4,096 bytes,
@@ -207,26 +211,29 @@ are intentionally not exposed.
   case with only legal-size names so the aggregate limit is isolated. Use ASCII plus a multibyte
   scalar to prove byte rather than character counting. Do not create the aggregate endpoint on disk
   or treat lexical admission as a `PATH_MAX` guarantee.
-- Update runtime tests to prove the existing CLI accepts one canonical workspace and maps invalid
+- Runtime tests prove the existing CLI accepts one canonical workspace and maps invalid
   root construction to its bounded startup failure without leaking the supplied path.
-- For observable replacement coverage, rename the original root so it remains referenced, create a
-  replacement at the captured pathname, assert that its device/inode differs, and then resolve. This
-  keeps the test independent of inode-reuse behavior.
-- Assert the exact failure-code/message table and check messages plus value representations against
-  distinctive temporary path names and raw OS text.
-- Use temporary directories and local filesystem operations only; no subprocess, provider, network,
-  sleep, or protocol fixture is required for the focused boundary evidence.
-- Run `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_workspace.py
-  tests/test_runtime.py` and the canonical `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache
-  ./scripts/check`.
+- Observable-replacement coverage renames the original root so it remains referenced, creates a
+  replacement at the captured pathname, asserts that its device/inode differs, and then resolves.
+  This keeps the test independent of inode-reuse behavior.
+- The tests assert the exact failure-code/message table and compare messages plus value
+  representations with distinctive temporary path names and raw OS text.
+- Focused boundary tests use temporary directories and local filesystem operations only; they need
+  no subprocess, provider, network, sleep, or protocol fixture. Runtime integration remains separate
+  process-boundary evidence.
+- The focused workspace/runtime suite and canonical
+  `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` passed. The canonical gate reported 1,015
+  Python tests with one live smoke deselected, 32 Python protocol cases, 48 repository-policy tests,
+  240 TUI tests, 31 TypeScript protocol cases, and four real Node-to-Python integration cases, plus
+  passing type, lint, and format checks.
 
 ## Documentation impact
 
 Update `README.md`, `docs/architecture.md`, `docs/context-engineering.md`, `docs/safety-model.md`,
-`docs/glossary.md`, the story and lesson indexes, and the backlog with the implemented boundary,
-its canonical-reporting rule, fixed failures, and residual check/use risk. Reconcile the Markdown
-lesson to the exact modules and tests. Do not add a presentation; the Markdown diagram carries the
-architecture position.
+`docs/glossary.md`, `docs/walking-skeleton.md`, the story and lesson indexes, and the backlog with
+the implemented boundary, its canonical-reporting rule, fixed failures, and residual check/use risk.
+Reconcile the Markdown lesson to the exact modules and tests. Do not add a presentation; the Markdown
+diagram carries the architecture position.
 
 ## Exclusions
 
@@ -249,7 +256,7 @@ architecture position.
 | Identity ledger | The selected-root alias is construction input only; the canonical root plus captured device/inode identify the boundary, the execution-time canonical target identifies a resolved path, and only its workspace-relative POSIX label is model-visible. Semantic owner, provenance source, and cache/accounting identity are N/A for this containment-only unit. |
 | End-to-end contract | Runtime `--workspace` selection -> `WorkspaceBoundary.from_path` -> stored boundary -> `resolve_existing` -> immutable canonical target/label or fixed error; runtime integration proves the existing readiness/protocol path, and CAH-025/026 consume this API. Evaluation wiring is N/A until the later M2 evaluation unit. |
 | Failure and atomicity | Construction or resolution returns one immutable value or one fixed error; invalid Unicode/path syntax reaches zero filesystem calls, stale/escape/missing checks return no target, and no content or tool operation can execute. Cancellation, deadline, and rollback are N/A for this synchronous boundary; the documented post-check pathname race remains. |
-| Reachable boundaries | The real boundary and runtime entry exercise accepted scalar paths, every pre-I/O syntax rejection, internal/escaping symlinks, sibling-prefix containment, and observable root removal/replacement before and after target resolution. Numeric item/byte ceilings and a scheduler seam are N/A. |
+| Reachable boundaries | The real boundary and runtime entry exercise accepted scalar paths, every pre-I/O syntax rejection, internal/escaping symlinks, sibling-prefix containment, and observable root removal/replacement before and after target resolution. The inclusive 4,095-byte raw-path, 256-component, and 255-byte-name ceilings are tested independently; a scheduler seam is N/A. |
 | Closed grammar and cardinality | One selected existing directory and one non-empty relative Linux path are admitted; `.` is the sole root label, `..`, absolute, NUL, bytes-valued, and lone-surrogate paths are closed out, and exactly five fixed error variants cover construction/resolution. No collection duplicate policy applies. |
 | Artifact parity | Story, lesson, compact diagram, architecture/context/safety docs, and test matrix use the same order: construct canonical root -> pre-I/O path admission -> root snapshot -> strict target resolution/containment -> root snapshot -> canonical label, with the same fixed failure precedence and residual race caveat. |
 | Independent lenses | Security/identity review covers component containment, symlinks, staleness, and leak-free values; handoff/composition review covers runtime plus CAH-025/026 callers; provider/protocol/limits/scheduler review records those boundaries unchanged and scheduler behavior as N/A. |
@@ -274,20 +281,24 @@ architecture position.
    the work is split before review.
 9. The PR is ready for review and every addressed inline review thread is resolved.
 
-## Planned evidence
+## Implementation evidence
 
-- `src/code_assist_harness/workspace.py` and `tests/test_workspace.py` implement and prove the
-  narrow boundary.
-- Runtime tests prove delegation preserves the current one-root launch contract and removes raw-path
-  startup errors.
+- `src/code_assist_harness/workspace.py` and `tests/test_workspace.py` implement and exercise the
+  narrow boundary, including bounded lexical admission, canonical reporting, internal and escaping
+  symlinks, escape-then-re-enter rejection, missing targets, canonical-label re-admission, and root
+  staleness.
+- Runtime tests exercise delegation while preserving the current one-root launch contract and
+  replacing raw-path startup errors with the fixed boundary surface.
 - The Markdown lesson locates CAH-024 between runtime workspace selection and future context/read
   tools while keeping provider, tool, and evidence changes absent. No presentation is planned
   evidence for CAH-024.
-- Focused tests and the repository-wide non-live gate pass before the story moves to Done.
+- The focused tests and repository-wide non-live gate pass with the counts recorded in Validation.
 
 ## Deferred work
 
-- The next E3 unit discovers root and nested repository instructions using this boundary.
+- CAH-026 is the next E3 unit and adds shared read contracts plus lexical/hard-deny policy by
+  delegating CAH-024's path grammar. CAH-025 then discovers root and nested repository instructions
+  through those two boundaries.
 - Later native read-tool units add type/ignore/output policy and must call `resolve_existing` again
   immediately before access.
 - A later executor-hardening unit may replace snapshot-only containment with descriptor-relative or

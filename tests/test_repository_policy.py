@@ -610,7 +610,6 @@ def test_m2_plans_are_reviewable_learning_units() -> None:
         "## Exclusions",
         "## Pre-review adversarial audit",
         "## Definition of done",
-        "## Planned evidence",
         "## Deferred work",
     )
     lesson_headings = (
@@ -687,8 +686,18 @@ def test_m2_plans_are_reviewable_learning_units() -> None:
         )
     )
     assert tuple(planned_churn_by_story) == expected_m2_ids
-    assert "16 Planned stories, CAH-024 through CAH-039 in documented dependency order" in backlog
-    assert "31 implementation-ready stories: 15 Done and 16 Planned" in backlog
+    all_indexed_statuses = re.findall(
+        r"^\| \d+ \| \[CAH-\d{3}:[^\n]+?\| M\d \| ([^|]+?) \|",
+        story_index,
+        re.MULTILINE,
+    )
+    assert len(all_indexed_statuses) == 31
+    for status in ("Done", "In progress", "Planned"):
+        count = sum(indexed_status.strip() == status for indexed_status in all_indexed_statuses)
+        if count:
+            assert f"{count} {status}" in backlog
+    assert "CAH-024" in backlog
+    assert "CAH-039" in backlog
     assert "The complete 16-story M2 sequence" in backlog
     story_template_source = (REPOSITORY_ROOT / "user-stories" / "story-template.md").read_text(
         encoding="utf-8"
@@ -743,6 +752,10 @@ def test_m2_plans_are_reviewable_learning_units() -> None:
         assert "**Planning PR scope:**" in story
         assert "600" in story
         assert all(heading in story for heading in story_headings)
+        evidence_heading = (
+            "## Planned evidence" if story_status == "Planned" else "## Implementation evidence"
+        )
+        assert evidence_heading in story
         for audit_lens in (
             "Identity ledger",
             "End-to-end contract",
