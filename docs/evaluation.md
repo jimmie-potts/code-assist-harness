@@ -7,8 +7,9 @@
 > and shared transition/replay fixtures. CAH-020 adds the provider-neutral port and programmable
 > fake. CAH-021 proves one provider-backed turn, CAH-022 proves four hard limits, deadline races,
 > bounded cleanup, and version-3 evidence around it, and CAH-023 adds SDK-fake adapter coverage plus
-> an explicit optional live smoke. Filesystem-backed `evals/` scenarios are not implemented yet, and
-> the launched TUI still defaults to the deterministic mock.
+> an explicit optional live smoke. CAH-037 now refines the first filesystem-backed, deterministic
+> read-only vertical-slice evaluation, but it is not implemented yet. The launched TUI still
+> defaults to the deterministic mock.
 
 Evaluation starts with the walking skeleton and measures the harness before it attempts to measure
 model intelligence. Deterministic scenarios should make lifecycle, protocol, policy, context, edit,
@@ -250,12 +251,77 @@ records its result.
 
 ## Implementation stories
 
-### Future story — Define the scenario format and runner
+### Planned CAH-037 — Prove the read-only assistant vertical slice
+
+> As a repository user, I want fixture-backed explain and plan tasks to traverse the composed M2
+> loop so that grounded behavior is proven without a live model.
+
+The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) introduces
+`evals/` only with a small purpose-built runner, one synthetic workspace, deterministic strict-fake
+explain/plan cases, and adversarial mutations. It checks structured retrieval/tool evidence before
+small required or forbidden answer facts. Plain runtime composition defaults **initial** context
+scope to `.` with empty focus and search inputs and supplies the exact M2 limits: four model turns, 120
+provider-work seconds, 4,096 output bytes, and three observed tool calls. Fixture cases may inject
+explicit context values through their test seam but may not alter that ordinary composition profile.
+Tests assert a fresh exact profile for mock and OpenAI paths so bare `LoopLimits()` defaults cannot
+silently narrow the loop. Optional live output remains observational and requires the same explicit
+OpenAI selection and repository-content egress warning as the application path.
+
+The deterministic fixture also proves context evolution: the exact first request contains only root
+instructions, and a successful `read_file` target under `pkg/` causes the binding with
+`source="shared/rules.md"` and `applies_to="pkg"` to appear in the next request. An exact owner snapshot
+repeats idempotently. Broad list/search results expose multiple nested and sibling owners; every
+binding must appear before the result is replayed. After every discovery guard, the returned bundle's
+`canonical_scope` must exactly equal the captured result scope; one mismatching or failing later owner
+rejects the whole local transaction without alias fallback. Empty-list/no-match cases retarget a
+supplied alias after dispatch and prove only the scope captured by the native operation's final
+access-time admission drives discovery; removing that captured path fails without replay or alias
+fallback. Stat/read cases likewise prove result `path` is final admitted provenance, including
+`read_file`'s final pre-open path. A separate injected case validates every projection with zero I/O,
+discovers/folds/checks root first, completes every focus read/discovery/fold before search, unions the
+instruction chains for the supplied root scope, every canonical-distinct focus path, and every
+first-occurrence search-match owner before its content, then proves each literal query uses only the
+exact supplied-scope `SearchTextRequest` projection with depth four and 100 matches. Root failure has
+zero focus/search calls and focus failure has zero search calls. A scope-alias retarget between root
+discovery and search produces a canonical-result mismatch and no package. An internal instruction link records
+its resolved source separately from candidate-owner applicability; a hard-denied target is never
+read. Missing-ancestor and late-insertion snapshots prove CAH-025's canonical-depth precedence gaps
+survive CAH-030 storage and CAH-032 projection unchanged; sibling serialization is never reinterpreted
+as precedence. CAH-031 projection tables admit signed-64-bit integer endpoints, reject adjacent and
+5,000-digit overflow values, cover 63/64/65-level complete result envelopes and wide/work-exhausting
+values, and map injected serializer `RecursionError`/`ValueError` to the fixed
+`invalid_read_tool_result`. CAH-032 construction and CAH-036 mapping tables cover malformed tool-name
+carriers plus 16,383/16,384/16,385 argument bytes; rejected carriers invoke neither CAH-033 nor
+CAH-039. CAH-033/036 text tables cover exact/subclassed 8,191/8,192/8,193-byte ASCII and multibyte
+inputs, one bounded normal join, zero overflow-tail work, exact marker handoff, structural/failure
+precedence, and zero publication/dispatch. Separate adapter cases pump 16,384 mapped-empty one-byte
+argument deltas at constant stack depth and require raw terminal-to-EOF; an extra event or iterator
+exception discards the staged terminal tuple. CAH-039's focused tables begin with admitted, at-or-below-limit carriers and cover an exact
+16,384-byte argument; 63/64/65-level object-array shapes with root object depth 1; quoted/escaped
+delimiters and mismatched containers; signed-64-bit endpoints and overflow; fractional/exponent
+numeric tokens; all three
+non-finite constant spellings; defensive decoder `RecursionError`/`ValueError`; and same-value,
+conflicting, reversed, nested, array-contained, and escape-equivalent duplicate members through the
+deepest admitted object depth. The composed CAH-037 fixture proves unknown-tool lookup wins first,
+then structural and numeric preflight runs before Python conversion, the pair-preserving decode uses
+rejecting `parse_constant` handling, and the iterative duplicate walk completes before
+dictionary construction, the exact-key gate, Pydantic, or native dispatch. Every CAH-039-rejected input
+becomes `invalid_read_tool_input`, followed by one charged observation and unchanged-context
+call/error replay. Named
+event gates before dispatch, after synchronous dispatch, after every discovery, after every merge, and before provider
+start prove zero native execution at the first gate and that later result,
+instruction, context, history, and request candidates remain uncommitted when cancellation wins.
+Instruction-discovery or merge failures, changed owner snapshots, and
+context/request overflow produce zero next provider starts; known bounded tool errors may continue
+against unchanged context.
+
+### Future story — Generalize the scenario format and runner
 
 > As a harness developer, I want filesystem-based deterministic scenarios so that behavior can be
 > reproduced from inputs, fake-provider events, decisions, and expected effects.
 
-Complete this story when an isolated runner reports event and file-state differences clearly.
+Complete this later story when CAH-037's focused read-only runner has a demonstrated second workflow
+and can become a general isolated format without weakening its deterministic evidence.
 
 ### Future story — Evaluate lifecycle and stopping
 
@@ -267,10 +333,10 @@ Complete this story when an isolated runner reports event and file-state differe
 > As a user, I want denial, approval, stale-edit, traversal, timeout, and cancellation scenarios so
 > that side-effect defenses are continuously verified.
 
-### Future story — Evaluate context selection
+### Future story — Expand context-selection evaluation
 
-> As a learner, I want known relevant files, source ranges, budgets, and unnecessary reads measured
-> so that context-engineering changes can be compared.
+> As a learner, I want a broader corpus of known relevant files, source ranges, budgets, and
+> unnecessary reads so that context-engineering changes can be compared beyond CAH-037's two cases.
 
 ### CAH-023 (Implemented) — Add optional live-provider smoke evaluation
 

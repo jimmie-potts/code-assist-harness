@@ -71,7 +71,12 @@ shell string in the MVP.
 
 A bounded piece of information selected for a provider request. It includes content, source
 provenance such as a path and line range, an inclusion reason, and a contribution to the context
-budget.
+budget. An instruction item also names its canonical candidate-owner `applies_to` directory, which
+may differ from a symlink-resolved canonical `source`. The same source under different owners is two
+separately charged bindings. Later successful tool targets may add unchanged, previously unseen
+instruction items atomically; sibling scopes do not imply precedence over one another.
+Instruction precedence is the canonical `applies_to` depth (`.` is zero), so missing ancestors may
+leave rank gaps and late insertion never renumbers an existing item.
 
 ## Correlation ID
 
@@ -114,6 +119,14 @@ The CAH-020 deterministic implementation of the provider port. It matches an ord
 exact harness-owned requests and explicit emit, logical-delay, or cancellation-checkpoint steps.
 It is strict rather than permissive: omitted requests, unexpected requests, unfinished operations,
 and unconsumed steps fail the test without exposing request contents in the diagnostic.
+
+## Function calling
+
+The model-facing conversation pattern in which the harness advertises typed tool definitions, a
+provider reports a requested call, the harness validates and executes that call, and a later model
+request includes the correlated tool result. Function calling does not give the provider permission
+to execute a tool. The project-owned agent loop remains responsible for dispatch, policy, limits,
+and deciding whether another model turn is admitted.
 
 ## Harness core
 
@@ -159,14 +172,47 @@ The learning companion for one implementation-ready user story. It explains the 
 architecture, practical exercises, failure modes, production alternatives, trade-offs, and local
 glossary. A lesson is educational context, not evidence that planned behavior has shipped.
 
+## Model Context Protocol (MCP)
+
+A transport and discovery protocol through which a client can list and invoke tools exposed by an
+MCP server. MCP is distinct from the model-facing function-calling grammar. M2's narrow local read
+registry is not directly MCP-compatible. A future generalized registry port may snapshot and
+re-admit discovered tools only after it defines broader schema/result mapping, remote capability
+classification, server trust, authentication, network access, changing catalogs, cancellation, and
+evidence rules. An MCP server never owns harness policy, approval, workspace containment, limits,
+or transcript semantics.
+
 ## Model turn
 
-One provider request and its complete streamed response. A model turn may produce assistant text,
-one or more tool-call requests, usage information, or a provider failure, and may end early through
-operation cancellation. Cancellation closes the provider stream rather than appearing as a
-provider stream event. CAH-021 implements exactly one provider-neutral turn, and CAH-023 runs that
-same turn when the user explicitly selects OpenAI and the exact supported model; the default remains
-mock. Another turn, tool continuation, and automatic multi-turn behavior remain planned.
+One provider request and its complete streamed response. A model turn may produce assistant text, a
+tool-call request, usage information, or a provider failure, and may end early through operation
+cancellation. Cancellation closes the provider stream rather than appearing as a provider stream
+event. CAH-021 implements exactly one provider-neutral turn, and CAH-023 runs that same turn when the
+user explicitly selects OpenAI and the exact supported model; the default remains mock. Planned M2
+admits final text or exactly one sequential call per turn and fails closed on mixed, multiple, or
+parallel call shapes. CAH-033 makes that admission atomic: the complete turn is buffered and its
+closed grammar is validated before final text can be published or a tool call can be dispatched.
+
+## Provider text overflow observation
+
+A planned content-free provider-neutral event with the sole required byte value 8,193. Provider
+models own the shared 8,192-byte normal-text cap; adapters and fakes emit the overflow event instead of
+constructing an oversized delta/completion. CAH-033 converts the event to a private overflow outcome,
+while session accounting retains ownership of `assistant_output_limit_exceeded`.
+
+## Opaque reasoning item
+
+Bounded provider continuation state that the harness preserves byte-for-byte but never interprets
+as instructions, assistant text, or policy. Planned CAH-036 stores each accepted OpenAI reasoning
+item as one canonical six-key replay envelope—including its required ID and item fields, not only the
+encrypted content. Omitted or null optional `content` and `status` become null markers and are omitted
+again on input replay. CAH-032 carries the payload as one bounded, content-suppressed item at its exact
+history position rather than a separate request field. CAH-036 reconstructs it on later stateless
+`store=false` requests even while the configured reasoning context remains `current_turn`. Every
+request uses the exact Responses include value `reasoning.encrypted_content` so even the first
+accepted reasoning item carries that replay payload. Its exact SDK `id` and `encrypted_content`
+strings pass O(1) character and strict UTF-8 byte gates before canonical replay JSON is built. SDK
+objects still stop at the adapter boundary.
 
 ## NDJSON
 
@@ -191,6 +237,13 @@ separately from ordinary assistant prose so the user can see the current course 
 The Python component that decides whether a validated action is prohibited, may run automatically,
 or requires approval. The TUI presents decisions but does not make them; the model cannot bypass
 them.
+
+## Prepared tool invocation
+
+A content-suppressed, typed, non-executed CAH-039 handoff produced only after exact-name lookup,
+bounded raw-JSON admission, duplicate rejection, exact-key validation, and native Pydantic
+validation. CAH-034 may dispatch this value unchanged; neither a provider adapter nor orchestration
+re-parses its arguments.
 
 ## Protocol version
 
@@ -218,9 +271,18 @@ and closes the stream logically without claiming remote resources were released.
 ## Provider request
 
 The immutable harness-owned input for exactly one model turn. CAH-020 represents a non-empty ordered
-conversation plus ordered caller-supplied repository instructions. The request deliberately excludes
-provider credentials, SDK values, provider-specific response objects, instruction discovery, and
-context-selection policy.
+conversation plus ordered caller-supplied repository instructions. Planned CAH-032 adds already
+selected repository context, strict local tool definitions, positional opaque continuation, and
+matched call/result history under a fixed canonical byte bound. The request deliberately excludes
+provider credentials, SDK values,
+provider-specific response objects, instruction discovery, context-selection policy, and inclusion
+reports. A plain runtime task defaults its initial context scope to `.` with empty focus and search
+inputs; later immutable requests may contain instruction items added for successful tool targets.
+Direct strings and the exact conversation, legacy-instruction, repository-context, and tool tuples
+are character/cardinality-gated before UTF-8, iteration, projection, or JSON serialization; the
+complete 512-KiB projection is the final per-request byte gate.
+Explicit OpenAI selection authorizes the bounded, policy-admitted repository content in that request
+to leave the machine; path admission does not content-secret-scan ordinary allowed files.
 
 ## Provider stream event
 
@@ -230,7 +292,8 @@ normalized failure. These are Python domain values, not protocol-v1 session even
 translates accepted text and terminal observations into the existing lifecycle and stores optional
 bounded usage through a transcript-only `model.usage_observed` evidence record. CAH-022 may add one
 `loop.limits_observed` record to a provider-backed version-3 tape. Neither record changes protocol v1
-or the shared lifecycle reducers.
+or the shared lifecycle reducers. Planned M2 retains optional usage as session-aggregate evidence
+only when final assistant text is accepted; tool-only turns do not create per-turn usage records.
 
 ## Provider session
 
@@ -240,9 +303,16 @@ strict stream grammar, and admits each lifecycle publication as an ordered, non-
 cancellation-shielded wire/reducer/observer transaction. It selects one outcome and joins the
 session's one supervised cleanup task. This protects admission against competing cancellation,
 deadline, or terminal selection; an ordinary later sink or observer failure does not roll back an
-earlier accepted view. The
-session is distinct from the default `MockSession`, provider adapter, multi-turn loop, and TUI
-projection.
+earlier accepted view. The session is distinct from the default `MockSession`, provider adapter,
+multi-turn loop, and TUI projection. CAH-033 first makes one tool-aware response an atomic admission
+transaction. CAH-039's registry-only factory invokes CAH-038 internally; its catalog owns the exact
+CAH-031 registry identity and advertised definitions, producing a same-entry prepared invocation or
+fixed error without dispatch. CAH-034 then adds the explicit two-turn teaching path and dispatches
+only through that same catalog; cross-catalog input is a session invariant failure. It also adds atomic instruction coverage
+for the native execution-time canonical request scope and returned-path owners. Each discovered
+bundle must still name that captured scope, with no post-dispatch alias fallback. CAH-035 replaces it
+with the bounded sequential loop while preserving
+current context, provider-session ownership, and cleanup.
 
 ## Reducer
 
@@ -263,7 +333,8 @@ writes ordered events, and coordinates shutdown. It hosts the harness core but i
 terminal interface. `run_runtime` supports provider composition and accepts the immutable limits
 configuration plus injectable monotonic clock pair. `main()` defaults to `MockSession`; explicit
 OpenAI/model selection validates configuration before lazily composing the concrete adapter and
-supplying default limits.
+supplying default limits. Planned CAH-037 instead supplies its explicit M2 profile: four model turns,
+120 provider-work seconds, 4,096 assistant-output bytes, and three observed tool calls.
 
 ## Sequence number
 
@@ -305,9 +376,30 @@ cancellation, expected failures, and security assumptions.
 
 ## Tool call
 
-A provider-requested invocation of a named tool with structured arguments. It is validated before
-policy evaluation and may be rejected, require approval, or execute automatically according to
-its capability and effective policy.
+A provider-requested invocation of a named tool whose arguments remain bounded raw JSON across
+provider-neutral and adapter boundaries. CAH-039 alone turns that text into a prepared M2 read
+invocation or fixed error; later policy may reject it, require approval, or allow execution according
+to its capability and effective policy.
+
+## Tool registry
+
+The harness-owned mapping from a unique model-facing tool name to its validated definition and
+executor. The planned M2 kernel admits only native read capabilities and rejects unknown names,
+duplicate definitions, malformed arguments, and invalid results. Later milestones extend the same
+seam with side-effect policy and approvals rather than bypassing it. A future MCP client requires a
+generalized registry port and separate remote-trust design rather than direct registration in this
+M2 kernel.
+
+## Tool result
+
+An immutable, bounded, provider-neutral outcome correlated to one tool-call ID. It contains only
+validated success data or a stable safe failure. Planned M2 serializes every provider-facing result
+as compact, sorted-key UTF-8 JSON: exactly `{"result":<projected>}` or
+`{"error":{"code":"<code>","message":"<fixed message>"}}`, capped at 65,536 bytes inclusive. A
+64-level complete-envelope depth cap and 65,536-unit pre-serialization work budget bound deep and
+wide values; defensive serializer `RecursionError`/`ValueError` becomes a fixed invalid-result
+failure. Oversize output fails instead of being truncated. Provider adapters translate the result
+into their wire or SDK representation; they do not execute the tool or reinterpret harness policy.
 
 ## Transcript
 
@@ -345,6 +437,11 @@ The planned CAH-024 immutable Python value that owns one canonical workspace roo
 model-facing relative targets into contained paths with workspace-relative labels. It describes a
 validated filesystem snapshot; later read, edit, or command code must recheck containment when it
 performs access because validation alone does not prevent filesystem replacement races.
+
+Its pure lexical primitive also owns the inclusive application budget for one supplied path:
+4,095 strict-UTF-8 bytes in the raw spelling, 256 normalized non-dot components, and 255 UTF-8 bytes
+per component. These are deterministic harness work limits, not `PATH_MAX`, `NAME_MAX`, or WSL mount
+compatibility guarantees.
 
 ## Workspace configuration
 

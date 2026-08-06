@@ -1,7 +1,10 @@
 # CAH-XXX lesson: Unit title
 
 - **Unit:** CAH-XXX
-- **Milestone:** M0 or M1
+- **Milestone:** M0, M1, M2, M3, M4, or M5
+- **Learning emphasis:** Core learning unit or Supporting implementation unit
+- **Review focus:** Name the system-design, agent-loop, provider, tool, MCP, safety, or evidence
+  concept that deserves the learner's closest attention
 - **Lesson status:** Planned, Implementation companion, Implementation companion - blocked, or
   Verified against implementation
 - **Implementation status:** Match the linked user story
@@ -58,7 +61,17 @@ flow.
 ## Practical walkthrough
 
 Describe the intended implementation sequence, what to inspect while building it, and how to know
-the concept is working. Link to the user story rather than duplicating all acceptance criteria.
+the concept is working. Use the same named stage order and failure precedence as the story, diagram,
+pseudocode, and test matrix; use the story's exact carrier fields and callable signatures, and do not
+reorder the pipeline merely for exposition. Link to the user story rather than duplicating all
+acceptance criteria.
+
+Before review, render the changed Markdown neighborhood. Confirm every diagram's success and error
+arrows reach the correct owner, every code fence is balanced, and pseudocode uses the real producer's
+field names, return variants, and callable signatures. If a provider or framework object is involved,
+show where its validated observations end and harness-owned atomic admission begins. Trace each bound
+to the first producer, show iterative/terminal-to-EOF transport behavior where relevant, and visibly
+consume every async transition's continue/stop result or private sentinel before later work.
 
 ## Implementation code samples
 
@@ -70,7 +83,9 @@ never present planned code as implemented evidence.
 ## Failure scenarios to study
 
 Include at least one meaningful failure path. Explain the observable symptom, the responsible
-boundary, the safe outcome, and the test evidence that should prove it.
+boundary, the exact safe outcome and precedence, and the test evidence that should prove it. State
+whether the branch is replayable model content, a session terminal, or a diagnostic after another
+outcome was selected.
 
 ## Production expansion
 

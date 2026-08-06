@@ -1,7 +1,8 @@
 # Context Engineering
 
-> Status: proposed design. CAH-024 is the planned first implementation unit; repository discovery,
-> native reads, and context selection are not yet implemented.
+> Status: proposed design refined into CAH-024 through CAH-030, with CAH-037 proving the composed
+> read-only outcome. Repository discovery, native reads, and context selection are not implemented
+> yet.
 
 Context engineering is the process of selecting the smallest useful, attributable view of a
 workspace for a model turn. The MVP will not load the entire repository, create embeddings, or use
@@ -31,9 +32,26 @@ The context builder will assemble provider-neutral items from:
 - File excerpts and search matches requested through repository read tools.
 
 Instruction discovery follows filesystem scope. A nested instruction file can refine rules for its
-subtree, but must not silently weaken harness safety policy. Repository content is untrusted data:
-text in a source file cannot authorize a command, broaden the command allowlist, or bypass an
-approval.
+subtree, but must not silently weaken harness safety policy. CAH-026's pure lexical admission and
+hard-deny classifier apply before instruction scope/source access even though exact `AGENTS.md`
+control-plane candidates are exempt from `.gitignore`. A binding records the resolved canonical
+source separately from the canonical candidate-owner directory to which it applies, so a symlink
+cannot move the instruction's scope. Its precedence is the canonical depth of `applies_to` (`.` is
+zero), not its tuple position. Missing ancestors leave legal gaps and siblings at the same depth do
+not acquire an invented order; CAH-030 retains and CAH-032 projects this exact rank without
+renumbering. Ignore policy has the same two-identity rule: a present `.gitignore` keeps the
+view-relative candidate-owner label for rule applicability, while its resolved source must remain
+inside the workspace, avoid canonical hard denial, and pass the same check immediately before its
+bounded read. Each lexical or canonical walk also captures the owner's canonical directory when that
+directory is admitted. It re-admits the owner label and requires the same directory immediately before
+the non-following leaf probe and before any cache-miss read, so a persistent allowed A-to-B owner
+retarget fails before B's leaf is resolved or read. A cache hit still follows the owner check and
+current leaf/source resolution before owner-relative rule attachment, but performs no content read or
+new charge. The source remains cache/budget identity. Escaping, hard-denied, dangling, non-regular,
+retargeted, or unreadable policy input fails closed and is neither cached nor charged. These are
+pathname snapshots; a mutation after the final check remains a deferred descriptor-relative risk.
+Repository content is untrusted data: text in a source file cannot authorize a command, broaden the
+command allowlist, or bypass an approval.
 
 ## Native read tools
 
@@ -48,21 +66,76 @@ These read-only tools may run automatically after schema validation and policy c
 as `find`, `grep`, `git status`, or `cat` are still subprocesses and require command approval; the
 model should prefer the native tools for routine inspection.
 
-Each tool input and result is validated with Pydantic v2 at the model boundary. Paths are resolved
-against the explicit workspace, symlink escapes are rejected, ignored or prohibited locations are
-excluded, and file/count/byte limits are enforced before content enters context. Binary files and
-files over configured size limits return structured explanations rather than unbounded data.
+CAH-032 construction and provider mapping reject malformed tool-name carriers or arguments above 16
+KiB before argument admission. Each reachable admitted model tool call first passes exact-name lookup.
+CAH-039 then scans the complete, at-most-16,384-byte argument payload once with an iterative
+quote-and-escape-aware delimiter stack.
+It counts the root object as structural depth 1, rejects mismatched containers or depth above 64, and
+admits numeric tokens only when they use signed 64-bit JSON integer grammar without a fraction or
+exponent, all before Python integer conversion. A rejecting `parse_constant` callback excludes
+`NaN`, `Infinity`, and `-Infinity` during pair-preserving decode. An iterative walk then rejects a
+repeated decoded name at every admitted object depth before dictionary construction. Structural or
+numeric preflight failure, rejected constants, and defensive decoder `RecursionError`/`ValueError`
+all map to `invalid_read_tool_input`. Only then does the advertised exact-key gate run, followed by
+Pydantic v2 field validation. This order prevents structural resource abuse, interpreter digit-limit
+failures, non-standard constants, silent duplicate collapse, and native defaults from filling a key
+the model omitted while preserving those defaults for direct Python callers. The byte ceiling is
+aggregate for the entire value rather than per subtree; quoted braces/brackets do not count as
+containers. CAH-039's factory accepts only the CAH-031 registry, invokes CAH-038 internally, and
+returns an immutable catalog that owns the exact CAH-031 registry identity, re-exposes the definition tuple
+used in every request, and produces one same-entry prepared invocation or
+fixed error without dispatching. CAH-034 consumes that same catalog and owns guarded execution plus
+context enrichment; a cross-catalog prepared value is a session failure before handler I/O. Paths are resolved against
+the explicit workspace, symlink escapes are rejected, ignored or prohibited locations are excluded,
+and file/count/byte limits are enforced before content enters context. Binary files and files over
+configured size limits return structured explanations rather than unbounded data.
+
+CAH-031 projects a successful typed read into one canonical, bounded JSON result envelope. Its finite,
+acyclic allowlist admits integers only in the signed 64-bit range before decimal conversion and at
+most 64 complete-envelope object/list levels, with the outer `result` object at depth 1. One
+65,536-unit pre-serialization work budget bounds width before sorting/encoding; a defensive serializer
+`RecursionError`/`ValueError` becomes `invalid_read_tool_result` without partial output or interpreter
+text.
 
 CAH-024 will supply the earlier, tool-independent path primitive for this flow: an immutable Python
 boundary around the already selected canonical root plus contained, workspace-relative target
 resolution. It will not read content or expose any of the tools above. Later read tools remain
 responsible for rechecking the target when they perform filesystem access.
+Its pure lexical seam admits at most 4,095 strict-UTF-8 bytes in the raw supplied spelling,
+256 normalized non-dot components, and 255 UTF-8 bytes per component before `Path` or filesystem
+work. CAH-026 delegates that exact decision and only maps repository vocabulary. These are harness
+work limits, not a promise about Linux or WSL mount acceptance; a lexically admitted path can still
+fail bounded resolution.
+
+For an ordinary runtime task, the **initial** context request defaults to repository scope `.` with
+empty `focus_paths` and `search_queries`. Those empty values are explicit rather than task- or
+model-inferred. After a native read succeeds, the registry's harness-owned metadata identifies the
+execution-time canonical request scope captured by the final native access-time admission first and
+then the owner directory of every model-visible returned path. List/search retain that scope in a
+dedicated content-suppressed result field even for empty/no-match success: directory search copies the
+listing's final scope, while direct-file search copies its final read path. Stat/read use their final
+admitted result path, with `read_file` copying the final pre-open path. The loop never re-resolves the
+original alias. It discovers all ordered scopes and, after each discovery guard, requires the
+bundle's `canonical_scope` to exactly equal the captured scope before atomically adding bindings.
+There is no alias fallback, and a mismatch prevents result replay and another provider start.
+Deterministic evaluation may inject non-empty initial values through a test-only
+composition seam without granting the model context policy authority. For such a request, every
+focus/search projection validates with zero I/O, instruction discovery folds and checks `scope` as
+the first I/O, and every canonical-distinct focus read/discovery/fold completes before search. Each
+query searches only the supplied scope through
+`SearchTextRequest(query=query, path=request.scope, max_depth=4, max_matches=100)`. Focus paths,
+matches, and result paths never become inferred search roots. Each search result's execution-time
+canonical request scope must equal root discovery's captured canonical scope before matches are
+inspected or another search starts. Every first-occurrence search-match
+file owner does become an instruction-discovery scope and joins the required instruction union before
+its excerpt can enter context.
 
 ## Provenance and attribution
 
 A repository context item should record:
 
 - A workspace-relative source path.
+- For an instruction, the canonical directory to which it applies.
 - The selected line range or metadata scope.
 - A content hash or revision marker when useful for detecting staleness.
 - The retrieval tool or rule that selected it.
@@ -72,6 +145,12 @@ A repository context item should record:
 Workspace-relative paths avoid leaking unnecessary personal paths into provider requests and
 transcripts. Line ranges let the final answer point back to evidence and let evaluations determine
 whether the correct region was retrieved.
+
+Workspace-relative labeling does not make repository content non-sensitive. Explicitly selecting
+OpenAI authorizes bounded, policy-admitted context and read-tool results to leave the machine for
+that session, and the user-facing configuration must warn that deny/ignore policy does not inspect
+ordinary allowed files for embedded secrets. The deterministic mock path sends nothing over the
+network.
 
 ## Budgeting policy
 
@@ -86,9 +165,10 @@ Selection should prefer, in order:
 5. Lower-confidence supporting material.
 
 When an item does not fit, the builder omits it as a unit or creates a clearly identified bounded
-excerpt. It must not silently cut JSON, split a tool result into an invalid shape, or remove the
-provenance needed to interpret an excerpt. The context builder exposes an inclusion report so a
-learner can see what was selected, omitted, and why.
+excerpt. A later applicable instruction is required: enrichment either adds the complete source
+without evicting prior context or fails before result replay and the next provider start. It must not
+silently cut JSON, split a tool result into an invalid shape, or remove provenance. The context
+builder exposes an inclusion report so a learner can see what was selected, omitted, and why.
 
 ## Iterative retrieval
 
@@ -98,6 +178,8 @@ of every file. A typical read-only task can iterate:
 ```text
 task + instructions
   -> list or search relevant paths
+  -> identify requested and returned-path owner scopes
+  -> add every newly applicable scoped instruction
   -> read bounded source and tests
   -> form a grounded explanation or plan
 ```
@@ -132,25 +214,88 @@ relative-path, missing-target, symlink-containment, and workspace-relative repor
 meaningful tests. Instruction discovery, file reads, model tool schemas, and execution-time race
 protection remain later work.
 
-### Future story — Discover repository instructions
+### Planned CAH-026 — Define repository read contracts and policy
+
+> As a user, I want every native read to reuse one containment, ignore, deny, and limit policy so
+> that handlers cannot disagree about what repository content is available.
+
+The [implementation-ready story](../user-stories/cah-026-define-repository-read-contracts.md) owns
+nested Git-compatible ignore evaluation through PathSpec, a non-overridable credential/VCS denylist,
+shared text rules, and fixed safe failures. Ignore rules are evaluated independently against both the
+normalized supplied path and its resolved canonical target. Each view admits every directory prefix
+before loading deeper policy or evaluating the leaf, and either view's ignored ancestor or target
+denies access. Its pure lexical-path and `is_hard_denied_path` helpers perform no I/O and are reused
+by CAH-025 so instruction discovery cannot drift to weaker pre-I/O admission. Every present ignore
+policy source separately passes workspace resolution, canonical hard denial, and an immediate
+pre-read recheck. Each view captures the admitted canonical owner and requires that same owner before
+the non-following leaf probe and before a cache-miss read; an allowed owner A-to-B retarget fails
+before resolving B's leaf. The view-relative owner label still controls rule scope, while the
+canonical source controls cache and budget identity. Even a cache hit re-admits the owner and resolves
+the current leaf/source before attaching cached rules, without rereading or charging bytes. CAH-025
+does not inherit
+ordinary-read limits or errors. This unit performs no user-requested read operation itself.
+
+### Planned CAH-025 — Discover scoped repository instructions
 
 > As a contributor, I want applicable workspace instructions included with their scope so that the
 > agent follows repository-specific rules while preserving harness safety.
 
-Complete this story when root and nested instruction precedence is documented and tested.
+The [implementation-ready story](../user-stories/cah-025-discover-repository-instructions.md)
+discovers exact root-to-nearest `AGENTS.md` candidates after CAH-026. Its sole result factory uses
+the admitted file/directory kind to reject unrelated, duplicate, equal-depth, or reordered owners;
+only a unique ancestor chain can become an immutable bundle. One exact canonical-label validator
+also keeps absolute, escaping, non-canonical, NUL, and lone-surrogate scope/source/owner spellings out
+of every downstream carrier. Every binding preserves the
+resolved canonical `source` separately from the canonical candidate-owner `applies_to` scope; the
+same source reached through different owners remains separately applicable and charged. It exempts
+these control-plane candidates from `.gitignore`, not from hard denial, and locks strict text,
+source/binding limits, rechecks, no-partial failure, and non-leaking errors without provider,
+registry, or loop behavior.
 
-### Future story — Add bounded read tools
+### Planned CAH-027 through CAH-029 — Add bounded native read operations
 
 > As an agent, I want safe native file listing, reading, searching, and metadata tools so that I can
 > investigate without using subprocesses.
 
-Complete this story when every tool enforces path and output bounds and exposes attributable
-results.
+The implementation-ready stories separate
+[listing and metadata](../user-stories/cah-027-list-files-and-stat-path.md),
+[one bounded text read](../user-stories/cah-028-read-bounded-text-file.md), and
+[literal text search](../user-stories/cah-029-search-repository-text.md). All reuse CAH-026, resolve
+again before access, return deterministic workspace-relative evidence, and stay independent of
+provider/tool registration. Literal-search queries reject the complete line-boundary repertoire used
+by Python `str.splitlines()`, including its C0, C1, and Unicode separators.
 
-### Future story — Build and explain budgeted context
+### Planned CAH-030 — Build and explain budgeted context
 
 > As a learner, I want a report of selected and omitted context so that I can understand and improve
 > the model input.
 
-Complete this story when deterministic tests cover selection priority, omission, truncation, and
-budget exhaustion.
+The [implementation-ready story](../user-stories/cah-030-build-budgeted-context.md) selects required
+instruction bindings for scope, every explicit focus path, and each first-occurrence search-match
+owner before admitting focus files or search excerpts under fixed item/UTF-8-byte budgets. It copies
+each binding's candidate-owner `applies_to` rather than deriving scope from its source, and uses the
+exact supplied-scope search projection above; returned paths expand instruction coverage but never
+search roots. It stores each CAH-025 precedence rank unchanged—gaps remain gaps—and CAH-032 copies the
+same value into provider context. It also owns pure atomic enrichment with an already-discovered
+instruction bundle: prior items retain their relative order, and a late ancestor is inserted before
+existing descendants without evicting anything. Its inclusion report distinguishes source and
+applicability while preserving admitted provenance and aggregate omission reasons without exposing
+denied labels.
+
+### Planned CAH-037 — Evaluate the composed read-only outcome
+
+> As a learner, I want deterministic explain and plan cases so that context usefulness is tested
+> through the actual loop rather than inferred from isolated handlers.
+
+The [implementation-ready story](../user-stories/cah-037-prove-read-only-assistant.md) composes the
+strict fake, fixture workspaces, context, registry, and bounded loop. It checks exact retrieval and
+small grounded answer facts, including root-only initial context followed by complete instruction
+coverage for direct and broad-result path owners before replay, plus injected focus/search context
+that proves the complete instruction union and exact supplied-scope search projection. Duplicate
+argument rejection is also required M2 evidence; semantic ranking and live-model quality remain
+future-quality and optional-live concerns respectively. That evidence includes 63/64/65-level
+object-array shapes, quote/escape-aware delimiters, signed-64-bit endpoints and overflow,
+fraction/exponent rejection, nested and array-contained duplicates, non-finite constants, and
+defensive decoder `RecursionError`/`ValueError`, all through CAH-039 before native I/O. Projection
+evidence separately checks signed-64-bit result endpoints and overflow, 63/64/65-level complete
+envelopes, width/work exhaustion, and defensive serializer `RecursionError`/`ValueError`.
