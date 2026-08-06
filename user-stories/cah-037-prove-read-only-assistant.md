@@ -2,8 +2,8 @@
 
 - **Status:** Planned
 - **Milestone / epic:** M2 - Read-only coding assistant / E8 - Evaluation and observability
-- **Dependencies:** CAH-025, CAH-026, CAH-027, CAH-028, CAH-029, CAH-030, CAH-031, CAH-032,
-  CAH-033, CAH-034, CAH-035, CAH-036
+- **Dependencies:** CAH-024, CAH-026, CAH-025, CAH-027, CAH-028, CAH-029, CAH-030, CAH-031,
+  CAH-038, CAH-032, CAH-033, CAH-039, CAH-034, CAH-035, CAH-036
 - **Lesson:** [Proving the read-only assistant](../docs/lessons/cah-037-read-only-assistant-evaluation.md)
 - **Learning emphasis:** Core learning unit
 - **Review focus:** Composition-root ownership and deterministic end-to-end evidence for exact
@@ -40,9 +40,10 @@ protocol message, UI surface, or write capability.
   and exact scope-rooted search projection are observable in order.
 - Evaluate internal instruction symlink provenance/applicability and hard-denied symlink targets
   without weakening CAH-025/026 policy.
-- Evaluate all five named cooperative checkpoints before dispatch, after synchronous dispatch,
-  after discovery, after merge, and before provider start with deterministic gates and distinctive
-  local candidates.
+- Evaluate the complete seven-name cooperative checkpoint union: `after_focus_read` and
+  `after_search` during initial CAH-030 construction plus `before_dispatch`, `after_dispatch`, every
+  `after_discovery`, every `after_merge`, and `before_provider_start` during the loop, with
+  deterministic gates and distinctive local candidates.
 - Introduce `evals/` with one synthetic workspace and strict-fake explain/plan cases only when the
   runnable runner, assertions, documentation, and tests arrive together.
 - Preserve mock as the credential-free default and OpenAI as explicit bounded-egress opt-in.
@@ -54,6 +55,15 @@ protocol message, UI surface, or write capability.
 - The runtime composition root is the only place that selects concrete workspace, context, registry,
   loop, transcript, and provider implementations. Domain modules neither import the runtime nor
   select a provider.
+- The root constructs one `WorkspaceBoundary`, then calls only
+  `build_read_only_agent_services(boundary)`. That factory creates the exact graph in this order:
+  `RepositoryInstructionDiscovery(boundary)`; `RepositoryReadPolicy(boundary)`;
+  `RepositoryMetadataReader(policy)`; `RepositoryTextReader(policy)`;
+  `RepositoryTextSearcher(policy, metadata_reader, text_reader)`;
+  `RepositoryContextBuilder(instructions, text_reader, searcher)`;
+  `build_read_tool_registry(metadata_reader, text_reader, searcher)`;
+  `build_read_tool_catalog(registry)`; then the frozen nine-identity `ReadOnlyAgentServices`. No other
+  runtime path constructs, copies, or rejoins a policy, service, registry, definition, or catalog.
 - Every ordinary interactive task constructs exactly
   `ContextBuildRequest(scope=".", focus_paths=(), search_queries=())`. The runtime does not derive a
   focus path, search query, scope, or hidden retrieval hint from task text, provider output, current
@@ -61,7 +71,10 @@ protocol message, UI surface, or write capability.
   contains only root-applicable CAH-025 instructions; repository exploration and any narrower
   instruction discovery occur through admitted read tools.
 - The deterministic evaluator may inject one explicit validated `ContextBuildRequest` for a named
-  case through the composition dependency. That seam is callable only by eval/test assembly, is not
+  case through exact `ProviderSessionRunner(..., initial_context_request: ContextBuildRequest | None
+  = None)`. `None` causes the session to construct the exact ordinary default; the evaluator passes
+  one immutable value copied unchanged into each named case's fresh session and records it. The seam
+  is called only by eval/test assembly, is not
   a protocol field or user-provider option, and records its exact request in structured test evidence.
   Evaluation injection never mutates the ordinary runtime default.
 - The injected initial-context case supplies exactly `scope="."`,
@@ -73,14 +86,28 @@ protocol message, UI surface, or write capability.
   remains the search root: neither a focus path, an admitted focus result, nor a returned search path
   creates another search root. Every first-occurrence search-match owner does trigger CAH-025
   discovery and joins the required instruction union before its excerpt enters context.
-- Default mock behavior is deterministic, credential-free, and network-free. Strict M2 evaluations
-  inject exact fake scripts. OpenAI remains an explicit selection with CAH-036's bounded repository-
-  content egress consent and no-content-secret-scanning warning.
+- M2 retires `MockSessionRunner` from the launched runtime path while retaining that historical class
+  and its focused tests. `provider=None` now composes a provider-backed
+  `DeterministicMockProvider` through the same `ProviderSessionRunner`, services, initial context, and
+  4/120/4096/3 tracker as OpenAI. This mock accepts any already-admitted request, emits the existing
+  fixed `MOCK_RESPONSE_DELTAS` as one text-only first turn, requests no tool, reports no usage/opaque
+  state, performs no network, and has an injectable observation gate for cancellation tests; it never
+  contains a fixture-specific or task-derived script. Strict M2 evaluations inject exact fake scripts.
+  OpenAI remains an explicit selection with CAH-036's bounded repository-content egress consent and
+  no-content-secret-scanning warning.
+- Launched default-mock sessions now use `ProviderSessionRunner`'s opaque `ses_provider_<n>` IDs and
+  transcript-v3 records include the exact 4/120/4096/3 loop-limit aggregate. The old `ses_mock_<n>`
+  prefix and omission of provider-loop evidence remain historical `MockSessionRunner` test behavior,
+  not compatibility promises; README/walking-skeleton/current architecture are updated when this
+  story ships. Protocol consumers continue treating both ID spellings as opaque validated strings.
 - One ordinary accepted task creates one immutable workspace boundary, discovers root instructions,
   builds one initial context package, and allocates fresh loop accounting before provider work. The
   injected evaluator uses the same atomic builder with its explicit request. Before a successful
   admitted `read_file` with `path="pkg/file.py"`,
-  `cooperate_then_guard("before_dispatch")` can cancel with zero native dispatch. After dispatch,
+  the CAH-030 callback adapts every root/focus/search-owner discovery and merge plus each
+  `after_focus_read` and `after_search` through CAH-034's same `cooperate_then_guard`; losing any gate
+  returns no initial package and begins no later initial-context I/O. Before a successful admitted
+  read, `cooperate_then_guard("before_dispatch")` can cancel with zero native dispatch. After dispatch,
   CAH-034's
   `cooperate_then_guard("after_dispatch")` observes the distinctive local result candidate, CAH-025
   discovers each distinctive instruction-bundle candidate from CAH-031's ordered local scopes, and
@@ -111,23 +138,45 @@ protocol message, UI surface, or write capability.
   initial context.
 - At least two outcome cases execute: explain a known implementation fact and plan a bounded change.
   Contract cases additionally assert the exact root-only runtime request, the injected scope/focus/
-  search projection, instruction-union-before-focus ordering, internal-symlink `source`/`applies_to`,
+  search projection, instruction-union-before-focus ordering, internal-symlink
+  `source`/`applies_to`/depth precedence,
   the `read_file(path="pkg/file.py")` enrichment step, a broad search/list result whose returned
   owners add sibling instruction bindings before replay, the next request containing the binding
   `source="shared/rules.md"` with `applies_to="pkg"`, provider history, calls/results, accepted
   sources, final workspace-relative citations, and small required/forbidden answer facts.
 - M2 enriches context from CAH-031's ordered `instruction_scopes` for every successful read. The
-  validated requested path is first; local metadata then contains the exact-deduplicated owner of
-  every model-visible result path. A broad `list_files` or `search_text` result is not replayed until
-  every owner bundle is discovered, folded, budgeted, and guarded. Repeated and canonical-alias
-  scopes must be idempotent; sibling scopes remain separately applicable rather than overriding one
-  another. If any returned scope cannot be covered, the complete result/context transaction fails
-  and the provider receives none of it.
-- A provider call containing duplicate JSON object members is preserved raw through CAH-032/033/036
-  but fails in CAH-034's duplicate-aware decoder as `invalid_read_tool_input`. The composed regression
-  uses conflicting and escape-equivalent `path` names and proves zero key-gate, Pydantic, native read,
-  instruction discovery, and context growth. When admission passes, it proves one charged observation
-  and exact call/error replay in a follow-up against unchanged context.
+  native result's execution-time canonical request scope is first; local metadata then contains the
+  exact-deduplicated owner of every model-visible result path. A broad `list_files` or `search_text`
+  result is not replayed until every owner bundle is discovered, its `canonical_scope` exactly
+  matches the captured scope, and it is folded, budgeted, and guarded. The original request alias
+  and a retargeted canonical label are never post-dispatch authority. Repeated canonical scopes must be
+  idempotent; sibling scopes remain separately applicable rather than overriding one another. If any
+  returned scope cannot be covered, the complete result/context transaction fails and the provider
+  receives none of it.
+- CAH-032 construction and CAH-036 adapter mapping own the provider-call carrier bounds. A malformed
+  tool-name carrier or argument string above 16 KiB fails there and never invokes CAH-033 or CAH-039.
+  CAH-039 receives only a valid, bounded carrier; a valid-but-unknown name still wins at lookup before
+  argument work. Structurally hostile or duplicate JSON remains raw through CAH-032/033/036 and fails
+  in CAH-039 as `invalid_read_tool_input`. Composed CAH-039 regressions use reachable at-or-below-limit
+  arguments and exercise object/array depth 63, 64, and 65 with root object depth 1; quoted and
+  escaped delimiters; mismatched containers; `NaN`, `Infinity`, and `-Infinity`; a defensive decoder
+  `RecursionError`; signed-64-bit endpoints/overflow, fractions/exponents, a 5,000-digit integer,
+  numeric-looking strings, and defensive `ValueError`; and conflicting, escape-equivalent, nested,
+  and array-contained duplicate names. They prove the quote-aware structural/numeric preflight and
+  iterative every-depth duplicate walk run before
+  dictionary construction/key-gate/Pydantic/native read/instruction discovery/context growth. When
+  admission passes, one known-error case proves a charged observation and exact call/error replay in
+  a follow-up against unchanged context. A separate native-maximum read proves wrapped overflow is
+  the fixed `read_tool_output_too_large` known error with zero discovery/context growth rather than a
+  session terminal; an unknown-tool control still wins before structural work. Result-projection
+  regressions also cover 63/64/65-level complete envelopes with the outer `result` object at depth 1,
+  one wide value exhausting the 65,536-unit pre-serialization work budget, and injected serializer
+  `RecursionError`/`ValueError`. They preserve CAH-031's fixed oversize-versus-invalid-result mapping.
+- Provider-text regressions use the real CAH-033 neutral constructors and CAH-036 SDK mapper at
+  8,191/8,192/8,193 ASCII and multibyte bytes. They prove only exact bounded normal carriers or the
+  content-free overflow marker reach admission, the tracker receives 8,193 once, and publication,
+  usage persistence, and dispatch remain zero. A maximum-fragment function-call stream proves the SDK
+  pump is iterative, while terminal-then-extra/exception cases prove raw EOF precedes neutral release.
 - Structured retrieval and dispatch evidence is authoritative. Answer substrings are narrow outcome
   checks, not a claim of broad semantic quality. Mutations must prove each evaluator rule can fail.
 - The default evaluator performs no network access, writes no target-repository or transcript content,
@@ -147,14 +196,17 @@ protocol message, UI surface, or write capability.
 - **Counted paths:** additions plus deletions under `src/code_assist_harness/` and `tui/src/`.
 - **Excluded from count:** tests, evaluation fixtures and expected data, documentation, lockfiles,
   and generated artifacts.
+- **Planning PR scope:** One contract neighborhood: existing TUI task carrier -> composed
+  CAH-024-through-CAH-039 runtime -> validated protocol/transcript evidence -> deterministic evaluator.
 - A missing domain abstraction or changed dependency contract becomes a focused prerequisite instead
   of an integration workaround. Keep the evaluator purpose-built; framework adoption is separate.
 - The range is a review estimate, not a quota; do not pad a smaller coherent implementation.
 
 ## Acceptance criteria
 
-1. One composition path joins CAH-025 through CAH-036 through public boundaries without reverse
-   imports or duplicated policy and supplies the exact four-field M2 loop-limit profile.
+1. The sole boundary-only services factory joins every CAH-024-through-CAH-039 M2 component in
+   documented dependency order, exposes the exact nine-identity graph without reverse imports or
+   duplicated policy, and supplies the exact four-field M2 loop-limit profile.
 2. Ordinary runtime always uses exactly `scope="."`, empty focus paths, and empty search queries;
    no task/provider/environment inference changes initial context. A successful exact
    `read_file(path="pkg/file.py")` makes the `source="shared/rules.md"`, `applies_to="pkg"` binding
@@ -163,8 +215,9 @@ protocol message, UI surface, or write capability.
    focus case proves every applicable instruction chain is unioned before focus content and that each
    query becomes exactly the supplied-scope-rooted `(depth=4, matches=100)` search request, with no
    focus/result fanout. Exact injection is observable without changing production defaults.
-4. Mock/check remains credential-free and network-free; explicit OpenAI selection retains bounded
-   egress behavior and the absent-secret-scan warning.
+4. The launched mock path is provider-backed through the same runner/services/profile, remains
+   credential-free and network-free, and preserves intentional visible lifecycle/cancellation
+   semantics; explicit OpenAI selection retains bounded egress and the absent-secret-scan warning.
 5. Exactly four native read operations remain contained in one workspace; no write, subprocess,
    network-tool, MCP, or hosted-tool path is reachable.
 6. Fixture explain and plan cases complete through the bounded loop with exact root-to-enriched
@@ -176,9 +229,15 @@ protocol message, UI surface, or write capability.
    instruction target, and context budget cases fail reproducibly and safely. Allowed internal
    instruction links preserve resolved `source` separately from owner `applies_to`; repeated/alias
    and sibling-scope cases prove idempotence and non-overriding applicability. The before-dispatch
-   cancellation gate proves zero native dispatch; gates after dispatch, every discovery/merge, and
-   before provider start prove no candidate state is committed and no next provider begins. Duplicate
-   argument members prove zero validation or dispatch stages after decoding.
+   cancellation gate proves zero native dispatch; initial `after_focus_read`/`after_search` plus every
+   root/focus/search-owner discovery/merge gate prove no package and no later context I/O; gates after
+   dispatch, every result-scope discovery/merge, and before provider start prove no candidate state is
+   committed and no next provider begins. Duplicate
+   structurally invalid, non-finite, recursive-failure, and duplicate argument cases prove zero key
+   validation or dispatch stages after CAH-039 rejects them. Malformed tool-name and above-16-KiB
+   carriers fail at CAH-032 construction or CAH-036 mapping and invoke neither CAH-033 nor CAH-039.
+   Over-bound provider text becomes only the content-free overflow observation and exact assistant
+   output limit with no publication, usage, or dispatch.
 8. The runner is deterministic, non-live by default, content-safe, and nonzero on failure; a live run
    is optional observational evidence only.
 9. Protocol/TUI/transcript schemas remain unchanged, and documentation distinguishes proven M2
@@ -188,22 +247,25 @@ protocol message, UI surface, or write capability.
 
 | Acceptance | Required evidence |
 | --- | --- |
-| 1, 5 | Composition tests inject each boundary and assert one workspace, exact descriptors, and a fresh tracker configured with 4 turns, 120 seconds, 4,096 output bytes, and 3 observed calls for fake and OpenAI sessions. They also prove ownership/import rules, absence of side-effect transports, and that composition neither calls bare `LoopLimits()` nor inherits its one-turn/one-call defaults. |
-| 2 | Runtime/launcher tests capture the exact root-only default `ContextBuildRequest` for varied task text, nested working paths, environment sentinels, mock/OpenAI selection, and repeated sessions. One strict fake then asserts request one has only root instructions, calls `read_file` with `path="pkg/file.py"`, and request two adds the exact `source="shared/rules.md"`, `applies_to="pkg"` binding while definitions stay unchanged. |
-| 3 | Eval assembly injects exactly `ContextBuildRequest(scope=".", focus_paths=("pkg/file.py",), search_queries=("completion",))`. Spies prove root, every distinct focus path, and every first-occurrence search-match owner form the complete instruction union before their content; the only search call is exactly `SearchTextRequest(query="completion", path=".", max_depth=4, max_matches=100)`, with no focus/result search-root fanout. Invalid projection yields zero context I/O, and a later ordinary session proves defaults unchanged. |
-| 4 | Provider-selection and socket-guard tests prove mock default, explicit OpenAI gating, bounded request fields, and warning behavior without live credentials. |
-| 6 | Two fixture cases assert exact root-to-enriched fake requests, context items, call/result replay, dispatches, final citations/facts, aggregate evidence, ordered events, and one terminal. Broad list/search cases return paths under multiple sibling owners and prove all instruction bindings precede replay; removing one scope or binding fails the evaluator. |
-| 7 | Mutations add duplicate JSON members, a distractor, forbidden path/claim, escape, exhausted limit, invalid grammar, late synchronous return, bounded tool error, discovery/merge failure on a later returned scope, changed duplicate, hard-denied instruction target, and context overflow. Duplicate-member cases include conflicting order, escape-equivalent names, and an unknown-tool precedence control with exact stage spies; the known duplicate case also proves one charged observation and exact unchanged-context call/error replay when admission passes. An allowed `pkg/AGENTS.md -> shared/rules.md` fixture proves `source="shared/rules.md"` with `applies_to="pkg"`; the denied target is never read and yields no partial package. Named `asyncio.Event` gates at `before_dispatch`, `after_dispatch`, each `after_discovery`, each `after_merge`, and `before_provider_start` prove zero dispatch at the first gate and use result/bundle/context/history/request sentinels to prove stage-local candidates are discarded and the next provider-start count remains zero. Repeat/canonical-alias scopes prove no growth; nested and sibling result owners prove root-to-nearest chain order and distinct sibling applicability. |
+| 1, 5 | Composition tests call only `build_read_only_agent_services(boundary)` and assert all nine exact identities plus every edge: instruction/policy boundary, metadata/text policy, search policy/metadata/text, context instruction/text/search, registry-bound metadata/text/search, and catalog registry/entry/definition. Equal-but-distinct/cross-wired mutations fail before descriptor construction or I/O. Tests assert one catalog factory call, `catalog.definitions` in every request, that same catalog at every handoff, and a fresh 4/120/4096/3 tracker for deterministic mock, strict fake, and OpenAI sessions. They also prove ownership/import rules, absence of side-effect transports, and no bare `LoopLimits()` default. |
+| 2 | Signature/static tests lock `initial_context_request: ContextBuildRequest | None = None`, production callers always pass/retain `None`, and eval assembly alone supplies an exact immutable request without task inspection. Runtime tests capture the exact root-only default for varied task text, nested working paths, environment sentinels, mock/OpenAI selection, and repeated sessions. One strict fake then asserts request one has only root instructions, calls `read_file` with `path="pkg/file.py"`, and request two adds the exact `source="shared/rules.md"`, `applies_to="pkg"`, canonical-depth `precedence` binding while definitions stay unchanged. |
+| 3 | Eval assembly injects exactly `ContextBuildRequest(scope=".", focus_paths=("pkg/file.py",), search_queries=("completion",))`. Spies prove all projections validate before I/O, root discovery/fold/budget is first, every focus read/discovery/fold finishes before search, and every first-occurrence search-match owner joins the complete instruction union before content. Invalid projection yields zero context I/O, root failure yields zero focus/search calls, and focus failure yields zero search calls. Two queries prove first-result scope mismatch causes zero second-search calls. The only stable search projection is exactly `SearchTextRequest(query="completion", path=".", max_depth=4, max_matches=100)`, with no focus/result search-root fanout. Separate request-alias and captured-focus/owner-label retargets prove result/bundle scope mismatch returns no package; stable controls prove success. |
+| 4 | Provider-selection and socket-guard tests prove `provider=None` no longer constructs `MockSessionRunner`, but instead injects one task-independent `DeterministicMockProvider` into `ProviderSessionRunner` with the exact services/profile. Successful migration tests preserve the existing fixed final text and ordered start/delta/completion lifecycle. Cancellation before or among provider observations now follows CAH-033 atomic staging and emits `session.started -> session.cancelled` with zero assistant deltas; the legacy partial-delta cancellation behavior remains only in focused historical `MockSession` tests and is explicitly not a launched-runtime invariant. Tests lock the deliberate opaque ID migration from launched `ses_mock_*` to `ses_provider_*`, add exact loop-limit aggregate evidence, retain absent model usage, and preserve teardown, repeated-session isolation, and zero network. Protocol consumers accept both opaque spellings. Explicit OpenAI gating, bounded request fields, and warning behavior remain covered without live credentials. |
+| 6 | Two fixture cases assert exact root-to-enriched fake requests, context items, call/result replay, dispatches, final citations/facts, aggregate evidence, ordered events, and one terminal. Broad list/search cases return paths under multiple sibling owners and prove all instruction bindings precede replay. Native-producer seams retarget allowed request `alias -> A` to `B` immediately before list/stat/read/search access and prove each validated result reports the target actually inspected, including empty/no-match outcomes. Separate `after_dispatch` retargets prove only captured `A` drives discovery. Replacing captured canonical `A` itself with an allowed symlink to `B` makes CAH-025 report `B` and fails before merge/replay/fallback; removal and stable controls cover the other outcomes. |
+| 7 | Mutations add structurally hostile and duplicate JSON, a distractor, forbidden path/claim, escape, exhausted limit, invalid grammar, late synchronous return, bounded tool error, discovery/merge failure on a later returned scope, changed instruction duplicate, hard-denied instruction target, context overflow, initial/post-dispatch alias retargets, and captured instruction-owner `A -> B` retargets immediately before probe/read. Initial-context gate tables cancel after each root/focus/search-owner discovery and merge plus `after_focus_read` and `after_search`; each asserts no returned package and zero later I/O. Carrier cases cover 16,383/16,384/16,385 argument bytes and malformed names, proving only producer-admitted carriers reach CAH-033/039. Provider-text cases use real neutral/SDK producers at 8,191/8,192/8,193 ASCII/multibyte bytes, maximum mapped-empty fragments, and raw terminal-then-extra/exception; they prove bounded normal carriers or one content-free marker, constant stack depth, raw EOF authorization, one 8,193 tracker reservation, and zero publication/usage/dispatch. Reachable CAH-039 cases use at-or-below-limit arguments and cover 63/64/65 object-array levels, quoted/escaped delimiters, mismatched containers, signed-64-bit endpoints/overflow, fractions/exponents, a 5,000-digit integer, numeric-looking strings, all non-finite constants, forced decoder `RecursionError`/`ValueError`, conflicting/reversed/escape-equivalent duplicates, nested/array duplicates at the deepest admitted level, and a valid unknown-tool precedence control. Exact spies prove no later stage. A known rejected-input case proves one charged observation and exact unchanged-context replay. Result cases cover complete-envelope depths 63/64/65, a wide 65,536-unit-work-budget exhaustion, injected serializer `RecursionError`/`ValueError`, exact envelope bytes 65,536/65,537, and a native 65,536-byte file; they preserve fixed invalid-result versus `read_tool_output_too_large` mapping, cross `after_dispatch` only for a known error, carry no scopes/content, and replay known errors against unchanged context. Instruction-link and owner-retarget mutations prove no replacement instruction read; loop checkpoint mutations prove no partial context or next provider start; repeated/nested/sibling scopes prove stable applicability. |
 | 8 | Runner tests cover stable ordering/report bytes, zero/nonzero exits, repeated identical evidence, no content/path/opaque leaks, and explicit live-marker isolation. |
-| 9 | Repository policy, documentation policy, transcript replay, protocol fixtures, reducer tests, and final diff review prove honest status and unchanged schemas. |
+| 9 | Repository policy, documentation policy, transcript replay, protocol fixtures, reducer tests, and final diff review prove honest status and unchanged schemas. OpenAI mapping snapshots preserve a missing-ancestor precedence gap and reject index-based renumbering. |
 
 ## Validation
 
 - Run the fixture evaluator twice and compare its structured pass/fail evidence. Use no live provider
   for definition-of-done evidence.
 - Run focused runtime/default-context/scoped-enrichment/eval-injection/composition tests, including
-  exact search projection and result-owner instruction union, symlink source/owner, hard-denied
-  target, duplicate argument decoding, and repeated named cooperative-gate cases; then run all M2
+  exact initial I/O order, search projection and canonical-scope consistency, execution-time
+  request/result-owner instruction union, symlink source/owner, hard-denied
+  target, producer-side name/argument carrier bounds, reachable at-limit CAH-039 structural/numeric
+  preflight, non-finite/recursion rejection, every-depth duplicate decoding, result-envelope
+  depth/width/work and serializer-failure cases, and repeated named cooperative-gate cases; then run all M2
   native-tool suites, staged-turn/loop/adapter tests, transcript replay, protocol fixtures, and real
   process-boundary tests.
 - Run `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` with provider credentials removed.
@@ -225,13 +287,26 @@ presentation.
 - New protocol/TUI displays, transcript tool content or reasoning, production telemetry, broad
   benchmark claims, content secret scanning, or live-provider CI requirements.
 
+## Pre-review adversarial audit
+
+| Audit | Required evidence or explicit N/A |
+| --- | --- |
+| Identity ledger | Evidence distinguishes task/session/call IDs, lexical request scope, access-time canonical target, instruction owner/source, context provenance/precedence, provider-visible relative label, and evaluator citation target. |
+| End-to-end contract | Trace existing TUI command -> Python composition -> CAH-024-through-CAH-039 read-only loop -> fake or explicit OpenAI provider -> validated final protocol events/transcript evidence -> evaluator assertions. |
+| Failure and atomicity | Every invalid carrier/grammar, hard deny, retarget, tool error, discovery/merge failure, limit, cancellation, and deadline case proves zero forbidden effect, no partial context/replay, and one bounded terminal outcome. |
+| Reachable boundaries | Run below/at/above limits through the composed runtime with real fixture producers, same-loop cancellation, access-time mutations, huge-string/shape cases, and repeated deterministic evaluation rather than relying only on isolated helper states. |
+| Closed grammar and cardinality | Fix the evaluation case schema, ordinary context defaults, evaluation-only injection seam, exact expected facts/citations/tool traces, allowed failures, four-turn/three-call ceilings, and deterministic evidence projection. |
+| Artifact parity | Story, lesson, end-to-end diagram, README/roadmap, conceptual docs, fixture cases, and policy tests agree on dependency order, ownership, status, checkpoints, and M2 exit evidence. |
+| Independent lenses | Filesystem security/identity review fixed one factory-built service graph and retarget/hard-deny evidence; composition/learning review added the exact eval injection API and provider-backed default-mock migration; provider/scheduler/evaluation review added fresh 4/120/4096/3 trackers, operation generations, all seven checkpoint names including initial focus/search stages, and deterministic mutation-validity evidence. |
+
 ## Definition of done
 
 - Explain/plan cases plus exact scope/focus/search projection, instruction symlink ownership,
   idempotence, sibling, hard-deny, cooperative-cancellation, safety, and failure mutations pass
   through composed runtime and existing process boundary twice with identical structured evidence.
-- Exact ordinary default context and evaluation-only injection have direct tests, and all CAH-025
-  through CAH-036 dependencies are Done without contract bypasses.
+- Exact ordinary default context and evaluation-only injection have direct tests, and every
+  CAH-024-through-CAH-039 M2 dependency is Done in documented dependency order without contract
+  bypasses.
 - **Delivered production-code churn** records the measured result and is no more than 600 lines;
   contract gaps become separate stories.
 - Public composition APIs, cases, status documentation, and concise Markdown lesson are verified
@@ -243,9 +318,11 @@ presentation.
 
 - Composition tests proving exact root-only default/injected context requests, nested instruction
   enrichment after `read_file(path="pkg/file.py")`, complete direct/broad-result instruction unions,
-  exact supplied-scope search projection, duplicate-argument zero-dispatch handling, internal-symlink
-  `source`/`applies_to`, hard-denied target rejection, all five named cancellation checkpoint types
-  including repeated per-scope gates and zero before-dispatch execution, idempotent repeat/alias scopes,
+  exact supplied-scope search projection and canonical-result comparison, projection/root/focus
+  failure precedence, post-dispatch canonical-scope preservation, structural/non-finite/recursive/
+  duplicate-argument zero-dispatch handling, internal-symlink
+  `source`/`applies_to`/depth precedence, hard-denied target rejection, all seven named cancellation checkpoint types
+  including initial focus/search and repeated per-scope gates plus zero before-dispatch execution, idempotent repeat/alias scopes,
   non-overriding siblings, atomic failures, explicit M2
   `(4 turns, 120 seconds, 4096 output bytes, 3 observed calls)` limits, provider selection, and
   side-effect absence.

@@ -37,14 +37,26 @@ calls, or decide which files belong in model context.
 
 ### Requests and results
 
+- `RepositoryMetadataReader(policy: RepositoryReadPolicy)` is the exact service. It retains the
+  supplied object as read-only `policy` identity and exposes
+  `list_files(request: ListFilesRequest) -> ListFilesResult` plus
+  `stat_path(request: StatPathRequest) -> StatPathResult`. Runtime passes the session's one CAH-026
+  policy; the service never accepts a root path, constructs another boundary, or creates an
+  independently configured policy.
+
 - `ListFilesRequest` is a strict, frozen Pydantic v2 model with unknown fields forbidden. It contains
   `path` (default `.`), `recursive` (default `false`), `max_depth` (default 4, admitted range 1-8),
-  and `max_items` (default 200, admitted range 1-500). Booleans used as integers are rejected.
+  and `max_items` (default 200, admitted range 1-500). Its path uses CAH-024/026's shared inclusive
+  4,095-byte, 256-component, and 255-byte-name lexical admission. Booleans used as integers are
+  rejected.
 - Non-recursive listing examines direct children only, regardless of the stored `max_depth` default.
   Recursive depth counts direct children as level 1 and never descends below the requested level.
-- `ListFilesResult` contains an immutable tuple of entries, `truncated`, `visited_items`, and
-  aggregate counts for descendants omitted as ignored, unavailable, or unsupported. It never lists
-  the omitted labels or the policy rule that caused omission.
+- `ListFilesResult` contains the content-suppressed `canonical_request_scope`, an immutable tuple of
+  entries, `truncated`, `visited_items`, and aggregate counts for descendants omitted as ignored,
+  unavailable, or unsupported. The scope is the canonical workspace-relative directory used by the
+  final access-time admission for this listing, including an empty listing; it is not recomputed from
+  the supplied alias after return. The result never lists omitted labels or the policy rule that
+  caused omission.
 - Each entry contains the canonical workspace-relative POSIX `path`, `kind` (`file` or `directory`),
   and `is_symlink`. A regular file also carries non-negative `size_bytes`; a directory carries
   `None`. Modification times, owners, permission bits, inode/device values, and absolute paths are
@@ -53,8 +65,11 @@ calls, or decide which files belong in model context.
   following it. It is `true` only when that candidate itself is a symlink; it does not mean that the
   canonical target or one of its descendants is a symlink. `stat_path` applies the same rule to the
   directly requested leaf after containment admission.
-- `StatPathRequest` is the same strict, frozen Pydantic form and contains only `path`.
-  `StatPathResult` uses the same entry shape. The root label is `.`, and its kind is `directory`.
+- `StatPathRequest` is the same strict, frozen Pydantic form and contains only required `path` with no
+  default.
+  `StatPathResult` uses the same entry shape. Its `path` and `is_symlink` come from the direct target's
+  final boundary/policy admission immediately before metadata inspection, not an earlier resolution
+  snapshot. The root label is `.`, and its kind is `directory`.
 - The service contracts are provider-neutral Python values, not OpenAI, protocol, JSON Schema, or
   MCP objects. E4 will expose reviewed operations through a tool registry.
 
@@ -62,7 +77,8 @@ calls, or decide which files belong in model context.
 
 - Inputs are validated before policy evaluation. A direct ignored target fails with
   `repository_path_ignored`; a direct hard-denied target fails generically with
-  `repository_path_unavailable`.
+  `repository_path_unavailable`. An over-bound path is `invalid_repository_path` before numeric
+  request checks, policy, traversal, or filesystem inspection.
 - Recursive discovery applies the hard denylist and effective nested `GitIgnoreSpec` policy before
   adding or descending into each candidate. There is no `include_ignored`, hidden-file override, or
   provider-controlled policy argument.
@@ -84,6 +100,10 @@ calls, or decide which files belong in model context.
   creation or iteration order from letting an early alias defeat a later ordinary target.
 - A path whose label cannot be represented as strict UTF-8 or a path that changes during inspection
   is omitted as unavailable during traversal and fails safely for direct `stat_path`.
+- Immediately before directory enumeration or direct metadata inspection, re-run boundary and policy
+  admission for the supplied request path and use that final canonical target as result provenance.
+  An allowed alias retarget from `A` to `B` at that seam inspects and reports `B`; an unsafe target
+  fails. The result never combines metadata from one target with a canonical label from another.
 
 ### Initial reviewed limits and completion
 
@@ -109,16 +129,21 @@ calls, or decide which files belong in model context.
 - **Delivered production-code churn:** Not started.
 - **Counted paths:** `src/code_assist_harness/` additions plus deletions.
 - **Excluded from count:** tests, docs, fixtures, lockfiles, and generated artifacts.
+- **Planning PR scope:** One contract neighborhood: CAH-026-admitted metadata request -> native
+  deterministic list/stat result with execution-time canonical provenance -> CAH-029 search,
+  CAH-030 context, and CAH-031 registry consumers.
 - **Split rule:** stop and refine another story before review if content reading, search, tool
   registration, or provider serialization enters this unit, or if production churn is likely to
   exceed roughly 600 changed lines. Do not pad a smaller coherent implementation.
 
 ## Acceptance criteria
 
-1. `stat_path` returns only the canonical label, supported kind, safe size, and internal-symlink flag
-   for admitted regular files, directories, and the workspace root.
-2. `list_files` returns deterministic, deduplicated entries for direct and bounded-recursive
-   requests with exact depth, item, visited-entry, alias-winner, and `is_symlink` accounting.
+1. One `RepositoryMetadataReader` retains the exact shared CAH-026 policy identity. `stat_path`
+   returns only the final-admission canonical label, supported kind, safe size, and
+   internal-symlink flag for admitted regular files, directories, and the workspace root.
+2. `list_files` returns its execution-time canonical request scope plus deterministic, deduplicated
+   entries for direct and bounded-recursive requests with exact depth, item, visited-entry,
+   alias-winner, and `is_symlink` accounting.
 3. Ignored and hard-denied descendants are omitted without labels; direct access fails with the
    CAH-026 fixed error, and no override exists.
 4. Recursive traversal does not follow directory symlinks, special files are never opened, and
@@ -133,6 +158,9 @@ calls, or decide which files belong in model context.
 | Contract or risk | Planned test | Layer | Expected evidence |
 | --- | --- | --- | --- |
 | Safe metadata | Stat root, regular file, directory, and internal symlinks | Unit/boundary | Exact canonical entry values and no unstable metadata |
+| Shared path request budget | Parameterize list/stat with 4,094/4,095/4,096 total UTF-8 bytes, 254/255/256 name bytes, and 255/256/257 normalized components | Request/policy boundary | Endpoints reach only later admission; every above-bound request is `invalid_repository_path` with zero policy, traversal, or filesystem work |
+| Final-admission provenance | Retarget allowed request alias `A` to allowed `B` at a deterministic seam immediately before empty-directory enumeration and, separately, before direct stat inspection | Boundary integration | List returns `canonical_request_scope=B`; stat returns `path=B` and metadata for `B`; neither operation reports stale `A` or combines target/provenance snapshots |
+| Empty-list request provenance | List empty directory `alias -> A`, then retarget the alias to `B` after return | Boundary integration | `canonical_request_scope` remains `A`; neither the empty result nor later alias mutation can substitute `B` |
 | Deterministic listing | Vary creation/iteration order for an ordinary target plus lower/higher aliases, then for aliases only; place the eventual winner after `max_items` candidates | Unit | Ordinary target wins with `is_symlink=false`; otherwise lowest original alias wins with `is_symlink=true`; canonical output and truncation are identical on repeated runs |
 | Depth behavior | Build a tree beyond levels 1, 4, and 8 | Unit | Exact direct and recursive membership at each boundary |
 | Item behavior | Request 199/200/201 and 499/500/501 available items | Unit | Exact count and explicit `truncated`; above-hard input rejected |
@@ -143,9 +171,13 @@ calls, or decide which files belong in model context.
 ## Validation
 
 - Add focused tests for both operations using temporary workspaces and CAH-024/026 real boundaries.
-- Assert strict request validation, immutable results, exact sorting, canonical labels, omission
-  counters, safe representations, and the shared error table. Snapshot the ordinary-target and
-  aliases-only winner cases, including exact `is_symlink` values.
+- Assert strict request validation, immutable results, execution-time canonical request scope, exact
+  sorting, canonical labels, omission counters, safe representations, and the shared error table.
+  Snapshot the empty internal-alias retarget case plus ordinary-target and aliases-only winner cases,
+  including exact `is_symlink` values.
+- At deterministic pre-enumeration and pre-stat seams, retarget an allowed alias from `A` to `B` and
+  assert that the final admitted target owns both metadata and reported provenance, including an empty
+  listing. Unsafe controls fail before inspection.
 - Test depth, returned-item, and visited-entry limits below, at, and above; avoid timing assertions.
 - Use native local filesystem setup only. Any FIFO test is capability-gated and does not open the
   object; no subprocess, provider, model, or network is permitted.
@@ -169,6 +201,18 @@ revise a presentation.
   watching, descriptor-relative traversal, or multiple workspace roots.
 - File writes, subprocesses, shell commands, network access, permissions, approvals, or configuration
   that broadens policy.
+
+## Pre-review adversarial audit
+
+| Audit | Required evidence or explicit N/A |
+| --- | --- |
+| Identity ledger | Keep the request alias distinct from the final access-time canonical request scope, each original traversal label, canonical target identity, deterministic winning candidate, emitted canonical path, and winning-candidate `is_symlink`. Cache/accounting and content-source identities are N/A; only admitted canonical labels are model-visible. |
+| End-to-end contract | Strict request -> CAH-024/026 final admission -> native enumeration or metadata inspection -> canonical deduplication/winner selection/sort -> immutable list/stat result -> CAH-029 traversal, CAH-030 context, and CAH-031 registry consumers. Evaluation wiring is deferred to CAH-037. |
+| Failure and atomicity | Invalid/direct denied requests execute no inspection; traversal omits unsafe descendants without labels, special objects are never opened, and the 10,001st visit fails without a partial result. Empty/truncated successes remain explicit; cancellation/deadline/rollback are N/A inside the synchronous operation and later dispatch guards it. |
+| Reachable boundaries | Real boundary/policy traversal exercises depths 1/4/8 and above, item counts 199/200/201 and 499/500/501, visited entries 10,000/10,001, empty directories, alias retargets at final admission, and winner candidates appearing after `max_items`. |
+| Closed grammar and cardinality | Strict frozen list/stat requests forbid extras and reject booleans as integers; result kind is exactly `file` or `directory`, canonical duplicates have one deterministic winner, directory symlinks are never recursively followed, and results contain at most 500 entries after a 10,000-visit bounded scan. |
+| Artifact parity | Story, lesson, diagram, tool/context/safety docs, and tests agree on validate -> final boundary/policy admission -> bounded inspection -> canonical winner selection -> canonical sort -> result cap, with direct-failure versus descendant-omission behavior and execution-time provenance aligned. |
+| Independent lenses | Security/identity review covers final-admission provenance, symlinks, ignore/deny policy, and unavailable paths; handoff/composition review covers CAH-029/030/031 consumers; limits/scheduler review covers traversal/item edges and records provider/protocol changes plus in-operation scheduler behavior as N/A. |
 
 ## Definition of done
 

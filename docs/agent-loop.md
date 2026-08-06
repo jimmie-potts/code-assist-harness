@@ -2,8 +2,9 @@
 
 > Status: incremental model-loop implementation. CAH-021 completes one provider-neutral turn,
 > CAH-022 hard-bounds it, and CAH-023 activates it through an explicitly selected OpenAI Responses
-> adapter. CAH-032 through CAH-036 now define the implementation-ready M2 tool-exchange and
-> iterative-loop sequence, but none is implemented. The launched `main()` path and TUI still
+> adapter. CAH-032 through CAH-039 now define the implementation-ready M2 tool-exchange and
+> iterative-loop sequence in documented dependency order, but none is implemented. The launched
+> `main()` path and TUI still
 > default to `MockSession`.
 
 Code Assist Harness will own its agent loop directly. That choice makes orchestration, limits,
@@ -421,18 +422,37 @@ default CI.
 
 ### CAH-032 — Define the provider-neutral tool contract
 
-> As an agent-loop developer, I want tool definitions, calls, and correlated results represented in
-> harness-owned values so that no provider or transport owns loop semantics.
+> As an agent-loop developer, I want selected context, prebuilt tool definitions, calls, and
+> correlated results carried in one bounded harness request so that no provider owns loop semantics.
 
 This [planned story](../user-stories/cah-032-define-provider-tool-contract.md) adds immutable,
-SDK-free selected context, strict function-tool definitions, a bounded positional opaque-continuation
-item type, calls, results, and ordered history to the provider port and strict fake. Each continuation
-is one content-suppressed history item immediately before its call or assistant item,
-not a separate request field. Its pure exact-key gate rejects omitted model-facing fields before
-native Pydantic can apply defaults while leaving direct-Python model defaults unchanged. The full
-canonical request projection is capped at 512 KiB. It performs no dispatch and admits no second turn.
+SDK-free selected context, a bounded positional opaque-continuation item type, calls, results, and
+ordered history to the provider port and strict fake. It consumes CAH-038's already-admitted
+function-tool definitions unchanged; it neither defines nor rebuilds their schema. Each continuation is
+one content-suppressed history item immediately before its call or assistant item, not a separate
+request field. The full canonical request projection is capped at 512 KiB. It preserves raw arguments
+and performs no argument interpretation, dispatch, or second turn. Exact-string and O(1)
+character/cardinality gates run before UTF-8, tuple iteration, projection, or JSON encoding, so the
+incremental request encoder never receives an unbounded caller string.
 An MCP adapter may later translate into these values, but MCP transport and remote trust are separate
 work.
+
+### CAH-038 and CAH-039 — Bound definitions and admit arguments
+
+CAH-038's [planned definition story](../user-stories/cah-038-canonicalize-provider-tool-definitions.md)
+owns the strict portable schema subset and bounded registry-to-provider definition bridge. It invokes
+schema generation only for the exact four native model identities and charges/omits expected
+`title`/`default` annotations inside the same shape-directed pass, never a recursive pre-pass. CAH-039's
+[planned argument story](../user-stories/cah-039-admit-provider-tool-arguments.md) owns unknown-name
+lookup followed by the complete 16-KiB/64-level structural and signed-64-bit numeric preflight,
+constant-rejecting pair decode, every-depth duplicate rejection, exact-key gate, and native Pydantic
+validation. Its sole public catalog factory accepts one CAH-031 registry and invokes CAH-038's
+definition bridge internally; callers cannot inject a separate definition tuple. CAH-032
+construction and provider mapping reject malformed names or arguments above 16
+KiB before this path; CAH-039 covers reachable at-limit carriers. Its immutable catalog owns the
+exact CAH-031 registry identity, re-exposes the exact CAH-038 definitions used by requests, and binds
+each prepared invocation to the same registry entry. It returns one prepared invocation or fixed
+error and performs no dispatch.
 
 ### CAH-033 — Stage and validate one tool-aware response
 
@@ -440,8 +460,10 @@ work.
 > invalid provider grammar cannot publish partial text or authorize work.
 
 This [planned story](../user-stories/cah-033-stage-and-validate-tool-aware-response.md) stages every
-observation until the whole response is known to be either final text or exactly one tool call.
-Only an accepted final-text branch may publish text, and only an accepted tool-call branch may be
+observation until the whole response is known to be final text, one content-free text-overflow
+marker, or exactly one tool call. Normal neutral text carriers are exact built-in strings bounded to
+8,192 characters/UTF-8 bytes; provider producers represent larger text only with the shared 8,193
+marker. Only an accepted final-text branch may publish text, and only an accepted tool-call branch may be
 returned for later dispatch. A normalized provider failure may terminate any otherwise valid
 nonterminal prefix: the full prefix is discarded, its bounded failure classification is preserved,
 and publication and dispatch remain zero. Premature EOF, mixed text/call output, a second call, or
@@ -454,18 +476,30 @@ remains candidate evidence until accepted final text completes the session.
 > ownership handoff is visible before general iteration.
 
 This [planned story](../user-stories/cah-034-run-one-read-tool-round-trip.md) implements exactly two
-fake-backed model turns around one native read dispatch. It preserves the registry-derived catalog
-and dispatches only after CAH-033 accepts the complete first response. Unknown-tool lookup runs first;
-CAH-034 alone then performs pair-preserving decoding of JSON object members and rejects any repeated
-decoded name before the exact-key gate, Pydantic validation, or dispatch. After a successful dispatch, it processes
-CAH-031's ordered local `instruction_scopes`—the requested path plus every model-visible result
-owner—and atomically enriches context before replaying one canonical correlated result envelope and
-appending `continuation? -> call -> result` to the single ordered history.
+fake-backed model turns around one native read dispatch. It calls CAH-039's registry-only catalog
+factory, which invokes CAH-038 internally, advertises `catalog.definitions`, and admits calls through
+that same object. Only after CAH-033 accepts the complete response does CAH-034's `dispatch_one`
+identity-check the prepared value, call CAH-031 `dispatch_bound(entry, request)`, and construct the
+correlated provider result. Cross-catalog input is a session failure before handler/replay/follow-up. A
+CAH-039 fixed error causes zero dispatch and may replay against unchanged
+context after the guarded handoff. After a successful dispatch, orchestration processes CAH-031's
+ordered local `instruction_scopes`—the canonical request scope captured by the native operation's final
+access-time admission, including an empty-list or no-match success, plus every model-visible result
+owner. It never re-resolves the original alias. Context is atomically enriched before one canonical
+correlated result envelope is replayed and `continuation? -> call -> result` is appended to the
+single ordered history. CAH-031 admits only signed 64-bit integers and at most 64 complete-envelope
+object/list levels in that canonical result projection, with the outer `result` object at depth 1. A
+65,536-unit pre-serialization work budget bounds width before sorting/encoding, and a defensive
+serializer `RecursionError`/`ValueError` maps to `invalid_read_tool_result`.
 Synchronous native reads, instruction discovery, and context merge are bounded and non-preemptive;
 one shared scheduling seam runs before dispatch, after dispatch, after every discovery, after every
-merge, and before the follow-up start. It unconditionally yields once to the event loop outside locks,
-then applies the existing cancellation/deadline guard. Tool results, instruction bundles, merged context, history,
-and the next request stay local until the final guard passes, so another terminal commits none of
+merge, and before the follow-up start. After each discovery and its guard, the returned bundle's
+`canonical_scope` must exactly equal the captured scope before merge; mismatch fails the transaction
+without alias fallback. CAH-030 retains each binding's CAH-025 depth rank and CAH-032 copies that exact
+precedence into provider context; neither layer derives it from list position or renumbers gaps. The
+seam unconditionally yields once to the event loop outside locks, then applies the existing
+cancellation/deadline guard. Tool results, instruction bundles, merged context, history, and the next
+request stay local until the final guard passes, so another terminal commits none of
 those candidates. A production-mode regression installs no awaited checkpoint hook, queues
 cancellation on the same loop, and asserts at guard entry that the unconditional yield alone let it
 latch; Event gates separately pause named stages. This does not claim that an in-flight synchronous
@@ -479,11 +513,14 @@ handler was reaped.
 This [planned story](../user-stories/cah-035-run-bounded-agent-loop.md) replaces the teaching branch
 with a sequential state machine capped at four model turns and three within-budget tool calls. It
 permits one call per turn, accumulates instructions for all direct and result-derived owner scopes
-without removing prior context, reuses CAH-034's sole duplicate-aware argument decoder, keeps all
-budgets cumulative, and retains exactly one rejecting fourth
+without removing prior context, reuses CAH-039's complete lookup-first bounded argument-admission
+pipeline and CAH-034's guarded dispatch/enrichment path, keeps session limits cumulative while
+reapplying the complete-request cap independently to each cumulative snapshot, and retains
+exactly one rejecting fourth
 observation when that limit wins, matching CAH-022 evidence semantics. It fails closed on mixed,
-multiple, or parallel call shapes. Provider usage is optional session-aggregate evidence and is
-admitted only alongside accepted final assistant text, never as a per-tool-turn lifecycle fact.
+multiple, or parallel call shapes. Per-turn provider usage is staged and admitted privately; only
+the complete optional session aggregate is persisted alongside accepted final assistant text, never
+as a per-tool-turn lifecycle fact.
 Planned CAH-037's composition root supplies the complete M2 profile explicitly as four turns, 120
 seconds, 4,096 output bytes, and three observed calls instead of inheriting one-turn/one-call defaults.
 
@@ -504,4 +541,9 @@ needed for later replay, every request—including turn one—sets exactly
 `include=["reasoning.encrypted_content"]`. The adapter sets `parallel_tool_calls=false`, omits
 `previous_response_id`, and rejects hosted or remote-MCP tools. Explicit OpenAI selection authorizes
 bounded admitted repository-content egress for that session and must warn that allowed files are not
-content-secret-scanned. Default evidence remains SDK-fake and network-free.
+content-secret-scanned. Reasoning `id` and `encrypted_content` must be exact strings and pass O(1)
+character plus strict UTF-8 byte ceilings before canonical replay serialization. Default evidence
+remains SDK-fake and network-free. The OpenAI mapper saturates text at the first producer, joins only
+bounded normal text once, and emits the content-free overflow observation only after raw terminal
+structure is valid. Its mapped-empty event pump is iterative, and it drains raw terminal-to-EOF before
+releasing the neutral terminal tuple; extra events or iterator failure discard that tuple.

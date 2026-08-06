@@ -26,14 +26,17 @@ instructions, expose a tool, or add another agent-loop step.
 ## Scope
 
 - Add top-level `src/code_assist_harness/workspace.py` with an immutable `WorkspaceBoundary`, an
-  immutable resolved-path value, and one bounded boundary exception.
+  immutable resolved-path value, one pure `normalize_workspace_relative_path(value: str)` lexical
+  primitive, and one bounded boundary exception.
 - Construct the boundary through `WorkspaceBoundary.from_path(...)`, canonicalizing one existing
   directory and capturing its filesystem identity.
 - Resolve existing model-facing relative paths through `resolve_existing(...)`, following symlinks
   and returning a best-effort containment snapshot when the observed canonical target is beneath
   the captured root.
-- Admit every model-facing path string only after it survives a strict UTF-8 encode/decode
-  round-trip; reject lone surrogates before constructing a `Path` or making any filesystem call.
+- Admit every model-facing path string only after it survives the shared 4,095-byte,
+  256-component, 255-byte-per-component lexical budget and a strict UTF-8 encode/decode round-trip;
+  reject an over-bound value or lone surrogate before constructing a `Path` or making any
+  filesystem call.
 - Return both the canonical absolute path for later local use and its canonical, workspace-relative
   POSIX label for later provider and evidence use.
 - Move or delegate the Python runtime's existing root validation to this boundary without changing
@@ -64,6 +67,11 @@ instructions, expose a tool, or add another agent-loop step.
   label, but never a host path.
 - `ResolvedWorkspacePath` is a containment snapshot, not authorization and not an open file. A
   future caller must resolve again immediately before filesystem access.
+- `normalize_workspace_relative_path(value)` is the sole model-facing lexical owner. It accepts
+  exactly `str`, returns the normalized tuple of non-`.` components (`()` for root `.`), and performs
+  no `Path` construction, root inspection, resolution, policy evaluation, or filesystem I/O.
+  `resolve_existing` obtains a non-bytes `str` from its local path-like API and then calls the same
+  primitive. CAH-026 delegates to it while translating only exception vocabulary.
 
 ### Root identity and staleness
 
@@ -86,6 +94,12 @@ instructions, expose a tool, or add another agent-loop step.
   with strict UTF-8, and requires exact equality with the original string. This admits Unicode
   scalar values without normalization and rejects every lone surrogate before `Path` construction,
   `stat`, `resolve`, existence checks, or any other filesystem access.
+- The complete supplied string is at most 4,095 strict-UTF-8 bytes before dot or repeated-separator
+  normalization, contains at most 256 normalized non-`.` components, and each component is at most
+  255 strict-UTF-8 bytes. All ceilings are inclusive. A constant-time `len(value) > 4095` necessary
+  check may reject before encoding; any shorter value is strictly encoded once, then the byte and
+  component limits are applied. Counting the raw spelling first prevents redundant `./` segments
+  from hiding input work, while the normalized-component limit bounds later ancestor work.
 - NUL, absolute paths, and any `..` component are rejected in the same pre-filesystem admission
   stage, including a traversal that would normalize back inside the root. `.` components may be
   normalized; `.` alone names the root.
@@ -100,6 +114,12 @@ instructions, expose a tool, or add another agent-loop step.
 - This unit decides only existence and containment. Future read tools remain responsible for file
   type, ignore policy, prohibited locations, byte/count limits, and whether the target is suitable
   for their operation.
+- These are harness application budgets, not portability claims. Linux commonly exposes a
+  4,096-byte pathname buffer including the terminating NUL and 255-byte names, but mount-specific
+  limits vary, the selected root consumes bytes when an absolute path is formed, and WSL DrvFS may
+  accept or reject different names than the distro filesystem. An input admitted at this lexical
+  ceiling can therefore still receive the existing bounded resolution failure; tests do not claim
+  that a 4,095-byte relative path can be created on every supported mount.
 
 ### Fixed, non-leaking failures
 
@@ -112,11 +132,12 @@ diagnostic, or transcript content.
 | --- | --- | --- |
 | `invalid_workspace_root` | `Workspace root must be an existing directory.` | construction cannot resolve an accessible directory |
 | `stale_workspace_root` | `The selected workspace is no longer available.` | a snapshot check observes that the captured root is missing, redirected, replaced, or no longer a directory |
-| `invalid_workspace_path` | `Workspace path must be a non-empty relative path.` | input is empty, bytes-valued, not a strict Unicode-scalar/UTF-8 round-trip, contains NUL, is absolute, contains `..`, or is otherwise not a valid path value |
+| `invalid_workspace_path` | `Workspace path must be a non-empty relative path.` | input is empty, bytes-valued, over the shared path byte/component/name budget, not a strict Unicode-scalar/UTF-8 round-trip, contains NUL, is absolute, contains `..`, or is otherwise not a valid path value |
 | `workspace_path_not_found` | `Workspace path does not exist.` | strict target resolution fails without establishing an escape |
 | `workspace_path_outside` | `Workspace path is outside the selected workspace.` | a resolved component or target leaves the canonical root |
 
-Escape takes precedence when the boundary can establish that a symlink resolves outside; otherwise
+Every lexical failure, including a size failure, precedes root inspection and filesystem work.
+Escape takes precedence when an admitted path lets the boundary establish that a symlink resolves outside; otherwise
 an inaccessible or dangling target uses the bounded not-found result. Raw filesystem distinctions
 are intentionally not exposed.
 
@@ -126,6 +147,9 @@ are intentionally not exposed.
 - **Delivered production-code churn:** Not started.
 - **Counted paths:** additions plus deletions under `src/code_assist_harness/` and `tui/src/`.
 - **Excluded from count:** tests, documentation, fixtures, lockfiles, and generated artifacts.
+- **Planning PR scope:** One contract neighborhood: runtime-selected root and model-facing relative
+  path -> immutable workspace boundary/resolved canonical label -> CAH-025 instruction and CAH-026
+  read-policy consumers.
 - **Split rule:** stop and refine another story before review if the unit gains filesystem-read,
   instruction-discovery, tool-registration, or agent-loop responsibility, or is likely to exceed
   roughly 600 changed production lines. Do not pad a smaller coherent implementation.
@@ -138,9 +162,10 @@ are intentionally not exposed.
    single-root CLI, protocol v1, readiness handshake, or TUI behavior.
 3. `resolve_existing` accepts `.`, regular descendants, and internal file or directory symlinks and
    returns canonical absolute and target-relative paths.
-4. Empty, bytes-valued, lone-surrogate, NUL-containing, and absolute inputs plus every path
-   containing a `..` component fail before any filesystem access with `invalid_workspace_path`;
-   valid multibyte scalar paths round-trip unchanged and are not normalized.
+4. Empty, bytes-valued, lone-surrogate, NUL-containing, absolute, traversal, and over-bound inputs
+   fail before any filesystem access with `invalid_workspace_path`; exact 4,095-byte,
+   256-component, and 255-byte-name endpoints pass pure lexical admission, valid multibyte scalar
+   paths round-trip unchanged, and no Unicode normalization occurs.
 5. Component-aware containment rejects symlinked files and directories that resolve outside the
    root, including missing descendants beneath an escaping directory symlink.
 6. Missing and dangling in-workspace paths fail with `workspace_path_not_found`; no create-target or
@@ -161,7 +186,7 @@ are intentionally not exposed.
 | Contract or risk | Planned test | Layer | Expected evidence |
 | --- | --- | --- | --- |
 | Canonical contained path | construct a boundary and resolve `.`, a file, and an internal symlink | unit | immutable values report canonical relative labels without host paths |
-| String and syntax admission | try bytes-valued, lone-surrogate, empty, NUL, absolute, `..`, and sibling-prefix paths; include a valid multibyte scalar path | unit | exact fixed code, zero filesystem calls for invalid strings, and unchanged UTF-8 round-trip for valid text |
+| String, syntax, and work admission | try bytes-valued, lone-surrogate, empty, NUL, absolute, `..`, and sibling-prefix paths; exercise complete bytes 4,094/4,095/4,096, names 254/255/256 bytes, and 255/256/257 normalized components with multibyte controls | unit | exact fixed code and zero `Path`, root, or filesystem calls for invalid strings; endpoints pass only the pure lexical gate, without claiming the host mount can create the longest value |
 | Symlink escape | resolve file, directory, and missing-descendant escapes | unit | `workspace_path_outside` without requested or canonical path leakage |
 | Missing target | resolve missing and dangling in-workspace paths | unit | `workspace_path_not_found` with no raw `OSError` |
 | Root staleness | remove, rename, replace, redirect, and type-change the root | unit | observable replacement produces `stale_workspace_root` |
@@ -176,6 +201,12 @@ are intentionally not exposed.
   root replacement, and root type changes.
 - For lone-surrogate and other pre-admission failures, inject filesystem spies and assert that path
   construction/resolution, existence checks, and stat operations are never reached.
+- Test the pure lexical primitive independently at 4,094/4,095/4,096 bytes,
+  254/255/256 bytes for one component, and 255/256/257 normalized components. Construct the
+  4,095-byte endpoint from sixteen 255-byte names and fifteen separators; construct the 4,096-byte
+  case with only legal-size names so the aggregate limit is isolated. Use ASCII plus a multibyte
+  scalar to prove byte rather than character counting. Do not create the aggregate endpoint on disk
+  or treat lexical admission as a `PATH_MAX` guarantee.
 - Update runtime tests to prove the existing CLI accepts one canonical workspace and maps invalid
   root construction to its bounded startup failure without leaking the supplied path.
 - For observable replacement coverage, rename the original root so it remains referenced, create a
@@ -210,6 +241,18 @@ architecture position.
   that path-resolution snapshots eliminate time-of-check/time-of-use races.
 - Multiple workspace roots, native Windows or macOS paths, remote repositories, archives, or virtual
   filesystems.
+
+## Pre-review adversarial audit
+
+| Audit | Required evidence or explicit N/A |
+| --- | --- |
+| Identity ledger | The selected-root alias is construction input only; the canonical root plus captured device/inode identify the boundary, the execution-time canonical target identifies a resolved path, and only its workspace-relative POSIX label is model-visible. Semantic owner, provenance source, and cache/accounting identity are N/A for this containment-only unit. |
+| End-to-end contract | Runtime `--workspace` selection -> `WorkspaceBoundary.from_path` -> stored boundary -> `resolve_existing` -> immutable canonical target/label or fixed error; runtime integration proves the existing readiness/protocol path, and CAH-025/026 consume this API. Evaluation wiring is N/A until the later M2 evaluation unit. |
+| Failure and atomicity | Construction or resolution returns one immutable value or one fixed error; invalid Unicode/path syntax reaches zero filesystem calls, stale/escape/missing checks return no target, and no content or tool operation can execute. Cancellation, deadline, and rollback are N/A for this synchronous boundary; the documented post-check pathname race remains. |
+| Reachable boundaries | The real boundary and runtime entry exercise accepted scalar paths, every pre-I/O syntax rejection, internal/escaping symlinks, sibling-prefix containment, and observable root removal/replacement before and after target resolution. Numeric item/byte ceilings and a scheduler seam are N/A. |
+| Closed grammar and cardinality | One selected existing directory and one non-empty relative Linux path are admitted; `.` is the sole root label, `..`, absolute, NUL, bytes-valued, and lone-surrogate paths are closed out, and exactly five fixed error variants cover construction/resolution. No collection duplicate policy applies. |
+| Artifact parity | Story, lesson, compact diagram, architecture/context/safety docs, and test matrix use the same order: construct canonical root -> pre-I/O path admission -> root snapshot -> strict target resolution/containment -> root snapshot -> canonical label, with the same fixed failure precedence and residual race caveat. |
+| Independent lenses | Security/identity review covers component containment, symlinks, staleness, and leak-free values; handoff/composition review covers runtime plus CAH-025/026 callers; provider/protocol/limits/scheduler review records those boundaries unchanged and scheduler behavior as N/A. |
 
 ## Definition of done
 

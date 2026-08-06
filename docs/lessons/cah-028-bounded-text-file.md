@@ -43,8 +43,12 @@ fails instead.
 
 ## Key concepts
 
+- **Shared path budget:** CAH-024/026 admits at most 4,095 UTF-8 bytes, 256 normalized components,
+  and 255 UTF-8 bytes per component before policy or file I/O.
 - **Strict text:** Complete source decodes as UTF-8 and contains no NUL.
 - **Two budgets:** Source eligibility is 256 KiB; one response is at most 64 KiB and 400 lines.
+- **One real producer:** `read_file` and CAH-029 search consume the same final-admission,
+  cap-plus-sentinel, strict-text candidate seam.
 - **Whole-line slice:** No partial line or partial Unicode encoding is returned.
 - **Fresh admission:** Boundary and policy are checked again immediately before open.
 
@@ -55,45 +59,70 @@ TUI / provider tool request (future)
               |
         Python harness
               |
- CAH-024 boundary -> CAH-026 policy -> [CAH-028 read_file] -> repository bytes
+ CAH-024 boundary -> CAH-026 policy -> [CAH-028 read_text_candidate] -> repository bytes
+                                              |                    |
+                                         read_file           CAH-029 search
                                               |
                                     CAH-030 context (later)
 
 Protocol, loop, and transcript/evidence remain unchanged in this unit.
 ```
 
-The result contains canonical path, exact text, line range, total lines, source/returned bytes, and
-truncation. Default representations suppress content.
+The result contains the final pre-open canonical path, exact text, line range, total lines,
+source/returned bytes, and truncation. It never copies a stale request alias. Default
+representations suppress content.
+Runtime calls `RepositoryTextReader(policy: RepositoryReadPolicy)`. Its exact
+`read_text_candidate(path, max_source_bytes)` returns one frozen `TextSourceCandidate` and owns final
+admission, a cap-plus-one sentinel
+read, and strict UTF-8/NUL classification. `read_file(request) -> ReadFileResult` calls that producer
+with 262,144 bytes; CAH-029 later calls it with the smaller of that ceiling and its remaining
+aggregate budget. The reader retains the exact policy object shared with CAH-027; it never rebuilds
+a workspace boundary or independent ignore-policy state.
+`ReadFileRequest.path` is required and has no default; only the line and byte bounds have defaults.
 
 ## Practical walkthrough
 
-1. Validate path, start line, line count, and byte request.
-2. Admit a regular file with CAH-026 and recheck immediately before open.
-3. Read at most 256 KiB plus one byte, then strictly decode the entire file.
-4. Select whole lines from the 1-based start and stop before either return bound.
-5. Return exact counts and test empty, CRLF, no-final-newline, and multibyte cases.
+1. Validate the shared path byte/component/name budget, start line, line count, and byte request.
+2. Call the shared candidate producer, which rechecks CAH-026 immediately before open and retains
+   that final canonical label.
+3. Read at most the active cap plus one byte. Classify overflow without decoding the sentinel;
+   otherwise strictly decode the complete source and classify decoded NUL as non-text.
+4. Map overflow/non-text to the existing safe errors, or select whole lines from admitted text and
+   stop before either return bound.
+5. Return exact counts and test the producer through both its direct-read and later search consumers.
 
 ## Implementation code samples
 
 Planned pseudocode only:
 
-```text
-source = read_at_most(FILE_LIMIT + 1)
-text = strict_utf8_without_nul(source)
+```python
+candidate = reader.read_text_candidate(request.path, max_source_bytes=262_144)
+if candidate.overflowed:
+    raise repository_source_too_large()
+if candidate.non_text:
+    raise repository_not_text()
+
+text = require_type(candidate.text, str)
 lines = text.splitlines(keepends=True)
 selected = whole_lines_within(request.max_lines, request.max_bytes)
-return ReadFileResult(selected, exact_counts, truncated)
+return ReadFileResult(path=candidate.path,
+                      text=selected, **exact_counts, truncated=truncated)
 ```
 
-The extra byte proves an over-limit source. Full decode validates evidence before slicing. Whole-line
-selection makes truncation observable and reproducible.
+The candidate owns the extra byte and never decodes or charges it. Full decode validates evidence
+before slicing. Whole-line selection makes truncation observable and reproducible. CAH-029 receives
+the same three-state carrier, so a prose-level promise cannot drift from the actual producer.
 
 ## Failure scenarios to study
 
+- A path at 4,096 bytes, 257 components, or a 256-byte name fails as
+  `invalid_repository_path` before policy or open; each exact endpoint remains lexically valid.
 - A 262,145-byte file fails without partial content.
 - Invalid UTF-8 and NUL return `repository_not_text`, never replacement text.
 - An oversized first selected line returns empty text with `truncated=true`.
 - A denied, ignored, escaping, or replaced target returns a fixed safe error.
+- An allowed `alias -> A` retargeted to allowed `B` before open reads and reports `B`; the earlier
+  alias resolution never becomes success provenance.
 
 ## Production expansion
 
@@ -132,12 +161,19 @@ evaluations need it, then isolate its parser and retain canonical provenance and
 1. Compute byte counts for ASCII and multibyte lines.
 2. Predict results for empty, beyond-EOF, and oversized-first-line reads.
 3. Write below/at/above tests for source and returned bytes.
-4. Teach back: why validate the complete eligible source before returning a slice?
+4. Retarget an admitted alias from one allowed file to another and identify which canonical label
+   the result must carry.
+5. Teach back: why validate the complete eligible source before returning a slice?
+6. Explain why CAH-029 passes its remaining aggregate budget to this producer instead of opening the
+   file again itself.
 
 ## Key takeaways
 
 - The harness owns text admission and output bounds.
+- Success provenance comes from final read admission, not the mutable request alias.
 - Strict decode plus whole-line truncation preserves evidence integrity.
+- Sharing the real bounded candidate producer prevents direct reads and search from drifting on
+  admission, byte charging, or sentinel handling.
 - More formats increase utility and parser/security cost.
 
 ## Glossary

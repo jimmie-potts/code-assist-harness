@@ -36,6 +36,8 @@ After completing this unit, you should be able to:
   canonical path views;
 - explain why a policy candidate's owner controls rule scope while its canonical source controls
   containment, hard denial, caching, and budgets;
+- explain why each ignore view snapshots the admitted owner's canonical directory and re-admits that
+  owner before probing or reading its `.gitignore`;
 - distinguish a hard deny from a repository ignore; and
 - design fixed failures that do not become an existence or secret oracle.
 
@@ -74,21 +76,31 @@ reading. A link outside the workspace or to `.git/config` is an invalid policy s
 to read those bytes. Applying GitIgnoreSpec recursively to the policy source would be circular, so
 policy sources receive containment, hard-deny, type, size, and text checks instead.
 
+The owner label can change too. Suppose the lexical owner `pkg-link` resolves to admitted directory A
+when the view enters it, then is retargeted to another allowed directory B. Checking only
+`pkg-link/.gitignore` would silently select B's leaf while still attaching its rules at `pkg-link`'s
+scope. Each view therefore captures A as the admitted canonical owner, re-resolves `pkg-link` before
+the non-following leaf probe, and repeats that owner check before a cache-miss read. A persistent
+A-to-B change fails before B's leaf is resolved or read. The rule scope remains the view-relative
+owner label; the canonical leaf source remains the cache and budget identity.
+
 A common misconception is that approval makes any read safe. Here, ignored and hard-denied decisions
 have no override field. Future approval cannot broaden this boundary.
 
 Another misconception is that a shared classifier must also resolve paths or load ignore files.
 `is_hard_denied_path` accepts an already normalized tuple of workspace-relative components and
 returns only `True` or `False`. It performs no filesystem access and does not reveal which rule
-matched. The sibling pure `normalize_repository_path_components` helper owns model-facing lexical
-normalization without constructing a `Path`; callers still own resolution, safe public errors, and
-any later ignore evaluation.
+matched. CAH-024's pure `normalize_workspace_relative_path` primitive owns model-facing lexical
+normalization and its 4,095-byte, 256-component, and 255-byte-name budgets without constructing a
+`Path`. The sibling `normalize_repository_path_components` API delegates to it and translates only
+the fixed repository-policy exception vocabulary; callers still own resolution, safe public errors,
+and any later ignore evaluation.
 
 That helper accepts exactly `str` and returns `tuple[str, ...]`. Its only failure is the fixed,
 content-suppressed `RepositoryPathSyntaxError("Repository path syntax is invalid.")`. Ordinary reads
 map it to `invalid_repository_path`; CAH-025 maps it to `invalid_instruction_scope`. A shared corpus
-must also match CAH-024's established string admission so extracting the pure seam cannot create a
-second lexical grammar.
+must exactly match CAH-024's tuple and failure result so this adapter cannot create a second lexical
+grammar or second set of limits.
 
 Another misconception is that a parsed JSON string is automatically safe Unicode. Python can hold
 an isolated surrogate in `str`, even though strict UTF-8 cannot encode it. The shared request
@@ -106,13 +118,17 @@ does not normalize spelling, because normalization could change which repository
   evaluate its rules independently at each view's owner-relative scope.
 - **Policy owner versus source:** the candidate owner supplies GitIgnoreSpec scope; the admitted
   canonical source supplies containment, hard-deny, cache, and budget identity.
+- **Owner-stability snapshot:** each lexical or canonical walk captures the candidate owner's
+  canonical directory when admitted, then requires that same directory immediately before the leaf
+  probe and any cache-miss read.
 - **Dual-view ignore:** preserve the normalized supplied label and the resolved target label as
   independent ignore-policy inputs; one view cannot re-include the other.
 - **Hard denylist:** conservative VCS and credential names that ignore negation cannot re-include.
 - **Pure hard-deny classifier:** one Boolean function over normalized components, without path
   resolution, I/O, GitIgnoreSpec evaluation, or matching-rule disclosure.
-- **Pure lexical admission:** strict Unicode-scalar and relative-path normalization that rejects
-  empty/absolute/`..`/NUL input before `Path`, resolution, or I/O.
+- **Pure lexical admission:** delegated strict Unicode-scalar and relative-path normalization that
+  rejects empty/absolute/`..`/NUL input and values above 4,095 bytes, 256 normalized components, or
+  255 bytes per component before `Path`, resolution, or I/O.
 - **Safe error:** one fixed code/message without path, pattern, rule, content, or raw OS detail.
 - **Deterministic budget:** bytes and items, not provider tokens.
 - **Scalar-text admission:** accept only exact strict UTF-8 round-trips after JSON parsing; reject
@@ -123,7 +139,8 @@ does not normalize spelling, because normalization could change which repository
 ```text
 Ink TUI ---- NDJSON ----> Python harness <---- provider may request tools later
                               |
-             pure lexical admission -> normalized components
+       CAH-024 sole lexical admission -> normalized components
+          4095 bytes / 256 parts / 255 bytes per name
                               |
               [CAH-026 hard-deny classifier]
                     /                     \
@@ -151,27 +168,39 @@ The provider can propose a future operation, but only the harness admits it. The
 snapshot, not durable authorization. The pure classifier is the single implementation of hard-deny
 product policy for both branches; only ordinary reads add ignore semantics.
 
+Runtime creates one `RepositoryReadPolicy(boundary: WorkspaceBoundary)` per session. Its exact
+`admit_existing(path: str) -> AdmittedRepositoryPath` method returns frozen canonical `path`, `kind`,
+and direct-leaf `is_symlink` provenance while retaining the same boundary object as a read-only
+identity. CAH-027 and CAH-028 receive that same policy instance; recursive consumers reuse its
+descendant path rather than reconstructing a workspace root or policy cache.
+
 ## Practical walkthrough
 
-1. Define immutable decisions, shared ordinary-read limits, pure lexical admission, and fixed errors.
-2. Implement `normalize_repository_path_components(value)` and
-   `is_hard_denied_path(components)`; prove they reject invalid syntax before construction/I/O and
-   return only normalized components or a Boolean without a matching-rule oracle.
+1. Define immutable decisions, shared ordinary-read limits, one CAH-026 lexical adapter, and fixed
+   errors.
+2. Delegate `normalize_repository_path_components(value)` to CAH-024's sole lexical primitive and
+   implement `is_hard_denied_path(components)`; prove the adapter preserves exact endpoint tuples or
+   translates one fixed failure before construction/I/O.
 3. Admit path/query strings as unchanged Unicode scalar text, normalize supplied path components,
    then call the classifier.
 4. Preserve the normalized supplied label and walk its directory prefixes root-to-leaf. Before
    entering each directory, apply the policies available at that point; load its nested policy only
    after it admits. Deny before requested target resolution if any ancestor or the leaf is ignored.
-5. For every present policy candidate, preserve its owner, resolve its source through CAH-024, apply
-   canonical hard denial, and re-resolve and recheck it immediately before a cache-miss read. Cache
-   and charge one allowed canonical source once while attaching its rules at every candidate owner.
-6. Resolve an admitted lexical path with CAH-024 and call the same classifier on canonical
+5. When either view admits a candidate-owner directory, preserve its view-relative label and capture
+   its canonical directory. Re-admit that label and require the same directory immediately before the
+   non-following `.gitignore` probe. For every present candidate, resolve its source through CAH-024
+   and apply canonical hard denial.
+6. On a cache hit, attach rules only after the owner check and current leaf/source resolution; do not
+   reread or recharge content. On a cache miss, re-admit and compare the owner before resolving the
+   leaf again, then recheck the source immediately before the bounded read. Cache and charge one
+   allowed canonical source once while attaching its rules at each view-relative owner label.
+7. Resolve an admitted lexical path with CAH-024 and call the same classifier on canonical
    components.
-7. Walk the canonical chain by the same rule. Reuse cached rules for policy files already read and
+8. Walk the canonical chain by the same rule. Reuse cached rules for policy files already read and
    charged, read only newly reachable files, and still attach every applicable rule set at the
    canonical view's owner-relative scope before denying any ignored ancestor or leaf before requested
    content I/O.
-8. Re-run admission before use, then test negation, nested scope, policy-source aliases, staleness,
+9. Re-run admission before use, then test negation, nested scope, policy-source aliases, staleness,
    and every limit boundary.
 
 ## Implementation code samples
@@ -183,24 +212,33 @@ def is_hard_denied_path(components):
     return any(component_is_denied(component) for component in components)
 
 def normalize_repository_path_components(value: str) -> tuple[str, ...]:
-    if not isinstance(value, str):
-        raise RepositoryPathSyntaxError("Repository path syntax is invalid.")
-    validate_unicode_scalar_utf8(value)
-    return normalize_relative_without_io(value)  # rejects empty, absolute, NUL, and `..`
+    try:
+        return normalize_workspace_relative_path(value)  # CAH-024 owns syntax and limits
+    except WorkspacePathSyntaxError as error:
+        raise RepositoryPathSyntaxError("Repository path syntax is invalid.") from error
 
 def resolve_policy_source(candidate):
     source = boundary.resolve_existing(candidate)
     fail_policy_if_hard_denied(source.relative_path.parts)
     return source
 
-def load_or_reuse_policy(owner, policy_cache):
-    candidate = owner / ".gitignore"
+def require_same_owner(owner_label, captured_owner):
+    current_owner = boundary.resolve_existing(owner_label)
+    require_directory(current_owner)
+    fail_policy_if_owner_changed(captured_owner, current_owner)
+    return current_owner
+
+def load_or_reuse_policy(owner_label, captured_owner, policy_cache):
+    require_same_owner(owner_label, captured_owner)  # before any leaf probe
+    candidate = owner_label / ".gitignore"
     entry = probe_directory_entry_without_following_leaf(candidate)
     if entry.is_absent:
         return None
     first = resolve_policy_source(candidate)
     if policy_cache.contains(first.relative_path):
+        # Owner and current leaf/source were checked; cached bytes are not read or charged again.
         return policy_cache.rules_for(first.relative_path)
+    require_same_owner(owner_label, captured_owner)  # before resolving a cache-miss leaf again
     current = resolve_policy_source(candidate)  # immediately before the cache-miss read
     fail_policy_if_source_changed(first, current)
     require_regular_policy_within_limits(current)
@@ -210,11 +248,15 @@ def load_or_reuse_policy(owner, policy_cache):
     return policy_cache.commit_validated_source(current, candidate_text)
 
 def admit_ignore_view(label, policy_cache):
-    policies = scoped_rules(load_or_reuse_policy(owner=".", policy_cache), owner=".")
+    root_label = "."
+    root_owner = capture_canonical_directory_when_admitted(root_label)
+    root_rules = load_or_reuse_policy(root_label, root_owner, policy_cache)
+    policies = scoped_rules(root_rules, owner_label=root_label)
     for directory in label.proper_directory_prefixes():
         deny_if_ignored(policies.check(directory.as_directory()))
-        cached = load_or_reuse_policy(directory, policy_cache)
-        policies.extend(scoped_rules(cached, owner=directory))
+        captured_owner = capture_canonical_directory_when_admitted(directory)
+        cached = load_or_reuse_policy(directory, captured_owner, policy_cache)
+        policies.extend(scoped_rules(cached, owner_label=directory))
     deny_if_ignored(policies.check(label))
 
 components = normalize_repository_path_components(request.path)
@@ -226,6 +268,14 @@ deny_if_hard_denied(is_hard_denied_path(resolved.relative_path.parts))
 admit_ignore_view(resolved.relative_path, bounded_union)
 return admit(resolved)
 ```
+
+Planned deterministic tests inject the same persistent owner mutation at both marked seams. One
+parameter set walks a lexical symlink label whose admitted owner is A; the other walks the canonical
+owner label for A. Each retargets that label to a distinct allowed B before the probe and, in a
+separate case, before the cache-miss read. Spies require exact `repository_policy_invalid`, zero
+B-leaf resolution/probe/read, zero B-rule cache attachment or commit, and zero B-byte charge. Stable
+controls cover both views, including a cache hit that repeats owner and current leaf/source admission
+but performs zero content reads and zero new charges.
 
 The classifier is intentionally smaller than admission: it assumes normalized input, returns one
 bit, and neither touches the filesystem nor identifies the matched rule. The string check runs before
@@ -245,7 +295,8 @@ happens before requested target resolution so an ignored alias cannot become an 
 Canonical walking then catches safe-looking aliases whose targets or ancestors are ignored without
 reading requested content. Reaching access requires every ancestor plus the leaf in both views to
 admit. A caller repeats this sequence immediately before access. Descriptor-relative access remains
-deferred, so this check-before-use sequence narrows rather than eliminates races.
+deferred, so these owner/source pathname snapshots catch deterministic persistent changes at their
+checked seams but do not eliminate a mutation after the final check.
 
 ## Failure scenarios to study
 
@@ -266,6 +317,11 @@ deferred, so this check-before-use sequence narrows rather than eliminates races
 - **Allowed shared policy source:** `pkg/.gitignore` links to `shared/ignore.rules`. Its source is read
   and charged once, but its rules remain scoped below `pkg`; another owner may attach the cached rules
   at its own scope.
+- **Policy-owner retarget:** after a lexical-alias or canonical view captures owner A, its label is
+  persistently retargeted to allowed directory B just before the leaf probe or just before a
+  cache-miss read. Owner re-admission returns `repository_policy_invalid` before B's leaf is resolved,
+  read, cached, charged, or attached at A's scope. Stable controls still admit, and a stable cache hit
+  performs the owner plus current leaf/source checks without a content read or new charge.
 - **Policy retarget:** an initially allowed policy link points outside or to a denied source at the
   pre-read recheck. The changed source fails with `repository_policy_invalid` before policy-source
   content I/O.
@@ -329,6 +385,9 @@ provenance; preserve local fail-closed enforcement if the central service is una
    construct a GitIgnoreSpec, log a matching rule, or return more than components/a Boolean.
 9. Trace `pkg/.gitignore -> shared/ignore.rules`: identify the owner used for matching and the source
    used for containment, hard denial, cache identity, and budget accounting.
+10. Retarget both a lexical alias owner and a canonical-chain owner from allowed A to allowed B at
+    each owner-check seam. Explain why checking only the leaf would attach the wrong rules, and what
+    pathname race remains after the last check.
 
 ## Key takeaways
 
@@ -339,6 +398,8 @@ provenance; preserve local fail-closed enforcement if the central service is una
   ancestor or leaf denies access.
 - Every policy source is contained and canonically hard-denied before a bounded read; safe internal
   aliases preserve candidate-owner scope and share canonical cache/budget accounting.
+- Each view re-admits the captured canonical owner before probing and before a cache-miss read, so a
+  persistent allowed-to-allowed owner retarget cannot redirect policy while preserving the old scope.
 - Hard denial precedes and dominates Git-style ignore policy.
 - Central policy improves governance but introduces availability and operational cost.
 
@@ -352,6 +413,8 @@ provenance; preserve local fail-closed enforcement if the central service is una
 - **Ancestor traversability:** The rule that every parent directory must remain reachable before a
   descendant or nested policy can affect admission.
 - **Policy candidate owner:** The directory whose `.gitignore` location determines rule scope.
+- **Owner-stability snapshot:** A checked mapping from a view-relative owner label to the canonical
+  directory captured when that view admitted it.
 - **Policy source:** The boundary-resolved canonical file whose bytes, cache identity, and budget
   supply a policy candidate.
 - **Lexical path:** The normalized supplied workspace-relative name before symlinks are resolved.

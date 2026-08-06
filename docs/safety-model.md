@@ -2,7 +2,8 @@
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
 > provider-session path, and CAH-023 makes that path available only through explicit, validated OpenAI
-> selection. CAH-024 through CAH-037 refine the read-only M2 boundaries but have not implemented
+> selection. The 16 dependency-ordered M2 stories CAH-024 through CAH-039 refine the read-only M2
+> boundaries but have not implemented
 > them. The launch still defaults to `MockSession`; this is not a sandbox or a claim that untrusted
 > code can be executed safely.
 
@@ -64,6 +65,10 @@ selected by the CLI. All model-facing paths are workspace-relative. CAH-024 will
 canonical root into an immutable Python boundary, resolve one relative target against a filesystem
 snapshot, and reject absolute paths, traversal, or symlink resolution outside the workspace. It will
 report an accepted target with a workspace-relative label and will not itself read the target.
+The same CAH-024 lexical primitive bounds a supplied spelling to 4,095 strict-UTF-8 bytes,
+256 normalized components, and 255 UTF-8 bytes per component before root, policy, or filesystem
+inspection. CAH-026 and all native/context/provider request carriers delegate that rule. The numbers
+are harness budgets rather than claims about `PATH_MAX`, `NAME_MAX`, or DrvFS behavior.
 
 That planned snapshot check is necessary but not execution-time authorization. Path checks must be
 repeated when a later tool accesses a target because files and symlinks can change after validation
@@ -72,6 +77,12 @@ proposal returns a conflict and never overwrites newer content. CAH-026 plans th
 deny/ignore policy, and CAH-027 through CAH-029 require access-time re-admission for listing, reads,
 and search. Their tests cover missing descendants under symlinks and observable replacement races in
 addition to the CAH-024 containment matrix.
+
+CAH-026 applies the same pathname-snapshot discipline inside ignore evaluation. Each lexical and
+canonical view captures a candidate owner's canonical directory when it admits that directory, then
+requires the owner label to resolve identically before probing `.gitignore` and before a cache-miss
+read. This blocks deterministic persistent allowed-to-allowed owner retargets at those seams, but it
+does not eliminate mutation after the final check.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -258,15 +269,25 @@ perform filesystem access or eliminate time-of-check-to-time-of-use races.
 
 [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) owns the shared admission
 policy and exposes pure lexical-path admission plus its exact hard-deny table. Every present
-`.gitignore` candidate preserves its owner directory for rule scope, but its source resolves through
-`WorkspaceBoundary`, passes canonical hard denial, and is re-resolved and rechecked immediately
-before a bounded cache-miss read. Escaping, hard-denied, dangling, inaccessible, retargeted, or
-non-regular sources fail as `repository_policy_invalid` without reading requested content and are
-not opened, cached, or charged. An admitted internal symlink remains owner-relative and a shared
-canonical source is read and charged once. CAH-025 reuses the same pre-I/O decisions for supplied and
+`.gitignore` candidate preserves its view-relative owner label for rule scope, but its source resolves
+through `WorkspaceBoundary`, passes canonical hard denial, and is re-resolved and rechecked
+immediately before a bounded cache-miss read. When either ignore view admits an owner directory, it
+captures the canonical owner. It re-admits the owner label immediately before the non-following leaf
+probe and again before any cache-miss read; a persistent `owner A -> allowed B` mutation fails as
+`repository_policy_invalid` before B's leaf is resolved or read and cannot attach B rules at A scope.
+On a cache hit, owner re-admission plus current leaf/source resolution still precedes owner-relative
+attachment, while content is neither read nor newly charged. Escaping, hard-denied, dangling,
+inaccessible, retargeted, or non-regular sources fail under the same fixed error without reading
+requested content and are not opened, cached, or charged. An admitted internal leaf symlink remains
+owner-relative and a shared canonical source is read and charged once. These checks leave the stated
+pathname race after the final seam. CAH-025 reuses the same pre-I/O decisions for supplied and
 canonical scope plus each resolved instruction source, while its control-plane `AGENTS.md` candidates
 remain exempt only from `.gitignore`. It preserves the canonical
 candidate owner as `applies_to` even when a leaf symlink resolves to another source directory. The
+owner label itself is re-admitted immediately before the non-following leaf probe and again before
+content read; a persistent disappearance or `owner A -> allowed B` retarget already present at either
+checked seam fails before that seam's replacement-leaf work. A leaf-only recheck is not evidence that
+the captured owner stayed stable, and mutation after the final check remains a pathname race. The
 full read policy applies Git-compatible ignore rules independently to the normalized supplied path
 and resolved canonical target; each view requires every parent directory to remain traversable
 before a leaf negation or nested policy can apply. Either view's ignored ancestor or target denies,
@@ -276,22 +297,57 @@ so a symlink alias cannot bypass policy on either name. [CAH-027](../user-storie
 return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
 remain M3 work.
 
-### Planned CAH-031 through CAH-037 — Keep tool authority in the harness
+### Planned CAH-031 through CAH-039 — Keep tool authority in the harness
 
 > As a user, I want model tool requests admitted through one typed registry and explicit bounded loop
 > so that neither the provider nor an MCP transport can execute or continue work directly.
 
 CAH-031 limits registration to four read capabilities and attaches ordered, content-suppressed
-instruction-scope metadata for the request and every model-visible result owner to successful reads.
-CAH-032 defines strict context/tool exchange
-values, including a bounded positional opaque-continuation item type, without dispatch. CAH-033
-admits a complete response before either publication or dispatch,
-CAH-034 rejects duplicate JSON member names recursively before ordinary decoding can collapse them,
-then discovers and atomically admits applicable instructions for every successful result scope before
-any replay. CAH-035 generalizes that monotonic context rule only to four model
-turns and three sequential calls with cumulative limits. CAH-036 requests
+instruction-scope metadata for the native operation's execution-time canonical request scope and
+every model-visible result owner to successful reads. Empty-list/no-match success still carries the
+canonical scope, and the supplied alias is never re-resolved after dispatch. Every later instruction
+bundle must report that exact captured `canonical_scope` before merge, so replacing the canonical
+label with an allowed alias to another target fails closed. This does not prove object identity
+against same-label replacement, which remains part of deferred descriptor-relative hardening.
+CAH-031's canonical result projection admits integers only in the signed 64-bit range, caps the
+complete wrapped envelope at 64 object/list levels with the outer `result` object at depth 1, and
+uses one 65,536-unit pre-serialization work budget to bound width before sorting/encoding. It maps a
+defensive serializer `RecursionError`/`ValueError` to the fixed `invalid_read_tool_result`. CAH-030
+preserves each CAH-025 canonical-depth precedence rank, including legal gaps, and CAH-032 copies that exact value
+into provider context rather than deriving a rank from list position. CAH-032 otherwise defines
+strict context/tool exchange values, including a bounded positional opaque-continuation item type,
+without argument interpretation or dispatch. Its exact-string and four request-collection cardinality
+gates for conversation, legacy instructions, repository context, and tools run before UTF-8,
+projection, or serialization. CAH-038 owns bounded canonical tool definitions,
+trusts only four exact native schema generators, and consumes expected Pydantic annotations only
+inside its metered shape-directed pass.
+CAH-033 admits a complete response before either publication or dispatch.
+Normal provider-neutral text carriers are exact built-in strings capped at 8,192 UTF-8 bytes. A
+provider adapter must detect larger text at its first producer and emit only the fixed content-free
+8,193 overflow observation; CAH-033 owns conversion to the harness limit outcome. CAH-036 also uses an
+iterative mapped-empty SDK pump and withholds raw terminal tuples until EOF, so unbounded adapter
+retention, recursive event chains, and post-terminal SDK values cannot bypass core admission.
+CAH-032 construction and provider mapping reject malformed names or arguments above 16 KiB before
+CAH-039. For a reachable admitted carrier, after unknown-tool lookup CAH-039 iteratively preflights
+the complete argument payload with one
+quote-and-escape-aware 16,384-byte scanner: root object depth is 1, maximum structural depth is 64,
+and numeric tokens must use signed 64-bit JSON integer grammar without a fraction or exponent before
+Python conversion. Its subsequent pair-preserving decode uses a rejecting `parse_constant` callback
+for `NaN`, `Infinity`, and `-Infinity`; an iterative walk rejects duplicate decoded member names at
+every admitted object depth. Structural/numeric failure, a rejected constant, or defensive decoder
+`RecursionError`/`ValueError` maps to `invalid_read_tool_input`. CAH-039's registry-only factory calls
+CAH-038 internally; its catalog owns the exact CAH-031 registry identity and advertised definitions,
+then returns a prepared invocation
+bound to that same executor entry or a fixed error without dispatching. CAH-034 consumes that exact
+catalog; cross-catalog identity mismatch is a session failure before handler I/O, result replay, or
+follow-up provider work. It then may dispatch and discover and
+atomically admit instructions for every successful result scope before any replay.
+CAH-035 generalizes that monotonic context rule only to four model
+turns and three sequential calls with cumulative session limits; CAH-032 independently rechecks the
+complete-request cap for each cumulative snapshot. CAH-036 requests
 `reasoning.encrypted_content` on every stateless OpenAI turn so replay is available, but keeps that
-opaque payload out of policy and evidence. CAH-037 explicitly composes the four-turn, 120-second,
+opaque payload out of policy and evidence; exact SDK reasoning IDs and encrypted strings are
+character- and UTF-8-bounded before canonical JSON construction. CAH-037 explicitly composes the four-turn, 120-second,
 4,096-byte, three-call M2 profile instead of inheriting defaults. A future MCP client must enter
 through a generalized registry and separate remote-trust design; the local M2 registry is not a
 direct MCP compatibility claim.

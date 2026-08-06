@@ -40,7 +40,8 @@ validated hard limits, per-session accounting, deterministic deadline and cleanu
 transcript-v3 loop-limit evidence with v1/v2/v3 replay. CAH-023 adds SDK-free provider configuration,
 an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composition, deterministic
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
-protocol v1 is unchanged. CAH-024 through CAH-037 are implementation-ready but still planned as the
+protocol v1 is unchanged. The 16 dependency-ordered M2 stories CAH-024 through CAH-039 are
+implementation-ready but still planned as the
 M2 read-only vertical slice. They proceed from workspace and instruction boundaries through native
 reads, attributable context, a typed read registry, provider-neutral function calling, atomic
 tool-aware response admission, a bounded iterative loop, strict OpenAI mapping, and deterministic
@@ -195,10 +196,13 @@ For M2, a plain task enters **initial** context selection with scope `.` and emp
 seam. An injected request discovers instructions for its supplied scope and every validated,
 canonical-distinct focus path before selecting focus content. Search stays rooted at the supplied
 scope with fixed depth and match bounds, while every first-occurrence match owner contributes to the
-required instruction union before its excerpt becomes visible. A successful native read contributes
-ordered local `instruction_scopes` for its requested path and every model-visible result owner. The
-loop atomically enriches later requests with every applicable binding before result replay or another
-provider start. Planned CAH-037 explicitly composes the M2 limit profile as four model turns,
+required instruction union before its excerpt becomes visible. All projections validate before I/O;
+root discovery/fold/check is first, focus work precedes search, and each search result's captured
+canonical request scope must equal the root snapshot before its matches are inspected or another
+search starts. A successful native read contributes ordered local `instruction_scopes` for its
+execution-time canonical request scope and every model-visible result owner. The loop atomically
+enriches later requests with every applicable binding before result replay or another provider start.
+Planned CAH-037 explicitly composes the M2 limit profile as four model turns,
 120 provider-work seconds, 4,096 assistant-output bytes, and three observed tool calls; it does not
 inherit the current
 one-turn/one-call constructor defaults. Explicit OpenAI selection also authorizes bounded,
@@ -225,9 +229,9 @@ dependency-resolution changes commit `uv.lock`.
 | Child-process startup and display of child failures | Ink TUI | A prevalidated Linux `uv` starts the prepared Python environment, which is terminated when the TUI exits. |
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
-| Workspace path containment | Python workspace boundary | Planned in CAH-024: one immutable canonical root resolves contained, workspace-relative targets; later tools recheck at access time. |
+| Workspace path containment | Python workspace boundary | Planned in CAH-024: one pure 4,095-byte/256-component/255-byte-name lexical gate feeds an immutable canonical root that resolves contained, workspace-relative targets; later tools delegate the gate and recheck at access time. |
 | Context selection | Python context subsystem | Planned in CAH-026, CAH-025, then CAH-027 through CAH-030: context items retain source separately from candidate-owner applicability, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
-| Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel and typed instruction-scope metadata for requested and returned paths; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
+| Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel and typed instruction-scope metadata for the native execution-time canonical request scope and returned-path owners; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
 | Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs and explicitly typed non-lifecycle evidence are persisted after admission. |
 | Visible conversation, plan, tools, errors, and diffs | Ink TUI | Visible state is reduced from runtime events. |
@@ -501,7 +505,9 @@ CAH-024 through CAH-030 refine that subsystem into single-responsibility units. 
 owns the canonical workspace boundary, a shared hard-deny/read policy, scoped `AGENTS.md` discovery,
 native listing,
 bounded text reads, literal search, and atomic context selection with inclusion and omission
-evidence. CAH-026's pure lexical/hard-deny helpers are reused by CAH-025 even though instruction
+evidence. CAH-024 owns the sole pure path grammar and inclusive 4,095-byte,
+256-normalized-component, and 255-byte-name work budgets; CAH-026 delegates it, maps repository
+errors, and adds the pure hard-deny helper reused by CAH-025 even though instruction
 candidates are exempt from `.gitignore`; ordinary-read limits and errors are not. A present ignore
 policy source must itself resolve inside the workspace, avoid canonical hard denial, and survive an
 immediate pre-read recheck while its candidate owner still controls rule scope. CAH-025 preserves each
@@ -512,26 +518,71 @@ the exact supplied scope. Later enrichment admits every required owner bundle at
 removing earlier context. Each filesystem operation re-resolves immediately before access and reports
 only workspace-relative provenance. CAH-031 then exposes those handlers through the smallest generic,
 typed read registry needed by the M2 loop, including one ordered harness-only `instruction_scopes`
-extractor for each successful read; later E4 work extends that seam for side effects.
+extractor for each successful read. Each extractor starts from canonical provenance captured by the
+native operation's final access-time admission—including empty-list and no-match successes—rather
+than re-resolving the original alias. CAH-031's canonical result projection admits only finite,
+acyclic JSON values whose integers fit the signed 64-bit range and whose complete wrapped envelope is
+at most 64 levels deep with the outer `result` object at depth 1. A 65,536-unit pre-serialization work
+budget bounds width before sorting/encoding; a defensive serializer `RecursionError`/`ValueError`
+becomes the fixed `invalid_read_tool_result`. Later E4 work extends the registry seam for side effects.
 
-CAH-032 through CAH-036 refine the provider-neutral tool exchange, atomic full-response admission,
-one request/call/result/response round trip, bounded iteration, and strict OpenAI Responses
-translation. A response is fully buffered and validated before final text is published or a tool is
-dispatched. After exact tool lookup, CAH-034 alone performs duplicate-aware, pair-preserving recursive
-JSON-object decoding and rejects repeated decoded member names before dictionary construction. The
-admitted object must then contain the exact advertised key set before native Pydantic validation can
-apply defaults; direct Python callers keep the unchanged native models and defaults.
+The path numbers are harness budgets rather than filesystem portability claims. Linux pathname/name
+limits and WSL DrvFS behavior vary, and an absolute root prefix consumes additional bytes. CAH-038
+may expose a coarse character `maxLength`, but CAH-039's native Pydantic step is authoritative for
+the byte/component/name invariant; CAH-031 does not add a second path parser.
+
+CAH-032 through CAH-039 refine the provider-neutral tool exchange, bounded tool definitions and
+arguments, atomic full-response admission, one request/call/result/response round trip, bounded
+iteration, and strict OpenAI Responses translation in documented dependency order. A response is fully
+buffered and validated before final text is published or a tool is dispatched. CAH-038 owns bounded
+canonical tool-definition construction. CAH-039's registry-only factory invokes that bridge and its
+atomic catalog owns the exact CAH-031 registry identity and re-exposes the resulting definitions
+advertised to the provider; prepared calls
+retain that same registry entry so composition cannot validate against one catalog and execute
+another. Cross-catalog identity drift is a session invariant failure, not a tool error. CAH-032
+construction and CAH-036 mapping reject malformed
+tool-name carriers or arguments above 16 KiB before CAH-039. For a reachable admitted carrier, after
+exact tool lookup CAH-039 iteratively preflights the complete argument payload once:
+the quote-and-escape-aware scanner admits at most 16,384 bytes, counts the root object as structural
+depth 1, rejects depth above 64, and admits numeric tokens only when they use signed 64-bit JSON
+integer grammar without a fraction or exponent, all before Python integer conversion. A rejecting
+`parse_constant` callback then excludes `NaN`, `Infinity`, and `-Infinity` during pair-preserving
+decode. An iterative walk rejects duplicate decoded names at every admitted object depth before
+dictionary construction. Structural or numeric failure, a rejected constant, or defensive decoder
+`RecursionError`/`ValueError` maps to `invalid_read_tool_input`. The admitted object must then contain
+the exact advertised key set before native Pydantic validation can apply defaults; direct Python
+callers keep the unchanged native models and defaults. CAH-039 returns a content-suppressed prepared
+invocation or fixed error without dispatching. CAH-034 consumes that handoff and owns dispatch,
+instruction enrichment, replay, and the follow-up transition.
+CAH-032 also admits every direct provider string as an exact built-in value with an O(1) character
+ceiling before UTF-8, escaping, or request serialization, and gates exact tuple counts for
+conversation, legacy instructions, repository context, and tools before iteration. CAH-038 invokes
+schema generation only for four exact native Pydantic model
+identities and handles expected `title`/`default` annotations inside its bounded shape-directed copy,
+not a generic cleanup walk. CAH-036 similarly pre-bounds exact reasoning `id` and
+`encrypted_content` strings before constructing canonical replay JSON. CAH-033's provider models own
+the shared 8,192-byte normal-text cap and content-free 8,193 overflow observation; CAH-036 saturates at
+the SDK producer before unbounded retention or joining. Mapped-empty SDK events use an iterative pump,
+and raw terminal tuples remain private until SDK EOF.
 CAH-034/035 use one cooperative scheduling seam before dispatch, after each bounded synchronous
 dispatch/discovery/merge stage, and before the next provider start. The seam unconditionally yields
 to the shared event loop outside locks, then runs the existing cancellation/deadline guard, so a
 readable cancel command can latch before the guard observes it. Successful dispatch results,
 instruction bundles, merged context, history, and the bounded next request remain local candidates
-until the final guard passes. Each successful result's requested path and every model-visible returned
-path owner are exposed only as local `instruction_scopes` and processed in order through discovery,
-guard, merge, and guard before result replay. Repeats for one candidate-owner scope are idempotent only
+until the final guard passes. Each successful result's execution-time canonical request scope and
+every model-visible returned path owner are exposed only as local `instruction_scopes` and processed
+in order through discovery, guard, exact equality between the discovered bundle's `canonical_scope`
+and the captured scope, merge, and guard before result replay. The original request alias is never
+post-dispatch authority, and an allowed retarget of the captured canonical label fails rather than
+substituting another scope. Repeats for one candidate-owner scope are idempotent only
 when source, content, and bytes are unchanged; the same source under another owner remains a distinct binding. A
 late ancestor enters before existing descendants, while sibling scopes retain explicit applicability
-rather than an invented cross-sibling precedence. Known tool failures keep context unchanged.
+rather than an invented cross-sibling precedence. Numeric precedence is canonical owner depth:
+CAH-030 stores and CAH-032 projects the exact CAH-025 rank rather than deriving it from tuple position
+or renumbering it after late insertion. Known tool failures keep context unchanged. That closed set
+includes CAH-031's fixed `read_tool_output_too_large`; a native-max result that overflows only after
+wrapping replays the small error envelope with no instruction scopes or result content instead of
+terminating the session.
 Opaque provider continuation is a bounded, content-suppressed item in the same ordered request
 history immediately before its call or assistant item, so neither core nor an adapter side channel
 loses its replay position.

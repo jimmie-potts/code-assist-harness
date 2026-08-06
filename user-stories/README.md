@@ -49,12 +49,13 @@ CAH-021 adds the first injected fake-backed turn, strict stream grammar, termina
 serialization, and bounded usage evidence. CAH-022 adds four validated hard limits, fresh per-session
 tracking, deterministic deadline and cleanup supervision, and transcript-v3 loop evidence with
 v1/v2/v3 replay. CAH-023 adds the strict OpenAI Responses adapter plus explicit cross-language
-provider/model configuration while preserving the mock default. M0 and M1 are complete. CAH-024
-through CAH-037 are the 14 implementation-ready M2 units and all remain **Planned**. CAH-024 is the
-next dependency checkpoint; the sequence then adds shared read policy, scoped instructions and handlers,
-attributable context, a typed registry, provider-neutral tool exchange, atomic response admission,
-complete result-path instruction coverage through one explicit round trip, the bounded agent loop,
-strict OpenAI tool mapping, and deterministic vertical-slice evaluation.
+provider/model configuration while preserving the mock default. M0 and M1 are complete. The 16
+implementation-ready M2 units, CAH-024 through CAH-039 in the dependency order below, all remain
+**Planned**. CAH-024 is the next dependency checkpoint; the sequence then adds shared read policy,
+scoped instructions and handlers, attributable context, a typed registry, bounded provider
+definitions, provider-neutral tool exchange, atomic response and argument admission, complete
+result-path instruction coverage through one explicit round trip, the bounded agent loop, strict
+OpenAI tool mapping, and deterministic vertical-slice evaluation.
 
 ## Dependency-ordered implementation sequence
 
@@ -83,28 +84,32 @@ strict OpenAI tool mapping, and deterministic vertical-slice evaluation.
 | 21 | [CAH-029: Search repository text literally](cah-029-search-repository-text.md) | [Literal repository search](../docs/lessons/cah-029-literal-text-search.md) | M2 | Planned | CAH-027, CAH-028 |
 | 22 | [CAH-030: Build budgeted repository context](cah-030-build-budgeted-context.md) | [Budgeted repository context](../docs/lessons/cah-030-budgeted-context.md) | M2 | Planned | CAH-025, CAH-027, CAH-028, CAH-029 |
 | 23 | [CAH-031: Register and dispatch read-only tools](cah-031-register-read-tools.md) | [Read-tool registry](../docs/lessons/cah-031-read-tool-registry.md) | M2 | Planned | CAH-027, CAH-028, CAH-029 |
-| 24 | [CAH-032: Define the provider-neutral tool contract](cah-032-define-provider-tool-contract.md) | [Provider-neutral tool contract](../docs/lessons/cah-032-provider-tool-contract.md) | M2 | Planned | CAH-030, CAH-031 |
-| 25 | [CAH-033: Stage and validate one tool-aware response](cah-033-stage-and-validate-tool-aware-response.md) | [Tool-aware response admission](../docs/lessons/cah-033-tool-aware-response-admission.md) | M2 | Planned | CAH-032 |
-| 26 | [CAH-034: Run one read-tool round trip](cah-034-run-one-read-tool-round-trip.md) | [One read-tool round trip](../docs/lessons/cah-034-one-read-tool-round-trip.md) | M2 | Planned | CAH-030, CAH-031, CAH-032, CAH-033 |
-| 27 | [CAH-035: Run the bounded agent loop](cah-035-run-bounded-agent-loop.md) | [Bounded agent loop](../docs/lessons/cah-035-bounded-agent-loop.md) | M2 | Planned | CAH-034 |
-| 28 | [CAH-036: Map OpenAI Responses tool calls](cah-036-map-openai-tool-calls.md) | [OpenAI tool-call mapping](../docs/lessons/cah-036-openai-tool-calls.md) | M2 | Planned | CAH-035 |
-| 29 | [CAH-037: Prove the read-only assistant](cah-037-prove-read-only-assistant.md) | [Read-only assistant evaluation](../docs/lessons/cah-037-read-only-assistant-evaluation.md) | M2 | Planned | CAH-025 through CAH-036 |
+| 24 | [CAH-038: Canonicalize provider tool definitions](cah-038-canonicalize-provider-tool-definitions.md) | [Bounded provider tool definitions](../docs/lessons/cah-038-bounded-provider-tool-definitions.md) | M2 | Planned | CAH-031 |
+| 25 | [CAH-032: Define the provider-neutral tool contract](cah-032-define-provider-tool-contract.md) | [Provider-neutral tool contract](../docs/lessons/cah-032-provider-tool-contract.md) | M2 | Planned | CAH-030, CAH-031, CAH-038 |
+| 26 | [CAH-033: Stage and validate one tool-aware response](cah-033-stage-and-validate-tool-aware-response.md) | [Tool-aware response admission](../docs/lessons/cah-033-tool-aware-response-admission.md) | M2 | Planned | CAH-032 |
+| 27 | [CAH-039: Admit one provider tool argument object](cah-039-admit-provider-tool-arguments.md) | [Provider tool-argument admission](../docs/lessons/cah-039-provider-tool-argument-admission.md) | M2 | Planned | CAH-031, CAH-032, CAH-038 |
+| 28 | [CAH-034: Run one read-tool round trip](cah-034-run-one-read-tool-round-trip.md) | [One read-tool round trip](../docs/lessons/cah-034-one-read-tool-round-trip.md) | M2 | Planned | CAH-030, CAH-031, CAH-032, CAH-033, CAH-039 |
+| 29 | [CAH-035: Run the bounded agent loop](cah-035-run-bounded-agent-loop.md) | [Bounded agent loop](../docs/lessons/cah-035-bounded-agent-loop.md) | M2 | Planned | CAH-034 |
+| 30 | [CAH-036: Map OpenAI Responses tool calls](cah-036-map-openai-tool-calls.md) | [OpenAI tool-call mapping](../docs/lessons/cah-036-openai-tool-calls.md) | M2 | Planned | CAH-035 |
+| 31 | [CAH-037: Prove the read-only assistant](cah-037-prove-read-only-assistant.md) | [Read-only assistant evaluation](../docs/lessons/cah-037-read-only-assistant-evaluation.md) | M2 | Planned | CAH-024 through CAH-036, CAH-038, CAH-039 |
 
 See [backlog.md](backlog.md) for the milestone roadmap and the outcome-level E0-E9 backlog.
 
 ## M2 learning emphasis
 
-CAH-024 through CAH-026 and CAH-030 through CAH-037 are core learning units. Give the closest review
-attention to CAH-031 through CAH-036: they expose the registry boundary, provider-neutral LLM/tool
-grammar, atomic response admission, one complete function-calling exchange, the bounded
-harness-owned loop, scoped context evolution, and strict OpenAI response mapping. CAH-037 then tests whether those parts
-produce grounded behavior rather than merely
-type-checking in isolation.
+CAH-024 through CAH-026, CAH-030 through CAH-037, and CAH-039 are core learning units. Give the
+closest review attention to the registry-to-evaluation sequence—CAH-031, CAH-038, CAH-032, CAH-033,
+CAH-039, then CAH-034 through CAH-037. It exposes the registry boundary, provider-neutral LLM/tool
+grammar, atomic response and argument admission, one complete function-calling exchange, the
+bounded harness-owned loop, scoped context evolution, and strict OpenAI response mapping. CAH-037
+then tests whether those parts produce grounded behavior rather than merely type-checking in
+isolation.
 
-CAH-027 through CAH-029 are supporting implementation units. Their correctness and failure tests are
-still required, but their lessons stay shorter because they implement the filesystem primitives
-consumed by the higher-value agentic design units. MCP remains a later transport/discovery adapter to
-the registry; M2 teaches the seam and trust boundary without adding a remote server or network path.
+CAH-027 through CAH-029 and CAH-038 are supporting implementation units. Their correctness and
+failure tests are still required, but their lessons stay shorter because they implement filesystem
+primitives or bounded definition plumbing consumed by the higher-value agentic design units. MCP
+remains a later transport/discovery adapter to the registry; M2 teaches the seam and trust boundary
+without adding a remote server or network path.
 
 ## Planning notes
 
@@ -168,5 +173,8 @@ the registry; M2 teaches the seam and trust boundary without adding a remote ser
   records the E3 story split, the decisions already fixed by the architecture, and the boundary
   between planned path containment and later filesystem access.
 - [2026-08-03 M2 read-only assistant planning](notes/2026-08-03-m2-read-only-assistant-planning.md)
-  records the 14-story vertical slice, learning priorities, exact loop and tool-exchange defaults,
+  records the 16-story vertical slice, learning priorities, exact loop and tool-exchange defaults,
   review-size policy, and the distinction between local function calling and a future MCP adapter.
+- [2026-08-03 PR 28 review churn learnings](notes/2026-08-03-pr-28-review-learnings.md) records the
+  complete finding taxonomy, contract-neighborhood audit, single-responsibility splits, and
+  pre-review evidence adopted to prevent repeated review rounds.

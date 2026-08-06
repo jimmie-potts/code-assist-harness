@@ -49,6 +49,8 @@ the separate 10,000-visited bound limits traversal effort.
 - **Alias tie-break:** prefer the ordinary target path; otherwise use the lowest alias label.
 - **Exact symlink evidence:** `is_symlink` describes the selected candidate's final entry, not the
   canonical target in general.
+- **Execution-time request scope:** even an empty list records the canonical directory actually
+  admitted and inspected, so a later alias retarget cannot rewrite the result's meaning.
 
 ## Architecture and design
 
@@ -65,29 +67,46 @@ CAH-030 context and transcript/evidence are later/unchanged; no content is read 
 ```
 
 Requests permit 1-500 returned items and recursive depth 1-8. Traversal stops with a safe failure
-above 10,000 visited entries. Results contain canonical labels and aggregate omission counts, never
-the names of denied or ignored descendants.
+above 10,000 visited entries. Results contain the content-suppressed execution-time canonical
+request scope, canonical entry labels, and aggregate omission counts, never the names of denied or
+ignored descendants.
+Runtime calls these methods on one
+`RepositoryMetadataReader(policy: RepositoryReadPolicy)`: `list_files(ListFilesRequest) ->
+ListFilesResult` and `stat_path(StatPathRequest) -> StatPathResult`. The reader retains the exact
+session policy object; it never reconstructs the workspace boundary or a second ignore cache.
+`ListFilesRequest.path` defaults to `.`, while `StatPathRequest.path` is required and has no default.
+The request path first crosses CAH-024/026's inclusive 4,095-byte, 256-component, and
+255-byte-name lexical budget. An above-bound value is `invalid_repository_path` before policy or
+enumeration. These application limits do not claim that every WSL mount accepts an endpoint name.
 
 ## Practical walkthrough
 
-1. Validate the strict request and admit the root through CAH-026.
+1. Validate the strict request and shared path budget, then perform final boundary/policy admission immediately before root
+   enumeration or direct stat inspection; retain that canonical target as result provenance.
 2. Enumerate native directory entries, applying policy before inclusion or descent.
 3. Never descend through directory symlinks or open special objects.
 4. Rank candidates by `(is_symlink, original_label_utf8)`, so any ordinary candidate wins and an
    aliases-only set chooses its lowest original label; copy that winner's exact `is_symlink` value.
-5. Finish bounded candidate collection before sorting canonical winners and applying `max_items`,
-   then return explicit truncation.
-6. Recheck direct `stat_path` immediately before inspection.
+5. Preserve the final admitted directory as `canonical_request_scope`, including when no entry is
+   returned; finish bounded candidate collection before sorting canonical winners and applying
+   `max_items`, then return explicit truncation.
+6. For direct `stat_path`, copy canonical path and symlink evidence from that same final admission and
+   inspection; never reuse an earlier target label.
 
 ## Implementation code samples
 
 Planned pseudocode only:
 
 ```text
-for entry in bounded_walk(root, depth=request.max_depth):
+admitted_root = final_admit(request.path)
+for entry in bounded_walk(admitted_root, depth=request.max_depth):
     if policy.admits(entry) and supported(entry):
         results.add(canonical_metadata(entry))
-return sorted(results)[:request.max_items], truncation_summary
+return ListFilesResult(
+    canonical_request_scope=admitted_root.path,
+    entries=sorted(results)[:request.max_items],
+    **truncation_summary,
+)
 ```
 
 The walk owns effort limits; policy runs before a result or recursive step; canonical metadata avoids
@@ -102,6 +121,10 @@ earlier alias merely because of iteration order.
 - A path replaced during inspection is rechecked and becomes a fixed safe failure.
 - An alias encountered before its ordinary target does not win: bounded collection finishes before
   canonical winner selection and truncation.
+- An empty `alias -> A` listing keeps `A` as its canonical request scope even if the alias is
+  retargeted to `B` immediately after the native operation returns.
+- If an allowed alias changes from `A` to `B` immediately before enumeration or direct stat, the
+  operation inspects and reports `B`; it never reports `A` beside `B` metadata.
 
 ## Production expansion
 
@@ -140,11 +163,14 @@ visit bound. An index is justified only with a tested freshness contract.
 3. Add the ordinary target after both aliases and predict the exact `is_symlink` value.
 4. Test depth and item limits below, at, and above.
 5. Teach back: why are visited entries and returned entries separate budgets?
+6. Retarget an empty directory alias after return and explain why the immutable scope must still name
+   the directory actually listed.
 
 ## Key takeaways
 
 - The harness owns bounded repository discovery.
 - Policy-before-descent and deterministic canonical ordering are the key invariants.
+- Empty success still carries execution-time provenance; the request alias is not later authority.
 - Indexes improve scale but add freshness and operational costs.
 
 ## Glossary

@@ -68,6 +68,12 @@ such as `"\ud800"`. Before constructing a path, CAH-024 requires a strict UTF-8 
 round-trip with exact equality. Valid multibyte text remains unchanged; a lone surrogate fails before
 the filesystem can turn it into a platform-dependent error or existence signal.
 
+The lexical gate also bounds work before a filesystem call: at most 4,095 strict-UTF-8 bytes in the
+raw supplied spelling, 256 normalized non-dot components, and 255 UTF-8 bytes in one component. All
+three endpoints are inclusive. Those are harness budgets, not a promise that every Linux or WSL
+mount can create an endpoint path. The selected root consumes additional pathname bytes, Linux
+mounts can report different limits, and Windows-backed DrvFS has different name behavior.
+
 ## Key concepts
 
 - **Canonical root:** the resolved absolute directory that anchors every operation.
@@ -83,6 +89,8 @@ the filesystem can turn it into a platform-dependent error or existence signal.
 - **Fixed failure:** a stable code/message pair that reveals neither a host path nor raw OS text.
 - **Unicode-scalar admission:** strict UTF-8 round-trip validation, without normalization, before
   any model-facing path reaches a filesystem API.
+- **Path work budget:** one raw-byte ceiling plus normalized-component and per-name ceilings, owned
+  by a pure CAH-024 primitive and reused without duplication downstream.
 
 ## Architecture and design
 
@@ -92,6 +100,7 @@ select one root -- child argv --> runtime composition
 render validated events                |
                                        v
                           [CAH-024 WorkspaceBoundary]
+                          pure 4095-byte/256-part/255-byte-name gate
                           canonical root + identity snapshot
                           relative path -> contained snapshot
                               |                    |
@@ -108,8 +117,9 @@ Evidence boundary: no protocol/transcript record in CAH-024; later evidence uses
 
 The TUI continues to select exactly one workspace and pass its canonical root at process startup.
 Python is authoritative after that handoff. `WorkspaceBoundary.from_path` captures the root;
-`resolve_existing` first rejects bytes-valued path-like inputs and strings that do not round-trip
-through strict UTF-8. It then accepts only a non-empty relative path, rejects NUL and every `..`,
+`resolve_existing` first delegates to `normalize_workspace_relative_path`, which rejects
+bytes-valued model input, over-bound values, and strings that do not round-trip through strict
+UTF-8. It then accepts only a non-empty relative path, rejects NUL and every `..`,
 follows symlinks, and returns the canonical target only when it remains inside the same root.
 
 Internal symlinks stay useful, but their aliases do not become durable provenance. Missing leaves
@@ -126,8 +136,8 @@ stable error codes. It does not create separate exception classes for each files
 1. Move the Python root invariant into top-level `workspace.py` and have runtime startup delegate to
    `WorkspaceBoundary.from_path`.
 2. Capture the root's canonical path and identity in a frozen value.
-3. Validate strict Unicode-scalar/UTF-8 round-trip and relative syntax before touching the requested
-   path.
+3. Apply the 4,095-byte/256-component/255-byte-name budget, strict Unicode-scalar/UTF-8 round-trip,
+   and relative syntax before touching the requested path.
 4. Resolve strictly, verify component-aware containment, and compute the canonical relative label.
 5. Recheck root identity before returning the snapshot.
 6. Test normal paths, internal links, escaping links, missing targets, and observable root
@@ -178,6 +188,7 @@ error content.
 | --- | --- | --- | --- |
 | `/etc/passwd` or `../outside` | input admission | `invalid_workspace_path` before resolution | parameterized syntax tests |
 | lone surrogate or bytes-valued path | string admission | `invalid_workspace_path` with zero filesystem calls | injected filesystem-spy test |
+| path above any shared byte/component/name ceiling | lexical work admission | `invalid_workspace_path` with zero `Path`, root, or filesystem calls | independent 4,094/4,095/4,096, 254/255/256, and 255/256/257 tests |
 | internal file/directory symlink | canonical containment | accept and report target-relative path | symlink happy-path tests |
 | symlink to outside | canonical containment | `workspace_path_outside` | file, directory, and missing-descendant tests |
 | missing or dangling in-root target | strict resolution | `workspace_path_not_found` | missing-path tests |

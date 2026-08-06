@@ -5,7 +5,7 @@ A user story is the delivery contract; a lesson is the learning companion that e
 concepts, architecture, design choices, practical failure modes, and how the same problem is often
 handled in a production organization.
 
-The lesson set maps one-to-one to the 29 implementation-ready stories. Outcome-level epics do
+The lesson set maps one-to-one to the 31 implementation-ready stories. Outcome-level epics do
 not receive lesson files until they are refined into a story with acceptance criteria. This keeps a
 lesson attached to work that can actually be built and verified.
 
@@ -65,19 +65,23 @@ not add or revise presentations unless the user explicitly reverses this freeze.
 | 21 | CAH-029 | [Literal repository search](cah-029-literal-text-search.md) | Planned |
 | 22 | CAH-030 | [Budgeted repository context](cah-030-budgeted-context.md) | Planned |
 | 23 | CAH-031 | [Read-tool registry](cah-031-read-tool-registry.md) | Planned |
-| 24 | CAH-032 | [Provider-neutral tool contract](cah-032-provider-tool-contract.md) | Planned |
-| 25 | CAH-033 | [Tool-aware response admission](cah-033-tool-aware-response-admission.md) | Planned |
-| 26 | CAH-034 | [One read-tool round trip](cah-034-one-read-tool-round-trip.md) | Planned |
-| 27 | CAH-035 | [Bounded agent loop](cah-035-bounded-agent-loop.md) | Planned |
-| 28 | CAH-036 | [OpenAI tool-call mapping](cah-036-openai-tool-calls.md) | Planned |
-| 29 | CAH-037 | [Read-only assistant evaluation](cah-037-read-only-assistant-evaluation.md) | Planned |
+| 24 | CAH-038 | [Bounded provider tool definitions](cah-038-bounded-provider-tool-definitions.md) | Planned |
+| 25 | CAH-032 | [Provider-neutral tool contract](cah-032-provider-tool-contract.md) | Planned |
+| 26 | CAH-033 | [Tool-aware response admission](cah-033-tool-aware-response-admission.md) | Planned |
+| 27 | CAH-039 | [Provider tool-argument admission](cah-039-provider-tool-argument-admission.md) | Planned |
+| 28 | CAH-034 | [One read-tool round trip](cah-034-one-read-tool-round-trip.md) | Planned |
+| 29 | CAH-035 | [Bounded agent loop](cah-035-bounded-agent-loop.md) | Planned |
+| 30 | CAH-036 | [OpenAI tool-call mapping](cah-036-openai-tool-calls.md) | Planned |
+| 31 | CAH-037 | [Read-only assistant evaluation](cah-037-read-only-assistant-evaluation.md) | Planned |
 
 CAH-023 completes the M1 learning sequence by locating the first real-provider adapter behind the
 harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024
-through CAH-037 form the planned M2 sequence. The strongest review emphasis falls on context
-ownership in CAH-025/026/030 and especially the registry, provider tool exchange, atomic response
-admission, round trip, bounded loop, OpenAI mapping, and evaluation in CAH-031 through CAH-037. All
-M2 lessons are Markdown-only and use compact text diagrams.
+through CAH-039 form the planned M2 inventory in the documented dependency order above. The
+strongest review emphasis falls on context ownership in CAH-025/026/030 and especially the registry,
+provider tool exchange, atomic response admission, argument trust boundary, round trip, bounded
+loop, OpenAI mapping, and evaluation in CAH-031 through CAH-039. CAH-038 remains a supporting schema
+bridge even though its dependency position precedes CAH-032. All M2 lessons are Markdown-only and
+use compact text diagrams.
 
 ## Required lesson structure
 

@@ -35,6 +35,9 @@ or architecture decision that would require human agreement.
 - **Delivered production-code churn:** Not started; replace with additions plus deletions before Done.
 - **Counted paths:** `src/code_assist_harness/` and `tui/src/` additions plus deletions.
 - **Excluded from count:** tests, docs, fixtures, lockfiles, and generated artifacts.
+- **Planning PR scope:** name the one contract neighborhood refined here, or justify why multiple
+  neighborhoods cannot be reviewed independently. Keep milestone-wide planning to a compact
+  dependency/responsibility skeleton.
 - **Split rule:** stop and refine another story before review if the unit gains a second
   responsibility or is likely to exceed roughly 600 changed production lines. Do not pad a smaller
   coherent implementation.
@@ -72,6 +75,29 @@ match the delivered behavior. Do not add or revise presentation files while the 
 - Name tempting adjacent behavior and its later owner.
 - Exclude extra providers, interfaces, platforms, side effects, or infrastructure not required by the
   single responsibility.
+
+## Pre-review adversarial audit
+
+Replace every prompt with story-specific evidence or an explicit `N/A` before opening the PR.
+Generic checkmarks are not evidence.
+
+| Audit | Required evidence or explicit N/A |
+| --- | --- |
+| Identity ledger | Distinguish the lexical/request alias, execution-time canonical target, semantic owner, provenance source, cache or accounting identity, and model-visible label. |
+| End-to-end contract | Trace producer -> carrier -> consumer -> observable side effect across upstream/downstream stories, the composition root, and evaluation wiring. Record exact factory/method signatures, return variants, carrier field names, and type-owner/import direction; prove each pseudocode call composes without an invented wrapper or reverse dependency. Trace each bound to the first producer so no earlier adapter/constructor/fake retains, scans, joins, recurses over, or serializes an unbounded value. |
+| Failure and atomicity | Cover empty, no-match, partial, error, cancellation, deadline, and rollback paths; name what remains uncommitted and what executes zero times. Give each async checkpoint/transition an exact continue/stop return or private sentinel, show every caller consuming it, and stage synchronous value/error candidates through their mandatory following seam. |
+| Reachable boundaries | Exercise below, at, and above each limit through the real upstream producer and the real scheduler seam; do not rely only on impossible synthetic states. |
+| Closed grammar and cardinality | Define exact accepted variants, canonical order, duplicate policy, structural depth/item/byte ceilings, and safe mappings for parser or runtime limit failures. |
+| Real producer and repeated snapshots | Use framework/SDK/native-generated values in addition to hand-built fixtures. Mutate defaults, required markers, annotations, optional execution-context fields, and every added/done/completed or producer/consumer snapshot that repeats identity or content. For SDK streams, prove mapped-empty observations pump iteratively and raw terminal tuples remain staged through EOF or iterator failure. |
+| Failure vocabulary and precedence | Name the owner, exception/result type, exact safe code/message, replayable tool error versus session terminal, diagnostic behavior, and cancellation/deadline precedence for every failure branch. |
+| Accounting scope and adoption | State whether each limit is per scalar, per result, per request snapshot, or cumulative per session. Identify the guard-owned linearization point and prove cancellation/deadline both before and after charge/adoption. |
+| Lazy async lifecycle | Separate awaitable lock/cleanup edges from the no-await critical section. Trace admission charge -> synchronous lazy start -> one-time iterator claim -> immutable installed-state carrier -> final clock read -> one non-failing pointer commit -> terminal-to-EOF -> cleanup. Prove pre/post-commit winner semantics, joined uninstalled cleanup, an explicitly consumed continuation result, one cleanup owner, force-reap before continuation, and session-wide watcher lifetime. |
+| Composition identity | Name the sole factory and explicit runtime profile. Prove exact boundary/service/catalog/definition/handler identities through construction, request advertisement, validation, dispatch, and evaluation wiring; reject same-shaped cross-wiring. |
+| Publication and evidence completeness | Define the atomic final publication transaction and whether evidence is complete, partial, or absent. Validate aggregate usage before whole-output reservation and publish neither on rejection. |
+| Runtime migration surface | If a default path, opaque ID, lifecycle, transcript, fixture, or cancellation behavior changes, enumerate all external consumers and the exact compatibility or migration decision. |
+| Mechanical artifact integrity | Render changed diagrams and nearby prose; prove every success/error arrow reaches the correct owner, code fences are balanced, pseudocode uses exact fields/signatures, and no stale or duplicate handoff prose remains. |
+| Artifact parity | Compare the story, lesson, diagram, pseudocode, conceptual docs, and test matrix for the same named stage order and failure precedence. |
+| Independent lenses | Name the completed security and identity/indirection review; end-to-end handoff and composition review; and provider/protocol, limits, and scheduler review, with concrete findings or explicit N/A. |
 
 ## Definition of done
 

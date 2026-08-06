@@ -110,6 +110,16 @@ Test the unconditional yield separately from awaited checkpoint gates: with no o
 installed, queue cancellation on the same loop and assert at synchronous guard entry that it already
 latched. An awaited `asyncio.Event` hook can pause a stage but is not evidence that the production
 yield still exists. Use injected clocks, never elapsed sleeps, for deadline/cancellation ties.
+Normal `cooperate_then_guard` return is the sole authorization for the next line; a losing guard raises
+the private session stop sentinel, which only the orchestration boundary consumes. Capture each
+bounded synchronous stage's value or exception, cross its mandatory following seam, then unwrap or
+map it; propagate `CancelledError` as task control only when the task's cancelling count is positive.
+Lazy start may await guard-lock acquisition and joined cleanup, but model charge through successful
+install is one no-await critical section: start, full operation-port validation, one event-iterator
+claim, immutable installed-turn carrier construction, final clock read, then one non-failing pointer
+assignment. A deadline after that assignment loses the transition. Join valid uninstalled-operation
+cleanup before terminal publication, and explicitly consume the continuation-cleanup result before
+argument admission or later work.
 
 Treat a tool-aware provider response as one atomic admission transaction. Buffer and validate its
 complete closed grammar before publishing assistant text or dispatching a requested tool; an
@@ -117,19 +127,66 @@ invalid, incomplete, mixed, multiple-call, or failed response must cause neither
 read handlers are synchronous and bounded rather than preemptively cancellable: check cancellation
 and deadlines before and after execution, discard a late result when cancellation wins, and do not
 claim an in-flight synchronous handler was reaped.
+Provider text is bounded at its first producer, not only at final admission. Provider models own one
+shared 8,192-byte normal-text cap; normal delta/completion carriers require exact built-in strings and
+early character/UTF-8 gates. An adapter or fake represents larger text only with the content-free
+8,193 overflow observation, and the harness retains ownership of the limit outcome. SDK adapters use
+an iterative mapped-empty observation pump and withhold a raw terminal tuple until SDK EOF; an extra
+raw event or iterator exception discards that tuple.
 
-Keep provider tool arguments as bounded raw JSON until the harness-owned dispatch path. Decode with
-pair-preserving duplicate detection before constructing a dictionary: any repeated decoded member
-name at any object depth is `invalid_read_tool_input` before the exact-key gate, Pydantic validation,
-or tool I/O. Compare names by exact code point after JSON escape decoding, without case folding or
-Unicode normalization; an unknown tool lookup still wins before argument decoding.
+Use one CAH-024-owned pure lexical primitive for every model-facing workspace-relative path. Count
+the complete raw spelling before legal dot/separator normalization and admit at most 4,095 strict
+UTF-8 bytes, 256 normalized non-`.` components, and 255 strict-UTF-8 bytes per component. All three
+limits are inclusive; `.` denotes the root, `/` is the Linux separator, backslash is an ordinary
+filename character, and Unicode is never normalized or case-folded. Reject an over-bound value
+before `Path`, root inspection, policy, or filesystem I/O. CAH-026 may translate the fixed lexical
+failure but must delegate the tuple/limit decision; native request, context, and provider-tool paths
+must not create another grammar. These are deterministic harness work budgets, not `PATH_MAX`,
+`NAME_MAX`, or WSL DrvFS portability guarantees: mount limits vary and the selected absolute root
+adds bytes. JSON Schema `maxLength` counts characters rather than UTF-8 bytes, so a schema hint never
+claims to enforce this native byte/component/name contract.
+
+Keep provider tool arguments as bounded raw JSON until the harness-owned dispatch path. After
+unknown-tool lookup, preflight the complete 16-KiB argument payload with an iterative,
+quote-and-escape-aware brace/bracket scanner before pair-preserving decode. Count the root object as
+structural depth 1, admit at most 64 object/array levels, and never reset the payload/work bound for a
+subtree. Decode with `parse_constant` rejection and pair-preserving duplicate detection before
+constructing a dictionary. Reject `NaN`, `Infinity`, and `-Infinity`; check member-name uniqueness at
+every object depth within the admitted bound; and admit numeric tokens only as signed 64-bit JSON
+integers (no fraction or exponent). The quote-aware preflight enforces that numeric grammar before
+Python integer conversion. Map numeric overflow, rejected constants, defensive decoder
+`RecursionError`/`ValueError`, or duplicates to `invalid_read_tool_input` before the exact-key gate,
+Pydantic validation, or tool I/O. Compare names by exact code point after JSON escape decoding,
+without case folding or Unicode normalization.
 
 Before replaying any successful tool result to a provider, derive ordered local instruction scopes
-from the requested path and every model-visible returned path. Discover and fold every applicable
-instruction bundle through CAH-025/030, crossing the cooperative guard after each discovery and
-merge. Keep the result and every intermediate context candidate local until the complete scope set,
-context budgets, final checkpoint, and model admission pass. Any failure discards the transaction;
-known tool errors carry no instruction scopes and retain the prior context.
+from the native operation's execution-time canonical request scope and every model-visible returned
+path. The canonical request scope must come from the final access-time admission used by the native
+operation, survive empty-list and no-match successes, and remain content-suppressed; never
+re-resolve or fall back to the original request alias after dispatch. Discover and fold every
+applicable instruction bundle through CAH-025/030, crossing the cooperative guard after each
+discovery and merge. After each discovery guard and before merge, require the returned bundle's
+`canonical_scope` to exactly equal the captured scope; a retargeted canonical label fails without
+alias fallback. Keep the result and every intermediate context candidate local until the
+complete scope set, context budgets, final checkpoint, and model admission pass. Any failure
+discards the transaction; known tool errors carry no instruction scopes and retain the prior
+context.
+
+For every CAH-025 instruction candidate, capture the canonical candidate owner but re-admit that
+owner label immediately before the non-following leaf probe and again immediately before content
+read. Require both resolutions to remain the same canonical directory; a disappearance or
+allowed-to-allowed retarget already present at either checked seam fails as an unavailable
+instruction source before that seam's later work. Rechecking only the `AGENTS.md` leaf is
+insufficient because a replaced owner directory can silently redirect the whole candidate path.
+This is pathname snapshot hardening, not a claim that mutation after the final check cannot race.
+
+A CAH-025 instruction bundle is valid only when its unique owners form the strict root-to-nearest
+ancestor chain for its canonical file-parent or directory scope. Validate that topology at the
+result factory together with owner-depth precedence; downstream context code may trust the frozen
+bundle but must still compare its canonical scope with the caller's captured scope before merge.
+Canonical scope, source, and owner labels must come through one exact workspace-relative label
+validator before construction; reject absolute, escaping, non-canonical, NUL, and lone-surrogate
+spellings so host paths or alternate aliases cannot enter downstream context serialization.
 
 ## Tool and Safety Conventions
 
@@ -138,12 +195,35 @@ input before policy evaluation. Proposed edits are structured exact-replacement,
 operations; validate them, generate a unified diff, receive one approval for the exact batch,
 re-check file hashes, and only then apply them.
 
+Canonical read-tool JSON projections admit integers only in the signed 64-bit range and at most 64
+object/list levels across the complete wrapped envelope, with the outer `result` object at depth 1.
+Validate range, cycles, and depth during an iterative pre-serialization walk. Bound that walk before
+sorting or serialization with a 65,536-unit work budget that charges every visited value/container,
+object-member name, and Unicode scalar; a value that exhausts it is already too large to form an
+admitted envelope. Map defensive serializer `RecursionError`/`ValueError` to the fixed invalid-result
+failure; do not let interpreter limits become an unbounded exception. Provider-result construction
+applies the same quote-aware complete-envelope depth preflight before JSON decode; its 65,536-byte
+input cap also bounds scanner width.
+Provider-tool schema integer values use the same range. Canonicalize schemas with a shape-directed,
+incrementally byte-charged copier rather than a generic deep copy or an unbounded serialize-then-
+measure pass. Cap each enum at 256 values and apply O(1) container-length checks plus one global
+16,384-unit visit/scalar work budget before uniqueness, sorting, or bounded encoding. Map defensive
+serializer `RecursionError`/`ValueError` to the bounded construction failure before a provider sees
+the definition tuple. Admit only exact built-in schema containers and scalar types; arbitrary mappings,
+sequences, iterators, and subclasses can execute caller-defined work even during apparent length or
+iteration checks and therefore fail before their hooks are used.
+
 Treat every present `.gitignore` as untrusted policy input. Resolve its source through the workspace
 boundary, hard-deny-check the canonical source, and re-resolve and recheck immediately before its
 bounded read. Missing candidates are normal; escaping, hard-denied, dangling, non-regular, stale, or
 unreadable candidates fail with the fixed ignore-policy error without reading or charging content.
 An admitted internal symlink keeps the candidate owner as rule scope while its canonical source owns
 cache identity and byte accounting.
+Capture each lexical/canonical view owner's canonical directory when that directory is admitted.
+Re-admit the owner immediately before the non-following `.gitignore` probe and again before a
+cache-miss read; a persistent allowed-to-allowed retarget at either seam fails before replacement
+leaf work. Cache hits still require current owner/leaf/source admission before attaching cached rules.
+These pathname snapshots narrow but do not eliminate mutation races after the final check.
 
 Represent subprocesses as argument arrays and never use `shell=True`. Built-in policy supplies the
 initial candidates, user configuration may broaden or narrow them, and workspace configuration may
@@ -242,6 +322,43 @@ production churn in the story. Split the unit before review when it gains a seco
 is likely to exceed the target; do not pad a smaller coherent unit to reach the number. Every story
 maps acceptance criteria to deterministic tests and carries an explicit story-specific definition of
 done in addition to the repository-wide checklist.
+
+Before opening a planning or implementation PR, close each affected contract neighborhood. Use the
+story template's pre-review adversarial audit to trace upstream producers through every carrier and
+consumer to the observable side effect, including composition roots, evaluation wiring,
+control-plane inputs, empty/error/cancellation paths, and the linked lesson's exact stage order and
+failure precedence. Run three independent review lenses: security plus identity/indirection;
+end-to-end handoff plus composition; and provider/protocol limits plus real scheduler behavior.
+Trace concrete factory inputs, carrier fields, return types, and consumer method parameters so the
+planned handoff is implementable without a reverse dependency. When definitions, validation, and
+execution share an inventory, prove the advertised tuple, validation catalog, and guarded executor
+entry come from one captured identity; never rely on independently supplied same-shaped copies.
+Exercise the real upstream producer, including framework- or SDK-generated snapshots, rather than
+only hand-built values; mutate defaults, required markers, annotations, optional execution-context
+fields, and every downstream snapshot that repeats a value. Trace every byte/item bound back to the
+first producer: a downstream cap is not evidence when an upstream adapter, constructor, or fake can
+already retain, scan, join, recurse over, or serialize an unbounded value. For SDK-to-neutral streams,
+prove mapped-empty observations use an iterative pump and raw terminals drain to EOF before neutral
+release. Give every failure an exact owner, type,
+code/message, replay-versus-terminal disposition, and precedence. State whether each counter or byte
+cap is per value, per request snapshot, per session, or cumulative, and linearize accounting against
+cancellation/deadline under the real guard. Give every async checkpoint/transition an exact
+continue/stop return or private sentinel and show each caller consuming it; stage synchronous values
+and exceptions through the same following seam. For every lazy async producer, distinguish awaitable
+lock/cleanup edges from the no-await critical section and trace charge, synchronous start, one-time
+iterator claim, immutable installed-state carrier construction, final clock read, one non-failing
+pointer commit, terminal-to-EOF consumption, uninstalled/intermediate/terminal cleanup, one
+cleanup-task owner, and watcher lifetime. Lock which side wins immediately before and after the
+pointer commit.
+Name the sole composition factory and prove exact service/catalog/handler identities and explicit
+runtime profiles. When a default runtime path or opaque identifier changes, enumerate every external
+consumer, fixture, transcript, cancellation semantic, and documentation surface that must migrate.
+Finally, render the changed Markdown neighborhood: check diagrams mechanically for every success and
+failure branch, balance code fences, and compare pseudocode fields/signatures with their producers.
+After fixing a review finding, repeat the neighborhood audit instead of checking only the cited
+line. The production-line budget does not constrain documentation-only planning changes, so split a
+large milestone refinement by contract neighborhood—normally one core learning story or two to
+three tightly coupled supporting stories—and land a skeleton milestone map separately when useful.
 
 Record durable implementation discoveries under `user-stories/notes/`. Capture decisions,
 unexpected constraints, failure causes, validation evidence, and follow-up work without turning the
