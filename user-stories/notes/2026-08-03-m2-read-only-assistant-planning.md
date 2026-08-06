@@ -7,8 +7,8 @@ agent loop inside a framework or turning one review into a repository-wide rewri
 records the cross-epic split, learning priorities, review-size policy, and decisions that let
 CAH-024 through CAH-039 proceed independently in the documented dependency order.
 
-**Delivery update (2026-08-06):** CAH-024 is Done. The remaining 15 M2 stories are planned, with
-CAH-026 as the next dependency checkpoint and CAH-025 following it.
+**Delivery update (2026-08-06):** CAH-024 and CAH-026 are Done. The remaining 14 M2 stories are
+planned, with CAH-025 as the next dependency checkpoint.
 
 ## Milestone outcome
 
@@ -183,7 +183,7 @@ is likely to cross the ceiling.
   existing strict-Pydantic stage after lookup/raw-JSON/exact-key precedence. These are harness work
   budgets, not Linux `PATH_MAX`, mount `NAME_MAX`, or WSL DrvFS promises. JSON Schema character
   `maxLength` cannot claim exact byte/component parity.
-- M2 discovers only exact `AGENTS.md` files. CAH-026 first supplies pure lexical-path and hard-deny
+- M2 discovers only exact `AGENTS.md` files. CAH-026 now supplies pure lexical-path and hard-deny
   helpers used by ordinary reads and instruction discovery. Every present `.gitignore` keeps its
   candidate-owner directory for rule scope while its canonical source resolves through
   `WorkspaceBoundary` and passes canonical hard denial. The view captures its admitted owner's
@@ -214,6 +214,13 @@ is likely to cross the ceiling.
   a path ignored in the other. The bounded union of reachable policy files charges a canonically
   identical policy input once, while both views still attach and evaluate its cached rules at their
   own owner-relative scopes. M2 has no ignored-path override.
+- CAH-026 checks every proper lexical ancestor and both lexical leaf forms, denying pre-resolution
+  only when the effective result is type-independent. It otherwise resolves, applies canonical hard
+  denial, and computes both canonical leaf forms before kind inspection. It then selects the admitted
+  `file | directory` kind's result in both views and maps an existing
+  special target to unavailable. This contract story does not install unused
+  runtime state. CAH-037's sole M2 composition factory creates one policy per session and passes its
+  exact identity to the native services after they exist.
 - `search_text` is literal, case-sensitive UTF-8 search with deterministic path and line order. Its
   one-line query grammar rejects every separator recognized by Python `str.splitlines()`, including
   VT, FF, FS/GS/RS, NEL, and Unicode line/paragraph separators in addition to CR/LF. Regex, ranking,

@@ -58,7 +58,7 @@ not add or revise presentations unless the user explicitly reverses this freeze.
 | 14 | CAH-022 | [Loop limits](cah-022-loop-limits.md) | Verified against implementation |
 | 15 | CAH-023 | [OpenAI Responses adapter](cah-023-openai-responses-adapter.md) | Verified against implementation |
 | 16 | CAH-024 | [Workspace boundary](cah-024-workspace-boundary.md) | Verified against implementation |
-| 17 | CAH-026 | [Repository read policy](cah-026-repository-read-policy.md) | Planned |
+| 17 | CAH-026 | [Repository read policy](cah-026-repository-read-policy.md) | Verified against implementation |
 | 18 | CAH-025 | [Scoped repository instructions](cah-025-repository-instructions.md) | Planned |
 | 19 | CAH-027 | [Repository listing and metadata](cah-027-list-files-and-stat-path.md) | Planned |
 | 20 | CAH-028 | [Bounded repository reads](cah-028-bounded-text-file.md) | Planned |
@@ -76,8 +76,8 @@ not add or revise presentations unless the user explicitly reverses this freeze.
 
 CAH-023 completes the M1 learning sequence by locating the first real-provider adapter behind the
 harness-owned loop; the mock remains the default unless OpenAI is selected explicitly. CAH-024 now
-opens M2 with a lesson verified against the workspace-boundary implementation; the remaining 15
-lessons are planned in the documented dependency order above. The
+opens M2 with workspace-boundary and repository-policy lessons verified against implementation; the
+remaining 14 lessons are planned in the documented dependency order above. The
 strongest review emphasis falls on context ownership in CAH-025/026/030 and especially the registry,
 provider tool exchange, atomic response admission, argument trust boundary, round trip, bounded
 loop, OpenAI mapping, and evaluation in CAH-031 through CAH-039. CAH-038 remains a supporting schema

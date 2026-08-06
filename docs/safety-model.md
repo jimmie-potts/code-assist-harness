@@ -2,8 +2,9 @@
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
 > provider-session path, CAH-023 makes that path available only through explicit, validated OpenAI
-> selection, and CAH-024 implements the first M2 workspace boundary. The remaining 15 M2 stories are
-> planned. The launch still defaults to `MockSession`; this is not a sandbox or a claim that untrusted
+> selection, CAH-024 implements the first M2 workspace boundary, and CAH-026 implements shared read
+> admission. The remaining 14 M2 stories are planned. The launch still defaults to `MockSession`;
+> this is not a sandbox or a claim that untrusted
 > code can be executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
@@ -75,7 +76,7 @@ are harness budgets rather than claims about `PATH_MAX`, `NAME_MAX`, or DrvFS be
 That implemented snapshot check is necessary but not execution-time authorization. Path checks must be
 repeated when a later tool accesses a target because files and symlinks can change after validation
 or a proposal. Edit operations also use content-hash or exact-content preconditions. A stale
-proposal returns a conflict and never overwrites newer content. CAH-026 plans the non-overridable
+proposal returns a conflict and never overwrites newer content. CAH-026 implements the non-overridable
 deny/ignore policy, and CAH-027 through CAH-029 require access-time re-admission for listing, reads,
 and search. Their tests cover missing descendants under symlinks and observable replacement races in
 addition to the CAH-024 containment matrix.
@@ -85,6 +86,15 @@ canonical view captures a candidate owner's canonical directory when it admits t
 requires the owner label to resolve identically before probing `.gitignore` and before a cache-miss
 read. This blocks deterministic persistent allowed-to-allowed owner retargets at those seams, but it
 does not eliminate mutation after the final check.
+
+The read gate checks hard denial, proper lexical ancestors, and both the lexical leaf's file and
+trailing-slash directory forms. An ancestor or leaf ignored in both forms denies before
+requested-target resolution. Otherwise the gate resolves, applies canonical hard denial, and
+evaluates both canonical leaf forms. A type-independent canonical denial wins before target type
+inspection. The gate then admits only a regular file or directory and selects that kind's effective
+result in both views; special targets are unavailable. This preserves hard-deny and ignore
+precedence without losing later negation semantics, and all kind-selected policy work still precedes
+requested-content I/O.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -145,8 +155,9 @@ barrier task is cancelled and reaped, and the required provider force-reap hook 
 every provider-owned local cleanup or SDK task without shielding. `provider_cleanup_failed` is emitted
 at most once without replacing the selected terminal outcome. No local provider task remains after
 force-reap, but resource release stays unconfirmed: this requires cancellation-responsive provider
-code and does not prove remote cleanup succeeded. File-size, search-result, provider-request, and
-multi-turn bounds are refined in CAH-026 through CAH-036 but remain unimplemented; command-duration
+code and does not prove remote cleanup succeeded. CAH-026 now enforces ignore-policy source count,
+byte, type, and text bounds and publishes the later read/context constants. User-source file size,
+search-result, provider-request, and multi-turn bounds remain work for CAH-027 through CAH-036; command-duration
 and side-effecting tool limits remain later controls.
 
 CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
@@ -265,7 +276,7 @@ CAH-024 introduces the immutable Python boundary and deterministic containment t
 bounded resolution and filesystem metadata checks, but it does not read repository content,
 authorize a later access, or eliminate time-of-check-to-time-of-use races.
 
-### Planned CAH-026 through CAH-029 — Recheck workspace targets at read execution
+### Implemented CAH-026 and planned CAH-027 through CAH-029 — Recheck workspace targets at read execution
 
 > As a user, I want containment, symlinks, deny/ignore policy, type, and bounds rechecked at read time
 > so that a prior path snapshot cannot silently authorize changed content.
@@ -299,6 +310,10 @@ so a symlink alias cannot bypass policy on either name. [CAH-027](../user-storie
 [CAH-029](../user-stories/cah-029-search-repository-text.md) reuse it immediately before access and
 return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
 remain M3 work.
+
+CAH-026 adds the reusable policy contract but no dead runtime wiring. CAH-037's sole M2 composition
+factory creates the per-session policy and passes that exact identity to the read services once they
+exist.
 
 ### Planned CAH-031 through CAH-039 — Keep tool authority in the harness
 

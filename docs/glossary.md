@@ -326,6 +326,19 @@ Deterministically folding trusted ordered lifecycle inputs over an initial state
 state and stops at the first invariant failure; it does not resume work or repeat provider, tool,
 filesystem, or subprocess effects.
 
+## Repository read admission
+
+The CAH-026 harness-owned decision that combines CAH-024 lexical and containment checks, a
+non-overridable credential/VCS hard denylist, and bounded root-to-nearest Git ignore policy. It
+evaluates proper lexical ancestors and both leaf forms, denying pre-resolution only when the result
+is type-independent. It otherwise resolves, applies canonical hard denial, and evaluates canonical
+ancestors plus both canonical leaf forms. After any type-independent canonical denial, it admits
+exactly `file` or `directory` and selects that kind's decision in both views before requested-content
+I/O; a special target is unavailable.
+The policy's candidate-owner label controls rule scope while the contained
+canonical source controls cache and byte identity. Admission is a checked snapshot, not durable
+authorization for later content access.
+
 ## Runtime
 
 The Python process entry point that reads protocol commands, supervises sessions and active work,

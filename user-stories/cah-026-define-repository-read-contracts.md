@@ -1,6 +1,6 @@
 # CAH-026 - Define repository read contracts and policy
 
-- **Status:** Planned
+- **Status:** Done
 - **Milestone / primary epic:** M2 - Read-only coding assistant / E3 - Repository context and
   read-only tools
 - **Dependencies:** CAH-024
@@ -61,10 +61,14 @@ or dispatch model-callable tools.
 ### Admission pipeline and ownership
 
 - `RepositoryReadPolicy(boundary: WorkspaceBoundary)` is the exact stateful service boundary. It
-  retains the supplied object as read-only `boundary` identity; runtime creates one policy per
-  session and later CAH-027/028 services receive that same object. Its public direct-admission method
-  is `admit_existing(path: str) -> AdmittedRepositoryPath`, where the frozen result contains exact
-  canonical workspace-relative `path`, `kind`, and direct-leaf `is_symlink` provenance. Recursive
+  retains the supplied object as read-only `boundary` identity. This contract unit does not add an
+  otherwise-unused runtime object: CAH-037's sole M2 composition factory creates one policy per
+  session after the native read services exist, and CAH-027/028 services receive that same object.
+  Its public direct-admission method is
+  `admit_existing(path: str) -> AdmittedRepositoryPath`, where the frozen result contains
+  exact canonical workspace-relative `path`, `kind`, and direct-leaf `is_symlink` provenance. `kind`
+  is the closed literal set `file | directory`; an existing special target is unavailable rather
+  than a third public kind. Recursive
   list/search code uses the same service's internal descendant-admission path rather than constructing
   another boundary or policy. Ignore-source caches and count/byte budgets are local to one public
   admission/traversal decision and never become persistent authorization.
@@ -80,13 +84,19 @@ or dispatch model-callable tools.
   truncates, normalizes Unicode, or lets an over-bound path reach hard-deny, ignore, boundary, or
   filesystem work.
 - The Python harness owns repository read admission. Every later operation validates its input,
-  first applies the shared model-facing string admission rule, applies the hard denylist and lexical
-  ignore view to supplied relative components, resolves through `WorkspaceBoundary` only when the
-  lexical view admits, then applies the hard denylist and canonical ignore view to the resolved
-  components. It next checks operation-specific type and limits, then repeats admission and
-  resolution immediately before I/O. Lexical checks prevent denied or ignored supplied names from
-  becoming an existence oracle or symlink bypass; canonical checks prevent a safe-looking alias from
-  bypassing policy on its resolved target.
+  first applies the shared model-facing string admission rule, applies the hard denylist, and walks
+  the supplied lexical path's proper directory ancestors. It also evaluates both the lexical leaf's
+  file and trailing-slash directory forms. An ignored ancestor or leaf ignored in both forms denies
+  before requested-target resolution. The policy otherwise resolves through `WorkspaceBoundary`,
+  applies canonical hard denial, and builds the canonical ancestor/two-form leaf decision. A
+  canonical ancestor or leaf ignored in both forms denies before target type inspection. Only then
+  does the policy admit exactly `file` or `directory` and select that kind's effective result in both
+  views; an existing special target fails as unavailable. The operation then checks its own limits and repeats admission and
+  resolution immediately before I/O. Hard denials, lexical ancestors, and type-independent leaf
+  denials do not become existence oracles; the contained target kind is observed only when exact
+  directory-only leaf semantics require it. Canonical hard denial and type-independent ignore checks
+  still precede that inspection. Canonical checks prevent a safe-looking alias from
+  bypassing policy on its resolved target, and no requested content is read during admission.
 - Public operations accept workspace-relative paths and return only canonical workspace-relative
   POSIX labels. Absolute host paths, user-supplied aliases, and raw filesystem exceptions never enter
   public values or default representations.
@@ -101,7 +111,11 @@ or dispatch model-callable tools.
   that directory are neither opened nor charged, and a later negation for the leaf cannot rescue it.
   Thus `private/` followed by `!private/keep.py` still denies `private/keep.py`, while
   `private/*` followed by `!private/keep.py` may admit it because `private/` itself stays traversable.
-  Only after every proper ancestor admits does the final target match decide that view.
+  Only after every proper ancestor admits does the final target match decide that view. The lexical
+  leaf's file and trailing-slash directory forms are both computed before kind inspection. The policy
+  may deny early only when both effective results are ignored. Otherwise the safely resolved target
+  kind selects the corresponding result before any read of requested content. This preserves later-rule
+  negation precedence without falsely denying either a regular file or directory.
 - A policy binding has two identities plus an owner-stability snapshot. Its view-relative
   candidate-owner label determines where parsed rules apply; its resolved canonical source determines
   containment, hard denial, cache identity, and policy-file budgets. When either the lexical or
@@ -119,13 +133,18 @@ or dispatch model-callable tools.
   GitIgnoreSpec because doing so would make ignore-policy loading self-referential.
 - Ignore admission has two independent views. The lexical view matches the normalized supplied
   workspace-relative path against root-to-nearest policy files on its supplied ancestor chain,
-  without replacing that label with a symlink target. The canonical view matches the
-  `WorkspaceBoundary` target-relative label against policy files on the resolved target's canonical
-  ancestor chain. Each view verifies ancestor traversability and computes normal Git precedence only
-  within that view. The target is admitted only when neither view has an ignored ancestor or final
-  target; negation in one view cannot cancel an ignored decision in the other. Lexical ancestor
-  denial occurs before requested target resolution; canonical ancestor denial occurs after requested
-  target resolution but before requested content I/O.
+  without replacing that label with a symlink target. Its proper ancestors can deny immediately. The
+  leaf denies pre-resolution only when its file and directory forms are both ignored. The canonical
+  view matches
+  the `WorkspaceBoundary` target-relative label against policy files on the resolved target's
+  canonical ancestor chain and likewise computes both leaf forms before kind inspection. Each view
+  verifies ancestor traversability and computes normal Git precedence only within that view. An
+  ignored ancestor or leaf ignored in both forms denies immediately. Otherwise the resolved
+  `file | directory` kind selects both views' exact effective result. The target is admitted only when
+  neither selected view is ignored; negation in one view cannot cancel denial in the other. Lexical
+  type-independent denial occurs before requested-target resolution; canonical hard denial and
+  type-independent ignore denial occur after resolution but before kind inspection; selected denial
+  still occurs before requested content I/O.
 - Policy-file count and byte limits apply to the union of the two applicable ancestor chains.
   Policy candidates that resolve to the same admitted canonical source label are loaded and charged
   once, even though their rules may be evaluated against both labels or at multiple candidate-owner
@@ -136,8 +155,8 @@ or dispatch model-callable tools.
   newly charged on that path. Escaping,
   hard-denied, or otherwise unadmitted policy sources never enter the cache or consume count or byte
   budget. The root policy therefore does not consume the budget twice merely because every request
-  has two views. A lexical denial short-circuits before resolving the requested target or loading its
-  canonical-chain policy files.
+  has two views. A lexical ancestor or leaf ignored in both forms short-circuits before resolving the
+  requested target or loading its canonical-chain policy files.
 - The final ignored decision is non-overridable. No public input, provider argument, configuration,
   or future approval may request `include_ignored`. A hard-denied path can never be re-included by a
   negation rule.
@@ -242,9 +261,12 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 ## Reviewability budget
 
 - **Estimated production-code churn:** 300-450 changed lines.
-- **Delivered production-code churn:** Not started.
+- **Delivered production-code churn:** 600 added lines.
 - **Counted paths:** `src/code_assist_harness/` additions plus deletions.
 - **Excluded from count:** tests, docs, fixtures, lockfiles, and generated artifacts.
+- **Variance:** exact two-form Git leaf precedence plus owner/source snapshot hardening raised the unit
+  above its estimate, but it remains one read-admission responsibility and below the 600-line review
+  ceiling, so no split is warranted.
 - **Planning PR scope:** One contract neighborhood: CAH-024 canonical paths plus model-facing
   strings -> shared lexical/hard-deny/ignore-policy decision -> CAH-025's pure-primitive use and
   CAH-027 through CAH-030 ordinary-read consumers.
@@ -258,7 +280,8 @@ denylist rule, ignore pattern, raw OS text, or repository content.
    plus nested `GitIgnoreSpec` rules for both the supplied lexical and resolved canonical ancestor
    chains in deterministic precedence order.
    The exact `RepositoryReadPolicy` constructor/method retains one CAH-024 boundary identity for all
-   later native read services.
+   later native read services. Its frozen result admits only `file | directory`; special targets fail
+   unavailable. Runtime composition remains with CAH-037's sole M2 service-composition factory.
 2. Pure public lexical admission rejects invalid Unicode/path syntax before `Path` construction or
    I/O, and one pure hard-deny classifier implements the exact table without I/O or rule disclosure;
    the full read policy consumes both primitives and produces the same decisions as their direct
@@ -290,11 +313,12 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 
 ## Acceptance-to-test matrix
 
-| Contract or risk | Planned test | Layer | Expected evidence |
+| Contract or risk | Implemented test | Layer | Expected evidence |
 | --- | --- | --- | --- |
 | Ancestor traversal and nested precedence | Compare `private/` plus `!private/keep.py` with the traversable-parent control `private/*` plus `!private/keep.py`; put an invalid nested policy below the ignored directory | Unit | The ignored parent denies direct access, its nested policy is never opened or charged, and leaf negation works only in the traversable-parent control |
 | Relative pattern scope | Repeat a filename inside and outside a nested policy directory | Unit | Nested rule affects only its subtree |
-| Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; access requires both complete walks to admit, lexical denial performs no requested target resolution, canonical denial performs no requested content I/O, and neither label nor rule leaks |
+| Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; lexical type-independent denial performs no requested-target resolution, canonical hard/two-form denial precedes kind inspection, the resolved kind selects both views' ambiguous leaf results before requested-content I/O, and neither label nor rule leaks |
+| Result-kind closure | Admit a regular file, directory, direct symlink to each, and an existing special target | Policy/boundary integration | Results contain canonical `file | directory` only, preserve direct-leaf symlink provenance, and map the special target to generic unavailable |
 | Dual-chain policy budget | Share root and aliased policy files across both chains, give the two view owners different labels, then cross the unique-file count and aggregate-byte edges | Unit | Canonically identical policy inputs are read/charged once but their cached rules are scoped and evaluated in both views; the union still fails closed above 16 files or 256 KiB |
 | Policy-owner stability | In both lexical-alias and canonical views, capture owner A, mutate its label persistently to allowed directory B immediately before the leaf probe and independently immediately before a cache-miss read; include stable-owner controls and spies for B leaf resolution/probe/read, cache attachment/commit, and budget charge | Policy/boundary integration | Both mutations return exact `repository_policy_invalid` before replacement-leaf resolution or I/O; B rules cannot attach at A scope and no replacement content enters cache or budget, while stable owners preserve the view-relative scope |
 | Policy-source containment and cache reuse | Point root and nested `.gitignore` candidates outside the workspace and at `.git/config` or `secrets/dev.env`; use an actually absent control, a safe internal symlink, a dangling candidate, pre-read disappearance/retarget/type/size replacements, and a stable cache hit | Policy/boundary integration | Only the absent entry is normal; every present unsafe source returns exact `repository_policy_invalid` and causes no requested content read; pre-read rejection opens no policy content, the internal source is committed once after validation, and a cache hit still re-admits the owner and resolves the current leaf/source before owner-relative attachment without rereading or charging content |
@@ -306,7 +330,7 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 | Strict text | Use invalid UTF-8 and NUL in applicable `.gitignore` files | Unit | `repository_policy_invalid` with no decoder or content leak |
 | Model-facing strings | After JSON parsing, pass multibyte scalar text, lone high/low surrogates, and NUL as path/query values | Request/policy boundary | Scalars round-trip unchanged; invalid values use the field's fixed error with zero policy/filesystem calls |
 | Check-before-use | Replace an admitted target or root before the final decision | Boundary integration | Re-evaluation fails safely rather than preserving authorization |
-| Error hygiene | Use distinctive paths, patterns, and raw OS failures | Unit | Exact table strings and leak-free representations |
+| Error hygiene | Use distinctive paths, patterns, and raw OS failures | Unit | Exact table strings, leak-free representations and tracebacks, and no retained `__cause__` or `__context__` chain |
 
 ## Validation
 
@@ -315,8 +339,11 @@ denylist rule, ignore pattern, raw OS text, or repository content.
   lexical/canonical ignore truth table and prove an opposing negation cannot override the other
   view's ignored decision. Direct-access regressions prove `private/` plus `!private/keep.py` denies
   in both lexical and canonical views, while `private/*` plus `!private/keep.py` admits only when the
-  other view also admits. A boundary spy proves lexical ancestor denial starts no requested target
-  resolution; an I/O spy proves canonical ancestor denial starts no requested content access.
+  other view also admits. A boundary spy proves lexical ancestor and two-form leaf denial start no
+  requested target resolution; canonical two-form controls prove type-independent canonical denial
+  precedes target stat; opposing file/directory rule and negation controls prove the safely resolved
+  kind selects both views' exact effective leaf results; and an I/O spy proves every post-resolution denial starts no
+  requested content access.
 - Cover root and nested policy candidates that symlink outside the workspace or to `.git/config` and
   `secrets/dev.env`, plus an actually absent entry, an allowed internal-policy-source control, a
   present dangling link, and deterministic disappearance, retarget, directory/special-file, and
@@ -353,7 +380,7 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 - Inspect the dependency and lockfile diff and prove default tests perform no network access.
 - Keep protocol, transcript, provider, and TUI schemas unchanged; use the full repository gate as
   nearest parity evidence.
-- Run focused Python tests and `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` before Done.
+- Focused Python tests and `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` passed before Done.
 
 ## Documentation impact
 
@@ -381,11 +408,11 @@ Do not add or revise a presentation.
 | Audit | Required evidence or explicit N/A |
 | --- | --- |
 | Identity ledger | Keep the supplied lexical alias and each view-relative policy owner distinct from the captured canonical owner, resolved canonical `.gitignore` source, canonical source cache/byte identity, final canonical target, and model-visible canonical POSIX label. A cached source never changes the candidate owner's rule scope. |
-| End-to-end contract | CAH-024 boundary plus pure syntax/hard-deny primitives -> lexical ancestor walk -> canonical target walk -> owner/leaf/source rechecks -> bounded `GitIgnoreSpec` decision -> CAH-027/028/029/030 direct failure or traversal omission. Lockfile/import evidence covers composition; evaluation wiring is deferred to the M2 evaluation story. |
-| Failure and atomicity | Lexical denial performs zero requested-target resolution, canonical denial performs zero requested-content I/O, and an unsafe policy candidate never attaches rules, enters cache, or consumes budget. Owner/source mismatch and every policy failure return one fixed error; cancellation/deadline/rollback are N/A inside this synchronous bounded policy decision. |
+| End-to-end contract | CAH-024 boundary plus pure syntax/hard-deny primitives -> pre-resolution lexical ancestor/two-form leaf evaluation -> target resolution -> canonical hard deny -> canonical ancestor/two-form leaf evaluation -> closed kind admission -> select both views -> owner/leaf/source rechecks -> bounded `GitIgnoreSpec` decision -> CAH-027/028/029/030 consumers. CAH-037 owns runtime composition and evaluation wiring. |
+| Failure and atomicity | Lexical type-independent denial performs zero requested-target resolution; canonical hard/two-form denial precedes target kind inspection; kind-selected denial performs zero requested-content I/O; an unsafe policy candidate never attaches rules, enters cache, or consumes budget. Special targets are unavailable. Owner/source mismatch and every policy failure return one fixed error; cancellation/deadline/rollback are N/A inside this synchronous bounded policy decision. |
 | Reachable boundaries | Real dual lexical/canonical walks exercise 65,535/65,536/65,537-byte policy sources, 16/17 distinct canonical sources, and the 256-KiB aggregate edge, including shared sources, cache hits, and deterministic pre-probe/pre-read retarget seams. Unicode admission also runs through the pure helper and full policy consumer. |
 | Closed grammar and cardinality | The exact hard-deny table is non-overridable; two complete root-to-leaf `GitIgnoreSpec` views are evaluated independently and either denial wins. At most 16 distinct strict-UTF-8/no-NUL policy sources totaling 256 KiB are admitted, with exact fixed direct-versus-traversal outcomes and no override field. |
-| Artifact parity | Story, lesson, diagram, safety/tool/context docs, and tests use the same order: syntax -> hard deny/lexical policy -> boundary resolution -> hard deny/canonical policy -> operation checks -> final re-admission, and agree on owner/source identity, fixed errors, cache accounting, and residual races. |
+| Artifact parity | Story, lesson, diagram, safety/tool/context docs, and tests use the same order: syntax -> lexical hard deny/ancestor/two-form leaf -> boundary resolution -> canonical hard deny/ancestor/two-form leaf -> `file | directory` kind -> select both views -> operation checks -> final re-admission, and agree on owner/source identity, fixed errors, cache accounting, and residual races. |
 | Independent lenses | Security/identity review covers aliases, owner/source retargets, symlinks, deny precedence, and cache identity; handoff/composition review covers the CAH-025 primitive consumer and CAH-027-030 full-policy consumers; limits/scheduler review covers exact budgets and records provider/protocol/scheduler changes as N/A. |
 
 ## Definition of done
@@ -397,7 +424,8 @@ Do not add or revise a presentation.
    hard-deny classification; the hard-deny classifier is the only implementation of the exact table,
    performs no I/O or rule disclosure, and has parity evidence through the full read policy.
 4. GitIgnoreSpec precedence and ancestor traversability in both lexical and canonical views, lexical
-   denial before requested target resolution, denial before requested content I/O, either-view-denies
+   ancestor/two-form leaf denial before requested-target resolution, canonical hard/two-form denial
+   before kind inspection, kind-selected matching in both views before requested content I/O, either-view-denies
    combination, canonical-only public labels, hard-deny dominance, and no ignored override are
    proved. Every present policy source has view-relative owner/source identity, captured canonical
    owner, pre-probe and pre-cache-miss owner stability, boundary and hard-deny admission, pre-read
@@ -415,15 +443,20 @@ Do not add or revise a presentation.
    review.
 11. The PR is ready for review and no addressed review thread remains unresolved.
 
-## Planned evidence
+## Implementation evidence
 
-- A repository-access policy module and temporary-repository tests prove exact matching and denial,
-  including aliases whose lexical and canonical ignore decisions disagree.
-- Pure lexical/classifier tests plus read-policy integration prove pre-I/O path admission and the
-  hard-deny table cannot drift inside ordinary-read policy; CAH-025 owns the later control-plane
-  consumer evidence.
-- `pyproject.toml` and `uv.lock` record the reviewed PathSpec dependency without any runtime network
-  requirement.
+- [`repository_access.py`](../src/code_assist_harness/repository_access.py) implements the immutable
+  result, fixed failures, shared limits, pure helpers, two-view GitIgnoreSpec gate, owner/source
+  rechecks, and decision-local cache/budgets without a user-content read operation. Its internal
+  descendant-admission scope reuses that same cache and aggregate budget across one future traversal;
+  its public failure boundary removes hidden exception context as well as suppressing rendered chains.
+- [`test_repository_access.py`](../tests/test_repository_access.py) exercises pure-helper parity,
+  every denylist class, exact two-form Git precedence, lexical/canonical alias disagreement,
+  owner/source mutation seams, policy-source safety, cache identity, shared traversal accounting,
+  non-leaking tracebacks, and below/at/above limits in 133 focused cases. CAH-025 owns the later
+  control-plane consumer evidence.
+- `pyproject.toml` admits maintained `pathspec>=1.1,<2`, and `uv.lock` resolves PathSpec 1.1.1 without
+  adding runtime network behavior.
 - The lesson locates policy between the workspace boundary and all native read operations; its
   primary teach-back question is: why is an approval or model argument unable to override a denied
   read?
@@ -433,6 +466,8 @@ Do not add or revise a presentation.
 - CAH-025 consumes only the pure lexical-path and hard-deny helpers while retaining its explicit
   `.gitignore` exemption for instruction control-plane files.
 - CAH-027, CAH-028, and CAH-029 reuse the full read policy for listing, reading, and literal search.
+- CAH-037's sole M2 composition factory creates the per-session policy only after the actual read
+  services exist; CAH-026 deliberately leaves no unused runtime wiring behind.
 - CAH-030 applies the shared item and byte limits to deterministic context inclusion.
 - E4 later adds schema-validated tool registration and dispatch without moving policy ownership out
   of the harness.

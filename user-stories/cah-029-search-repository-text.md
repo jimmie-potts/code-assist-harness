@@ -114,10 +114,10 @@ provider response handling, context selection, or agent-loop continuation.
   may not substitute the default, clamp it, add one, or perform a second walk. The 500-item bound
   counts both files and directories, so it yields at most 500 candidate files without a second
   candidate-file limiter. Canonical order is preserved, and `ListFilesResult.truncated` adds the
-  `listing` reason. A directory search skips invalid UTF-8, NUL-containing,
-  oversized, denied, ignored, unavailable, and special files with aggregate counts; a direct-file
-  search reports the corresponding CAH-026 fixed error. Direct-file search validates `max_depth`
-  for one request contract but does not perform a directory listing.
+  `listing` reason. A directory search skips invalid UTF-8, NUL-containing, oversized, denied,
+  ignored, and unavailable files—including special objects—with aggregate counts; a direct-file
+  search reports the corresponding CAH-026 fixed error. Direct-file search validates `max_depth` for
+  one request contract but does not perform a directory listing.
 - Search never opens or decodes repository content itself. For each candidate it increments
   `files_examined`, computes `remaining = 2_097_152 - source_bytes_examined`, and calls the exact
   CAH-028 producer once as
@@ -139,9 +139,9 @@ provider response handling, context selection, or agent-loop continuation.
   Therefore charged content is at most 2,097,152 bytes and physical reads are at most 2,097,652
   bytes; path
   replacement after a small pre-open snapshot cannot evade either bound. Ignored, denied,
-  unavailable, special, and already-known oversized candidates rejected before content open are
-  skip-counted but not charged. Item and byte budgets are deterministic safety limits, not token
-  estimates.
+  unavailable (including special objects), and already-known oversized candidates rejected before
+  content open are skip-counted but not charged. Item and byte budgets are deterministic safety
+  limits, not token estimates.
 - The operation is synchronous and bounded. Later dispatch owns cancellation checks around it; no
   task, event, or protocol cancellation is introduced here.
 
@@ -180,8 +180,8 @@ host path, denied label, ignore rule, raw byte, or OS text.
 4. Recursive-depth, inherited listing-entry, aggregate-byte, per-file, query, and returned-match
    bounds produce deterministic failures or explicit truncation and aggregate skip counts; every
    opened source is charged even when it is non-text or has no match.
-5. Directory search omits ignored, denied, unavailable, non-text, oversized, and unsupported files
-   without labels; direct-file search returns the shared fixed safe error.
+5. Directory search omits ignored, denied, unavailable (including special objects), non-text, and
+   oversized files without labels; direct-file search returns the shared fixed safe error.
 6. Requests and results are immutable, typed, documented, provider-neutral, preserve execution-time
    canonical request scope, use the exact canonical reason order with
    `truncated == bool(limit_reasons)`, and suppress queries, excerpts, and that local scope from

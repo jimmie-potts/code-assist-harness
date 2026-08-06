@@ -1,8 +1,9 @@
 # Context Engineering
 
 > Status: proposed design refined into CAH-024 through CAH-030, with CAH-037 proving the composed
-> read-only outcome. CAH-024 implements the workspace boundary; repository discovery, native content
-> reads, and context selection are not implemented yet.
+> read-only outcome. CAH-024 implements the workspace boundary and CAH-026 implements shared
+> repository-read admission; repository discovery, native content reads, and context selection are
+> not implemented yet.
 
 Context engineering is the process of selecting the smallest useful, attributable view of a
 workspace for a model turn. The MVP will not load the entire repository, create embeddings, or use
@@ -107,6 +108,18 @@ Its pure lexical seam admits at most 4,095 strict-UTF-8 bytes in the raw supplie
 work. CAH-026 delegates that exact decision and only maps repository vocabulary. These are harness
 work limits, not a promise about Linux or WSL mount acceptance; a lexically admitted path can still
 fail bounded resolution.
+
+CAH-026 layers the harness-owned read gate on that boundary. It applies hard denial, then evaluates
+every proper lexical ancestor plus the leaf's file and trailing-slash directory forms. An ancestor or
+leaf ignored in both forms denies before requested-target resolution. Otherwise it resolves and
+applies canonical hard denial, and evaluates canonical ancestors plus both canonical leaf forms. A
+type-independent canonical denial wins before target type inspection. The gate then classifies only
+a regular file or directory and selects that kind's result in both views; special targets are
+unavailable. Thus lexical type-independent denial stays pre-resolution, canonical type-independent
+denial stays pre-stat, kind-selected denial still precedes requested-content I/O, and public admissions
+have only `file | directory` kinds. CAH-026 defines this reusable service without unused runtime
+wiring; CAH-037's sole M2 composition factory creates and shares the per-session policy after the
+native read services exist.
 
 For an ordinary runtime task, the **initial** context request defaults to repository scope `.` with
 empty `focus_paths` and `search_queries`. Those empty values are explicit rather than task- or
@@ -215,12 +228,12 @@ missing-target, symlink-containment, stale-root, and workspace-relative reportin
 focused tests. Instruction discovery, repository-content reads, model tool schemas, and
 execution-time race protection remain later work.
 
-### Planned CAH-026 — Define repository read contracts and policy
+### Implemented CAH-026 — Define repository read contracts and policy
 
 > As a user, I want every native read to reuse one containment, ignore, deny, and limit policy so
 > that handlers cannot disagree about what repository content is available.
 
-The [implementation-ready story](../user-stories/cah-026-define-repository-read-contracts.md) owns
+The [implemented story](../user-stories/cah-026-define-repository-read-contracts.md) owns
 nested Git-compatible ignore evaluation through PathSpec, a non-overridable credential/VCS denylist,
 shared text rules, and fixed safe failures. Ignore rules are evaluated independently against both the
 normalized supplied path and its resolved canonical target. Each view admits every directory prefix
@@ -233,8 +246,9 @@ the non-following leaf probe and before a cache-miss read; an allowed owner A-to
 before resolving B's leaf. The view-relative owner label still controls rule scope, while the
 canonical source controls cache and budget identity. Even a cache hit re-admits the owner and resolves
 the current leaf/source before attaching cached rules, without rereading or charging bytes. CAH-025
-does not inherit
-ordinary-read limits or errors. This unit performs no user-requested read operation itself.
+does not inherit ordinary-read limits or errors. Direct admission exposes only regular-file and
+directory results; special targets are unavailable. This unit performs no user-requested read
+operation itself and deliberately defers per-session composition to CAH-037.
 
 ### Planned CAH-025 — Discover scoped repository instructions
 

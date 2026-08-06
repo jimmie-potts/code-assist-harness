@@ -69,7 +69,8 @@ CAH-030 context and transcript/evidence are later/unchanged; no content is read 
 Requests permit 1-500 returned items and recursive depth 1-8. Traversal stops with a safe failure
 above 10,000 visited entries. Results contain the content-suppressed execution-time canonical
 request scope, canonical entry labels, and aggregate omission counts, never the names of denied or
-ignored descendants.
+ignored descendants. Results distinguish `ignored_items` from `unavailable_items`; special objects
+join the unavailable count because CAH-026 intentionally does not reveal why a path is unavailable.
 Runtime calls these methods on one
 `RepositoryMetadataReader(policy: RepositoryReadPolicy)`: `list_files(ListFilesRequest) ->
 ListFilesResult` and `stat_path(StatPathRequest) -> StatPathResult`. The reader retains the exact
@@ -84,7 +85,8 @@ enumeration. These application limits do not claim that every WSL mount accepts 
 1. Validate the strict request and shared path budget, then perform final boundary/policy admission immediately before root
    enumeration or direct stat inspection; retain that canonical target as result provenance.
 2. Enumerate native directory entries, applying policy before inclusion or descent.
-3. Never descend through directory symlinks or open special objects.
+3. Never descend through directory symlinks or open special objects; count special objects only as
+   unavailable rather than bypassing policy to infer a more specific reason.
 4. Rank candidates by `(is_symlink, original_label_utf8)`, so any ordinary candidate wins and an
    aliases-only set chooses its lowest original label; copy that winner's exact `is_symlink` value.
 5. Preserve the final admitted directory as `canonical_request_scope`, including when no entry is
@@ -177,7 +179,8 @@ visit bound. An index is justified only with a tested freshness contract.
 
 - **Visited item:** A directory child inspected before admission.
 - **Truncation:** An explicit successful result that omits later admitted items.
-- **Special object:** A FIFO, socket, or device that is neither a regular file nor directory.
+- **Special object:** A FIFO, socket, or device that is neither a regular file nor directory; the
+  generic unavailable aggregate covers it without disclosing the reason.
 
 ## Further reading
 
