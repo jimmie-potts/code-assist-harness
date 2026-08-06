@@ -50,8 +50,9 @@ from code_assist_harness.provider import (
     ProviderUsageReported,
     RepositoryInstruction,
 )
-from code_assist_harness.runtime import RuntimeConfigurationError, resolve_workspace
+from code_assist_harness.runtime import RuntimeConfigurationError
 from code_assist_harness.session_state import SessionState
+from code_assist_harness.workspace import WorkspaceBoundary
 
 TIMESTAMP = "2026-07-16T12:34:56.789Z"
 FAKE_RUNTIME_SECRET = "FAKE_CAH_RUNTIME_SECRET_011"
@@ -218,23 +219,44 @@ def _read_process_event(process: subprocess.Popen[bytes]) -> Event:
     return events[0]
 
 
-def test_resolve_workspace_returns_canonical_directory(tmp_path: Path) -> None:
+def test_runtime_options_store_one_canonical_workspace_boundary(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     alias = tmp_path / "workspace-alias"
     alias.symlink_to(workspace, target_is_directory=True)
 
-    assert resolve_workspace(alias) == workspace.resolve()
+    options = runtime_module._parse_runtime_options(("--workspace", str(alias)))
+
+    assert isinstance(options.workspace, WorkspaceBoundary)
+    assert options.workspace.root == workspace.resolve()
 
 
-@pytest.mark.parametrize("invalid_kind", ["missing", "file"])
-def test_resolve_workspace_rejects_invalid_paths(tmp_path: Path, invalid_kind: str) -> None:
+@pytest.mark.parametrize("invalid_kind", ["private-missing-root", "private-file-root"])
+def test_runtime_options_map_invalid_roots_to_one_non_leaking_error(
+    tmp_path: Path,
+    invalid_kind: str,
+) -> None:
     candidate = tmp_path / invalid_kind
-    if invalid_kind == "file":
+    if invalid_kind == "private-file-root":
         candidate.write_text("not a directory", encoding="utf-8")
 
-    with pytest.raises(RuntimeConfigurationError, match="workspace"):
-        resolve_workspace(candidate)
+    with pytest.raises(RuntimeConfigurationError) as captured:
+        runtime_module._parse_runtime_options(("--workspace", str(candidate)))
+
+    assert str(captured.value) == "Workspace root must be an existing directory."
+    assert invalid_kind not in str(captured.value)
+
+
+def test_run_runtime_rechecks_a_stored_boundary_before_reading_commands(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    boundary = WorkspaceBoundary.from_path(workspace)
+    workspace.rename(tmp_path / "moved-workspace")
+
+    with pytest.raises(RuntimeConfigurationError) as captured:
+        asyncio.run(runtime_module.run_runtime(boundary, transcript_enabled=False))
+
+    assert str(captured.value) == "The selected workspace is no longer available."
 
 
 def test_runtime_accepts_shutdown_before_initialization_without_stdout(tmp_path: Path) -> None:
@@ -1990,14 +2012,16 @@ def test_interrupted_runtime_retains_a_valid_incomplete_jsonl_prefix(tmp_path: P
 
 
 def test_runtime_reports_invalid_workspace_only_on_stderr(tmp_path: Path) -> None:
-    missing = tmp_path / "missing"
+    missing = tmp_path / "private-missing-workspace"
 
     completed = _run_runtime("--workspace", str(missing))
 
     assert completed.returncode == 2
     assert completed.stdout == b""
-    assert b"runtime configuration error" in completed.stderr
-    assert b"workspace does not exist" in completed.stderr
+    assert completed.stderr == (
+        b"runtime configuration error: Workspace root must be an existing directory.\n"
+    )
+    assert b"private-missing-workspace" not in completed.stderr
 
 
 @pytest.mark.parametrize(

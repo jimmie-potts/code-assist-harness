@@ -18,6 +18,7 @@ from code_assist_harness.provider.openai_config import (
     OpenAIProviderConfiguration,
     ProviderConfigurationError,
 )
+from code_assist_harness.workspace import WorkspaceBoundary
 
 VALID_MODEL = "gpt-5.6-luna"
 FAKE_API_KEY = "FAKE_CAH_RUNTIME_OPENAI_KEY_023"
@@ -206,6 +207,30 @@ def test_concrete_adapter_module_is_imported_only_by_the_deferred_constructor(
     assert constructed == [configuration]
 
 
+def test_main_passes_the_parsed_workspace_boundary_instance_to_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary = WorkspaceBoundary.from_path(tmp_path)
+    options = runtime_module._RuntimeOptions(
+        workspace=boundary,
+        transcript_enabled=False,
+        provider="mock",
+        model=None,
+    )
+    captured: list[WorkspaceBoundary] = []
+
+    async def capture_runtime(workspace: WorkspaceBoundary, **_options: object) -> None:
+        captured.append(workspace)
+
+    monkeypatch.setattr(runtime_module, "_parse_runtime_options", lambda _arguments: options)
+    monkeypatch.setattr(runtime_module, "run_runtime", capture_runtime)
+
+    assert runtime_module.main(()) == 0
+    assert captured == [boundary]
+    assert captured[0] is boundary
+
+
 def test_main_keeps_ambient_credentials_on_the_default_mock_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -215,7 +240,7 @@ def test_main_keeps_ambient_credentials_on_the_default_mock_path(
     monkeypatch.setenv("OPENAI_BASE_URL", "https://ignored-on-mock.example/v1")
     captured: dict[str, object] = {}
 
-    async def capture_runtime(workspace: Path, **options: object) -> None:
+    async def capture_runtime(workspace: WorkspaceBoundary, **options: object) -> None:
         captured["workspace"] = workspace
         captured.update(options)
 
@@ -228,7 +253,9 @@ def test_main_keeps_ambient_credentials_on_the_default_mock_path(
     result = runtime_module.main(_runtime_arguments(tmp_path))
 
     assert result == 0
-    assert captured["workspace"] == tmp_path.resolve()
+    captured_workspace = captured["workspace"]
+    assert isinstance(captured_workspace, WorkspaceBoundary)
+    assert captured_workspace.root == tmp_path.resolve()
     assert captured["provider"] is None
     assert captured["loop_limits"] is None
 
@@ -242,7 +269,7 @@ def test_main_supplies_explicit_limits_with_the_selected_openai_provider(
     provider = _StubProvider()
     captured: dict[str, object] = {}
 
-    async def capture_runtime(workspace: Path, **options: object) -> None:
+    async def capture_runtime(workspace: WorkspaceBoundary, **options: object) -> None:
         captured["workspace"] = workspace
         captured.update(options)
 
@@ -264,7 +291,9 @@ def test_main_supplies_explicit_limits_with_the_selected_openai_provider(
     )
 
     assert result == 0
-    assert captured["workspace"] == tmp_path.resolve()
+    captured_workspace = captured["workspace"]
+    assert isinstance(captured_workspace, WorkspaceBoundary)
+    assert captured_workspace.root == tmp_path.resolve()
     assert captured["provider"] is provider
     assert captured["loop_limits"] == LoopLimits()
 

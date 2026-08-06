@@ -7,6 +7,9 @@ agent loop inside a framework or turning one review into a repository-wide rewri
 records the cross-epic split, learning priorities, review-size policy, and decisions that let
 CAH-024 through CAH-039 proceed independently in the documented dependency order.
 
+**Delivery update (2026-08-06):** CAH-024 is Done. The remaining 15 M2 stories are planned, with
+CAH-026 as the next dependency checkpoint and CAH-025 following it.
+
 ## Milestone outcome
 
 M2 is complete only when the Python harness can use scoped repository instructions and bounded native

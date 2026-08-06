@@ -41,6 +41,7 @@ from .provider_session import (
     ProviderSessionRunner,
 )
 from .session_state import SessionState, SessionUpdate
+from .workspace import WorkspaceBoundary, WorkspaceBoundaryError
 
 _READ_CHUNK_SIZE = 64 * 1024
 
@@ -56,38 +57,16 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 @dataclass(frozen=True, slots=True)
 class _RuntimeOptions:
-    """Validated process configuration supplied outside protocol stdin."""
+    """Validated process configuration supplied outside protocol stdin.
 
-    workspace: Path
+    The selected boundary is constructed once during argument admission and passed unchanged to
+    the runtime so later consumers share its captured root identity.
+    """
+
+    workspace: WorkspaceBoundary
     transcript_enabled: bool
     provider: ProviderName
     model: str | None
-
-
-def resolve_workspace(value: str | Path) -> Path:
-    """Resolve and validate the runtime's single workspace directory.
-
-    Args:
-        value: Workspace path supplied by the supervising TUI.
-
-    Returns:
-        The canonical absolute path to an existing directory.
-
-    Raises:
-        RuntimeConfigurationError: If the path cannot be resolved or is not a directory.
-    """
-    try:
-        candidate = Path(value).expanduser()
-        resolved = candidate.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError) as error:
-        raise RuntimeConfigurationError(
-            f"workspace does not exist or cannot be accessed: {str(value)!r}"
-        ) from error
-
-    if not resolved.is_dir():
-        raise RuntimeConfigurationError(f"workspace is not a directory: {resolved}")
-
-    return resolved
 
 
 def _parse_runtime_options(arguments: Sequence[str]) -> _RuntimeOptions:
@@ -122,8 +101,13 @@ def _parse_runtime_options(arguments: Sequence[str]) -> _RuntimeOptions:
     except ProviderConfigurationError as error:
         raise RuntimeConfigurationError(str(error)) from None
 
+    try:
+        workspace = WorkspaceBoundary.from_path(workspace_values[0])
+    except WorkspaceBoundaryError as error:
+        raise RuntimeConfigurationError(str(error)) from error
+
     return _RuntimeOptions(
-        workspace=resolve_workspace(workspace_values[0]),
+        workspace=workspace,
         transcript_enabled=not parsed.no_transcript,
         provider=provider,
         model=model,
@@ -238,7 +222,7 @@ async def _read_commands() -> AsyncIterator[Command | ProtocolParseFailure]:
 
 
 async def run_runtime(
-    workspace: Path,
+    workspace: WorkspaceBoundary | str | Path,
     *,
     transcript_enabled: bool = True,
     transcript_settings: TranscriptSettings | None = None,
@@ -260,7 +244,9 @@ async def run_runtime(
     OpenAI adapter. Python remains authoritative for every terminal event.
 
     Args:
-        workspace: Canonical existing directory owned by this runtime process.
+        workspace: Validated boundary owned by this runtime process. A string or path is accepted
+            as a direct-call compatibility seam and delegates immediately to the sole boundary
+            constructor.
         transcript_enabled: Whether accepted session inputs should create local evidence files.
         transcript_settings: Optional explicit storage and redaction settings. When omitted and
             persistence is enabled, settings are derived from XDG and recognized sensitive
@@ -273,21 +259,24 @@ async def run_runtime(
         monotonic_waiter: Optional absolute-deadline waiter paired with ``monotonic_now``.
 
     Raises:
-        RuntimeConfigurationError: If ``workspace`` is not canonical or is no longer a directory.
+        RuntimeConfigurationError: If ``workspace`` cannot establish a current boundary.
         OSError: If a protocol pipe cannot be monitored, read, written, or flushed.
 
     Note:
         Cancellation removes the event-loop reader before propagating to the caller.
     """
+    if isinstance(workspace, WorkspaceBoundary):
+        workspace_boundary = workspace
+    else:
+        try:
+            workspace_boundary = WorkspaceBoundary.from_path(workspace)
+        except WorkspaceBoundaryError as error:
+            raise RuntimeConfigurationError(str(error)) from error
     try:
-        resolved_workspace = workspace.resolve(strict=True)
-    except OSError as error:
-        raise RuntimeConfigurationError(
-            "workspace must remain a canonical existing directory"
-        ) from error
-
-    if workspace != resolved_workspace or not resolved_workspace.is_dir():
-        raise RuntimeConfigurationError("workspace must be a canonical existing directory")
+        workspace_boundary.resolve_existing(".")
+    except WorkspaceBoundaryError as error:
+        raise RuntimeConfigurationError(str(error)) from error
+    workspace_root = workspace_boundary.root
     if (monotonic_now is None) != (monotonic_waiter is None):
         raise RuntimeConfigurationError(
             "provider monotonic clock and waiter must be supplied together"
@@ -392,10 +381,11 @@ async def run_runtime(
                     continue
 
                 try:
-                    requested_workspace = resolve_workspace(result.payload.workspace)
-                except RuntimeConfigurationError:
+                    requested_workspace = WorkspaceBoundary.from_path(result.payload.workspace)
+                    workspace_boundary.resolve_existing(".")
+                except WorkspaceBoundaryError:
                     requested_workspace = None
-                if requested_workspace != workspace:
+                if requested_workspace != workspace_boundary:
                     await writer.emit_runtime(
                         "runtime.error",
                         {
@@ -412,7 +402,7 @@ async def run_runtime(
                 initialized = True
                 await writer.emit_runtime(
                     "runtime.ready",
-                    {"workspace": str(workspace)},
+                    {"workspace": str(workspace_root)},
                     correlation_id=result.command_id,
                 )
                 continue
@@ -462,7 +452,7 @@ async def run_runtime(
                     try:
                         active_transcript = await SessionTranscript.create(
                             settings,
-                            workspace,
+                            workspace_root,
                             active_session.session_id,
                         )
                     except TranscriptPersistenceError:

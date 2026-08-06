@@ -56,8 +56,12 @@ network-free fake, CAH-021 completes the first injected provider-neutral turn, a
 [CAH-022](user-stories/cah-022-enforce-loop-limits.md) completes its hard limits with a
 [written lesson](docs/lessons/cah-022-loop-limits.md) and
 [visual companion](docs/lessons/assets/cah-022-loop-limits.pptx). CAH-023 adds the strict OpenAI
-Responses adapter and explicit launch selection without changing protocol v1. Workspace discovery and
-reads, tool execution, policy, and broader multi-turn agent behavior remain unimplemented.
+Responses adapter and explicit launch selection without changing protocol v1. CAH-024 now adds one
+immutable Python workspace boundary and makes runtime startup retain that validated boundary. It
+strictly bounds model-facing relative path spellings, resolves existing targets to canonical
+workspace-relative labels, rejects symlink escapes, and detects observable root replacement. It reads
+only path metadata needed for that snapshot; repository-content discovery and reads, tool execution,
+policy, and broader multi-turn agent behavior remain unimplemented.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
@@ -349,7 +353,8 @@ The Python runtime, supervised TUI, protocol messages and fixtures, deterministi
 cooperative session cancellation, conversation projection, transcript-v3 persistence with v1/v2/v3
 replay, provider-neutral request and stream contracts, strict programmable fake, one hard-bounded
 provider session turn, and the explicitly selected OpenAI Responses adapter exist today. The launched
-TUI defaults to the mock. Broader evaluation, workspace discovery and reads, tools, policy, and
+TUI defaults to the mock. The immutable workspace boundary and bounded path grammar also exist;
+broader evaluation, repository-content discovery and reads, tools, policy, and
 transcript browsing/export/retention remain planned and are introduced only by the story that needs
 them.
 

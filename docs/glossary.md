@@ -433,10 +433,12 @@ must prevent escape from this boundary.
 
 ## Workspace boundary
 
-The planned CAH-024 immutable Python value that owns one canonical workspace root and resolves
+The implemented CAH-024 immutable Python value that owns one canonical workspace root and resolves
 model-facing relative targets into contained paths with workspace-relative labels. It describes a
 validated filesystem snapshot; later read, edit, or command code must recheck containment when it
 performs access because validation alone does not prevent filesystem replacement races.
+Containment is checked at every canonical prefix, not only at the final target, so leaving the root
+and later re-entering through another symlink is still an escape.
 
 Its pure lexical primitive also owns the inclusive application budget for one supplied path:
 4,095 strict-UTF-8 bytes in the raw spelling, 256 normalized non-dot components, and 255 UTF-8 bytes

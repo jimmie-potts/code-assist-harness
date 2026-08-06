@@ -278,13 +278,14 @@ adapter and explicit `--provider openai --model gpt-5.6-luna` launch path. Defau
 default tests, and this guide remain on `MockSession`; workspace discovery, tools, and approvals are
 still absent.
 
-[CAH-024](../user-stories/cah-024-establish-workspace-boundary.md) is now the
-implementation-ready first E3 unit. It establishes the reusable workspace-containment boundary
-without reading files or changing the protocol. Implementing that contract is the next delivery
-step. The [refined M2 plan](../user-stories/notes/2026-08-03-m2-read-only-assistant-planning.md)
-now defines the subsequent instruction, native-read, context, registry, LLM/tool exchange, atomic
-response admission, round trip, loop, OpenAI mapping, and deterministic-evaluation units through
-CAH-037.
+[CAH-024](../user-stories/cah-024-establish-workspace-boundary.md) now implements the first E3 unit:
+the reusable workspace-containment boundary. It performs bounded path and metadata resolution without
+reading repository content or changing protocol v1. [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md)
+is next, followed by [CAH-025](../user-stories/cah-025-discover-repository-instructions.md), so
+instruction discovery can reuse the shared lexical and hard-deny policy. The
+[refined M2 plan](../user-stories/notes/2026-08-03-m2-read-only-assistant-planning.md) defines the
+remaining native-read, context, registry, definition, LLM/tool exchange, response/argument admission,
+round-trip, loop, OpenAI mapping, and deterministic-evaluation units through CAH-039.
 
 See the [architecture](architecture.md), [protocol](protocol.md), [agent-loop design](agent-loop.md),
 [safety model](safety-model.md), and [glossary](glossary.md) for the broader design boundaries.

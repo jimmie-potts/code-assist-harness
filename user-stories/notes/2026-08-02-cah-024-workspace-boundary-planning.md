@@ -2,13 +2,14 @@
 
 ## Purpose
 
-Record the decisions that refine E3's workspace-boundary outcome into one implementation-ready,
-single-responsibility unit. This note describes planned behavior only; it does not claim that
-`WorkspaceBoundary`, native reads, or repository context are implemented.
+Record the decisions that refined E3's workspace-boundary outcome into one implementation-ready,
+single-responsibility unit, plus the contract clarifications retained during implementation.
+`WorkspaceBoundary` is now implemented; native repository-content reads and repository context are
+not.
 
 ## Outcome
 
-CAH-024 will add one immutable Python boundary that owns a canonical-root snapshot and existing-path
+CAH-024 adds one immutable Python boundary that owns a canonical-root snapshot and existing-path
 containment for every later repository-context capability. The unit stops after returning a
 canonical inside-workspace snapshot or a fixed safe failure.
 
@@ -52,14 +53,27 @@ below so the unit can begin without another design checkpoint.
 
 ### Relative, existing paths only
 
+- `normalize_workspace_relative_path(value)` is the sole pure lexical primitive for every
+  model-facing workspace-relative path. It accepts only exact built-in strings and rejects lone
+  surrogates through strict UTF-8 encode/decode before `Path`, root inspection, policy, or filesystem
+  I/O.
+- Count the complete raw spelling before normalizing repeated separators or `.` components. The
+  inclusive limits are 4,095 strict-UTF-8 bytes per raw spelling, 256 normalized non-dot components,
+  and 255 strict-UTF-8 bytes per component. Backslash remains an ordinary Linux filename character;
+  Unicode is neither normalized nor case-folded.
 - Empty, absolute, and `..`-containing inputs are invalid before target resolution. A traversal is
   rejected even when lexical normalization would bring it back inside.
 - Resolution is strict. A missing requested object is not a proposed create target.
 - Internal symlinks are allowed when their canonical targets remain inside the root. Reporting uses
-  the target-relative path, not the symlink alias.
+  the target-relative path, not the symlink alias. That canonical output label passes the same
+  lexical primitive before it can become a model-visible path, so a short alias cannot bypass the
+  shared work budget by targeting an over-bound in-root path.
 - Escaping file and directory symlinks are denied with component-aware containment. A missing
   descendant beneath an escaping directory link is still an escape when that outside ancestor can
   be established.
+- Resolve one component from the last contained canonical prefix at a time. Reject the first prefix
+  that leaves the root, even when a later symlink in that outside directory would resolve back into
+  the workspace; checking only the final whole-path target would mask that traversal.
 
 ### Root replacement detection is best effort
 
@@ -75,7 +89,7 @@ below so the unit can begin without another design checkpoint.
 
 ### Fixed failure surface
 
-The planned exception surface is closed:
+The implemented exception surface is closed:
 
 | Code | Message |
 | --- | --- |
@@ -127,25 +141,27 @@ outgrows host-path snapshots. CAH-024 must not imply those controls already exis
 - approvals, subprocess execution, and descriptor/container hardening; and
 - new TUI, protocol, transcript, or provider surfaces.
 
-## Planned evidence
+## Implementation evidence
 
 - Focused temporary-workspace tests cover construction, root reporting, normal descendants,
   internal file and directory symlinks, absolute/traversal input, sibling-prefix and symlink escape,
-  missing and dangling targets, escaping missing descendants, and observable root
-  removal/replacement/type change.
-- Runtime tests prove delegation preserves one-root startup and replaces raw-path errors with the
-  fixed boundary surface.
+  missing and dangling targets, escaping missing descendants, escape-then-re-enter chains, and
+  observable root removal/replacement/type change.
+- Runtime tests prove delegation preserves one-root startup, passes the exact options-owned boundary
+  into `run_runtime`, rechecks it before command intake, and replaces raw-path errors with the fixed
+  boundary surface.
 - Exact error-table assertions and distinctive temporary path values prove messages do not leak.
 - The Markdown lesson locates CAH-024 between runtime selection and future context/read tools while
   showing provider, tool, and evidence boundaries as unchanged. No presentation is planned evidence
   for CAH-024.
-- Focused tests and `./scripts/check` must pass before the story moves from Planned to Done.
+- Focused tests and `./scripts/check` passed before the story moved to Done; the canonical gate's
+  final Python stage reported 1,015 passed with one opt-in live smoke deselected.
 
 A six-slide planned companion was generated and inspected during branch work, then removed before
-merge under the presentation freeze. It is not a retained artifact and is not evidence that
-`WorkspaceBoundary` or any read behavior exists. This note, the story, and the Markdown lesson govern
-the planned contract: one `WorkspaceBoundaryError`, one `ResolvedWorkspacePath`, and five stable
-error codes.
+merge under the presentation freeze. It is not a retained artifact and supplies no implementation
+evidence. The boundary code and focused tests are the implementation evidence; no repository-content
+read behavior exists in this unit. This note, the story, and the Markdown lesson govern the locked
+contract: one `WorkspaceBoundaryError`, one `ResolvedWorkspacePath`, and five stable error codes.
 
 ## Lesson format handoff
 
@@ -156,7 +172,7 @@ evidence remain unchanged even when later design corrections diverge.
 
 ## Implementation handoff
 
-Begin with the immutable values and fixed exception table in `workspace.py`, then add focused tests
-before changing runtime delegation. Do not add instruction discovery or a read tool to make the
-boundary appear more useful; the deliberately small seam is what lets those later units share one
-well-tested security decision.
+The implementation follows the planned order: immutable values and the fixed exception table in
+`workspace.py`, focused boundary tests, then runtime delegation. It does not add instruction
+discovery or a read tool; the deliberately small seam is what lets later units share one tested
+security decision.
