@@ -279,10 +279,11 @@ default tests, and this guide remain on `MockSession`; workspace discovery, tool
 still absent.
 
 [CAH-024](../user-stories/cah-024-establish-workspace-boundary.md) now implements the first E3 unit:
-the reusable workspace-containment boundary. It performs bounded path and metadata resolution without
-reading repository content or changing protocol v1. [CAH-026](../user-stories/cah-026-define-repository-read-contracts.md)
-is next, followed by [CAH-025](../user-stories/cah-025-discover-repository-instructions.md), so
-instruction discovery can reuse the shared lexical and hard-deny policy. The
+the reusable workspace-containment boundary. It performs bounded path and metadata resolution
+without reading repository content or changing protocol v1.
+[CAH-026](../user-stories/cah-026-define-repository-read-contracts.md) is next, followed by
+[CAH-025](../user-stories/cah-025-discover-repository-instructions.md), so instruction discovery can
+reuse the shared lexical and hard-deny policy. The
 [refined M2 plan](../user-stories/notes/2026-08-03-m2-read-only-assistant-planning.md) defines the
 remaining native-read, context, registry, definition, LLM/tool exchange, response/argument admission,
 round-trip, loop, OpenAI mapping, and deterministic-evaluation units through CAH-039.

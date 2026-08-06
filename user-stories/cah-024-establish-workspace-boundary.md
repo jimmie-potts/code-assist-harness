@@ -214,12 +214,13 @@ are intentionally not exposed.
 - Runtime tests prove the existing CLI accepts one canonical workspace and maps invalid
   root construction to its bounded startup failure without leaking the supplied path.
 - Observable-replacement coverage renames the original root so it remains referenced, creates a
-  replacement at the captured pathname, assert that its device/inode differs, and then resolve. This
-  keeps the test independent of inode-reuse behavior.
-- The tests assert the exact failure-code/message table and check messages plus value representations against
-  distinctive temporary path names and raw OS text.
-- Tests use temporary directories and local filesystem operations only; no subprocess, provider, network,
-  sleep, or protocol fixture is required for the focused boundary evidence.
+  replacement at the captured pathname, asserts that its device/inode differs, and then resolves.
+  This keeps the test independent of inode-reuse behavior.
+- The tests assert the exact failure-code/message table and compare messages plus value
+  representations with distinctive temporary path names and raw OS text.
+- Focused boundary tests use temporary directories and local filesystem operations only; they need
+  no subprocess, provider, network, sleep, or protocol fixture. Runtime integration remains separate
+  process-boundary evidence.
 - The focused workspace/runtime suite and canonical
   `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` passed. The canonical gate reported 1,015
   Python tests with one live smoke deselected, 32 Python protocol cases, 48 repository-policy tests,
