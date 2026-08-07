@@ -82,19 +82,31 @@ and search. Their tests cover missing descendants under symlinks and observable 
 addition to the CAH-024 containment matrix.
 
 CAH-026 applies the same pathname-snapshot discipline inside ignore evaluation. Each lexical and
-canonical view captures a candidate owner's canonical directory when it admits that directory, then
-requires the owner label to resolve identically before probing `.gitignore` and before a cache-miss
-read. This blocks deterministic persistent allowed-to-allowed owner retargets at those seams, but it
-does not eliminate mutation after the final check.
+canonical view captures a candidate owner's canonical workspace-relative label plus followed
+directory device/inode when it admits that directory, then requires both identities before probing
+`.gitignore` and before a cache-miss read. This blocks deterministic allowed-to-allowed retargets and
+same-label directory replacements already present at either seam. It does not eliminate mutation
+after the final check, and a filesystem may reuse a device/inode pair.
 
-The read gate checks hard denial, proper lexical ancestors, and both the lexical leaf's file and
-trailing-slash directory forms. An ancestor or leaf ignored in both forms denies before
-requested-target resolution. Otherwise the gate resolves, applies canonical hard denial, and
-evaluates both canonical leaf forms. A type-independent canonical denial wins before target type
-inspection. The gate then admits only a regular file or directory and selects that kind's effective
-result in both views; special targets are unavailable. This preserves hard-deny and ignore
-precedence without losing later negation semantics, and all kind-selected policy work still precedes
-requested-content I/O.
+The read gate compiles each bounded policy source into original-line file rules and a
+direct-directory view with one semantic trailing slash removed safely. It verifies retained pattern
+count and include identity, preserves original no-op patterns so an invalid range cannot activate,
+then matches bare labels while skipping ancestor-only `ps_d` results. Thus `private` then
+`!private/` admits that directory and descendants, while `private/*` then `!private/` admits the
+parent but denies an immediate child directly matched by the wildcard. The directory view also lets
+`*/`, `**/`, and `a/**/` directly match the current entry rather than PathSpec's first ancestor
+slash. Only the final lexical leaf uses both kind views. An ignored ancestor or
+type-independent leaf denial wins before requested-target resolution. Otherwise the gate resolves,
+applies canonical hard denial, repeats direct-entry ancestors and the two-form canonical leaf, then
+admits only a regular file or directory and selects that kind's effective result in both views;
+special targets are unavailable. All kind-selected policy work still precedes requested-content I/O.
+
+One cumulative candidate-pattern-slot budget bounds ignore matching across ancestors, lexical and
+canonical views, both final-leaf forms, cache hits, and recursive descendants in one admission
+traversal. The harness reserves the selected kind view's complete stored pattern-slot count,
+including no-op slots, before calling its matcher; it does not charge the paired view. Exactly 65,536 is
+inclusive; an evaluation that would exceed it fails first with `repository_policy_invalid`. Cache
+reuse avoids policy content I/O, not matching work.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -286,18 +298,24 @@ policy and exposes pure lexical-path admission plus its exact hard-deny table. E
 `.gitignore` candidate preserves its view-relative owner label for rule scope, but its source resolves
 through `WorkspaceBoundary`, passes canonical hard denial, and is re-resolved and rechecked
 immediately before a bounded cache-miss read. When either ignore view admits an owner directory, it
-captures the canonical owner. It re-admits the owner label immediately before the non-following leaf
-probe and again before any cache-miss read; a persistent `owner A -> allowed B` mutation fails as
-`repository_policy_invalid` before B's leaf is resolved or read and cannot attach B rules at A scope.
+captures its canonical workspace-relative label plus followed directory device/inode. It re-admits
+both identities immediately before the non-following leaf probe and again before any cache-miss read;
+an `owner A -> allowed B` retarget or same-label replacement already present at either seam fails as
+`repository_policy_invalid` before replacement-leaf work and cannot attach replacement rules at the
+captured scope.
 On a cache hit, owner re-admission plus current leaf/source resolution still precedes owner-relative
 attachment, while content is neither read nor newly charged. Escaping, hard-denied, dangling,
 inaccessible, retargeted, or non-regular sources fail under the same fixed error without reading
 requested content and are not opened, cached, or charged. An admitted internal leaf symlink remains
 owner-relative and a shared canonical source is read and charged once. These checks leave the stated
-pathname race after the final seam. CAH-025 reuses the same pre-I/O decisions for supplied and
-canonical scope plus each resolved instruction source, while its control-plane `AGENTS.md` candidates
-remain exempt only from `.gitignore`. It preserves the canonical
-candidate owner as `applies_to` even when a leaf symlink resolves to another source directory. The
+pathname race after the final seam and cannot prevent device/inode reuse. Proper ancestors use the
+paired rules' direct-directory view in both path-name views; both kind views match bare labels and
+skip ancestor-only results, and only the final leaf evaluates both. One inclusive 65,536
+candidate-pattern-slot budget spans views, cache hits, and recursive descendants; an over-bound
+logical evaluation fails before the matcher runs. CAH-025 reuses the same pre-I/O decisions for
+supplied and canonical scope plus each resolved instruction source, while its control-plane
+`AGENTS.md` candidates remain exempt only from `.gitignore`. It preserves the canonical candidate
+owner as `applies_to` even when a leaf symlink resolves to another source directory. The
 owner label itself is re-admitted immediately before the non-following leaf probe and again before
 content read; a persistent disappearance or `owner A -> allowed B` retarget already present at either
 checked seam fails before that seam's replacement-leaf work. A leaf-only recheck is not evidence that

@@ -942,16 +942,25 @@ def test_m2_filesystem_identity_and_provenance_contracts_stay_coherent() -> None
         assert "canonical source" in document
         assert "candidate owner" in document or "candidate-owner" in document
         assert "repository_policy_invalid" in document
+        assert "65,536" in document
     assert "Pre-read-rejected sources are not opened, cached, or charged" in policy_lesson
-    assert "capture that owner's canonical directory when the view admits it" in read_policy
-    assert "same directory immediately before the non-following leaf probe" in read_policy
+    assert (
+        "capture that owner's canonical label plus followed directory device/inode" in read_policy
+    )
+    assert "immediately before the non-following leaf probe" in read_policy
     assert "again before a cache-miss read" in read_policy
-    assert "persistent `owner A -> allowed B` replacement" in read_policy
-    assert "before `B/.gitignore` is resolved or read" in read_policy
-    assert "re-resolves `pkg-link` before the non-following leaf probe" in policy_lesson
-    assert "repeats that owner check before a cache-miss read" in policy_lesson
-    assert "A-to-B change fails before B's leaf is resolved or read" in policy_lesson
-    assert "requires the owner label to resolve identically before probing" in safety_model
+    assert "`owner A -> allowed B` retarget or an allowed same-label directory replacement" in (
+        read_policy
+    )
+    assert "fails before resolving the replacement leaf" in read_policy
+    assert "cached pair of kind-specific `GitIgnoreSpec` views" in read_policy
+    assert "`private/*` then `!private/`" in read_policy
+    assert "`*/`, `**/`, and `a/**/`" in read_policy
+    assert "candidate-pattern-slot work budget" in read_policy
+    assert "requires both values again before the non-following leaf probe" in policy_lesson
+    assert "before a cache-miss read" in policy_lesson
+    assert "catches both an A-to-B retarget and a replacement directory" in policy_lesson
+    assert "requires both identities before probing `.gitignore`" in safety_model
     assert "does not eliminate mutation after the final check" in safety_model
 
     listing, listing_lesson = _m2_story_and_lesson(

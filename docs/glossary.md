@@ -330,14 +330,18 @@ filesystem, or subprocess effects.
 
 The CAH-026 harness-owned decision that combines CAH-024 lexical and containment checks, a
 non-overridable credential/VCS hard denylist, and bounded root-to-nearest Git ignore policy. It
-evaluates proper lexical ancestors and both leaf forms, denying pre-resolution only when the result
-is type-independent. It otherwise resolves, applies canonical hard denial, and evaluates canonical
-ancestors plus both canonical leaf forms. After any type-independent canonical denial, it admits
-exactly `file` or `directory` and selects that kind's decision in both views before requested-content
-I/O; a special target is unavailable.
-The policy's candidate-owner label controls rule scope while the contained
-canonical source controls cache and byte identity. Admission is a checked snapshot, not durable
-authorization for later content access.
+evaluates proper lexical ancestors through each source's safely transformed direct-directory spec
+and reserves the paired original-file view for file decisions. Both match bare labels and skip
+ancestor-only `ps_d` results; retained count/include checks keep original no-op patterns inert. It
+otherwise resolves, applies canonical hard denial, and repeats those semantics for the canonical
+view. After any type-independent canonical denial, it admits exactly `file` or `directory` and
+selects that kind's decision in both views before requested-content I/O; a special target is
+unavailable. The policy's candidate-owner label controls rule scope while the
+contained canonical source controls cache and byte identity. Each owner checkpoint preserves the
+captured canonical label plus followed directory device/inode; this narrows, but cannot eliminate,
+pathname races or inode reuse. One inclusive 65,536 candidate-pattern-slot budget spans both views,
+cache hits, and recursive descendants; each evaluation charges only its selected kind view. Admission
+is a checked snapshot, not durable authorization for later content access.
 
 ## Runtime
 

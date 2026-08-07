@@ -43,14 +43,26 @@ not acquire an invented order; CAH-030 retains and CAH-032 projects this exact r
 renumbering. Ignore policy has the same two-identity rule: a present `.gitignore` keeps the
 view-relative candidate-owner label for rule applicability, while its resolved source must remain
 inside the workspace, avoid canonical hard denial, and pass the same check immediately before its
-bounded read. Each lexical or canonical walk also captures the owner's canonical directory when that
-directory is admitted. It re-admits the owner label and requires the same directory immediately before
-the non-following leaf probe and before any cache-miss read, so a persistent allowed A-to-B owner
-retarget fails before B's leaf is resolved or read. A cache hit still follows the owner check and
-current leaf/source resolution before owner-relative rule attachment, but performs no content read or
-new charge. The source remains cache/budget identity. Escaping, hard-denied, dangling, non-regular,
-retargeted, or unreadable policy input fails closed and is neither cached nor charged. These are
-pathname snapshots; a mutation after the final check remains a deferred descriptor-relative risk.
+bounded read. When a lexical or canonical walk admits an owner directory, it also captures that
+owner's canonical workspace-relative label plus followed directory device/inode.
+It re-admits both identities immediately before the non-following leaf probe and before any cache-miss
+read, so an allowed A-to-B retarget or same-label directory replacement already present at either seam
+fails before replacement-leaf work. A cache hit still follows owner and current leaf/source admission
+before owner-relative rule attachment, but performs no content read or new byte charge. The source
+remains cache/byte-budget identity. Device/inode reuse and mutation after the final check remain
+deferred descriptor-relative risks.
+
+Each policy source compiles paired original-file and safely transformed direct-directory specs. The
+directory compile removes one semantic trailing slash, preserves original no-op patterns, and
+validates retained count/include identity. Both views match bare labels and skip ancestor-only `ps_d`
+results, so `*/`, `**/`, and `a/**/` can directly match the current directory without letting a
+parent negation impersonate its descendant. Only the final leaf evaluates both kind views. One
+inclusive 65,536 candidate-pattern-slot budget spans ancestors, lexical and canonical
+views, both final-leaf forms, cached policies, and recursive descendants in an admission traversal.
+Each logical matcher call reserves the selected view's complete stored pattern-slot count, including
+no-op slots, first. Work that would exceed the budget fails with `repository_policy_invalid` before the matcher
+runs; a cache hit saves content I/O, not matching work. Escaping, hard-denied, dangling, non-regular,
+retargeted, or unreadable policy input also fails closed and is neither cached nor charged.
 Repository content is untrusted data: text in a source file cannot authorize a command, broaden the
 command allowlist, or bypass an approval.
 
@@ -110,16 +122,18 @@ work limits, not a promise about Linux or WSL mount acceptance; a lexically admi
 fail bounded resolution.
 
 CAH-026 layers the harness-owned read gate on that boundary. It applies hard denial, then evaluates
-every proper lexical ancestor plus the leaf's file and trailing-slash directory forms. An ancestor or
-leaf ignored in both forms denies before requested-target resolution. Otherwise it resolves and
-applies canonical hard denial, and evaluates canonical ancestors plus both canonical leaf forms. A
-type-independent canonical denial wins before target type inspection. The gate then classifies only
-a regular file or directory and selects that kind's result in both views; special targets are
-unavailable. Thus lexical type-independent denial stays pre-resolution, canonical type-independent
-denial stays pre-stat, kind-selected denial still precedes requested-content I/O, and public admissions
-have only `file | directory` kinds. CAH-026 defines this reusable service without unused runtime
-wiring; CAH-037's sole M2 composition factory creates and shares the per-session policy after the
-native read services exist.
+every proper lexical ancestor as one known directory entry through the harness-owned matcher and
+reserves file/trailing-slash two-form matching for the final leaf. An already-decided ancestor match
+is not reapplied to descendants. An ignored ancestor or a leaf ignored in both forms denies before
+requested-target resolution. Otherwise the gate resolves, applies canonical hard denial, and repeats
+direct-entry ancestors plus the two-form canonical leaf. A type-independent canonical denial wins
+before target type inspection. The gate then classifies only a regular file or directory and selects
+that kind's result in both views; special targets are unavailable. Thus lexical
+type-independent denial stays pre-resolution, canonical type-independent denial stays pre-stat,
+kind-selected denial still precedes requested-content I/O, and public admissions have only
+`file | directory` kinds. CAH-026 defines this reusable service without unused runtime wiring;
+CAH-037's sole M2 composition factory creates and shares the per-session policy after the native read
+services exist.
 
 For an ordinary runtime task, the **initial** context request defaults to repository scope `.` with
 empty `focus_paths` and `search_queries`. Those empty values are explicit rather than task- or
@@ -237,18 +251,24 @@ The [implemented story](../user-stories/cah-026-define-repository-read-contracts
 nested Git-compatible ignore evaluation through PathSpec, a non-overridable credential/VCS denylist,
 shared text rules, and fixed safe failures. Ignore rules are evaluated independently against both the
 normalized supplied path and its resolved canonical target. Each view admits every directory prefix
-before loading deeper policy or evaluating the leaf, and either view's ignored ancestor or target
-denies access. Its pure lexical-path and `is_hard_denied_path` helpers perform no I/O and are reused
+through the paired rules' direct-directory view before loading deeper policy; both kind views use bare
+labels and skip ancestor-only results, and only the final leaf evaluates both. Either path-name view's ignored ancestor or target denies
+access. Its pure lexical-path
+and `is_hard_denied_path` helpers perform no I/O and are reused
 by CAH-025 so instruction discovery cannot drift to weaker pre-I/O admission. Every present ignore
 policy source separately passes workspace resolution, canonical hard denial, and an immediate
-pre-read recheck. Each view captures the admitted canonical owner and requires that same owner before
-the non-following leaf probe and before a cache-miss read; an allowed owner A-to-B retarget fails
-before resolving B's leaf. The view-relative owner label still controls rule scope, while the
-canonical source controls cache and budget identity. Even a cache hit re-admits the owner and resolves
-the current leaf/source before attaching cached rules, without rereading or charging bytes. CAH-025
-does not inherit ordinary-read limits or errors. Direct admission exposes only regular-file and
-directory results; special targets are unavailable. This unit performs no user-requested read
-operation itself and deliberately defers per-session composition to CAH-037.
+pre-read recheck. Each view captures the admitted owner's canonical label plus followed directory
+device/inode and requires both before the non-following leaf probe and a cache-miss read; an A-to-B
+retarget or same-label replacement fails before replacement-leaf work. The view-relative owner label
+still controls rule scope, while the canonical source controls cache and byte-budget identity. Even a
+cache hit re-admits the owner and resolves the current leaf/source before attaching cached rules,
+without rereading or charging bytes, while still consuming candidate-pattern work. One inclusive
+65,536-pattern-slot budget spans both path-name views and every recursive descendant; each logical
+evaluation charges only the selected kind view. An over-bound logical
+evaluation fails before the matcher runs. CAH-025 does not inherit ordinary-read limits or errors. Direct
+admission exposes only regular-file and directory results; special targets are unavailable. This unit
+performs no user-requested read operation itself and deliberately defers per-session composition to
+CAH-037.
 
 ### Planned CAH-025 — Discover scoped repository instructions
 

@@ -46,6 +46,7 @@ MAX_CONTEXT_BYTES = 98_304
 MAX_POLICY_SOURCE_BYTES = 65_536
 MAX_POLICY_SOURCES = 16
 MAX_POLICY_BYTES = 262_144
+MAX_POLICY_MATCH_WORK = 65_536
 
 _PATH_SYNTAX_MESSAGE = "Repository path syntax is invalid."
 _ERROR_MESSAGES: dict[RepositoryAccessErrorCode, str] = {
@@ -198,10 +199,11 @@ class AdmittedRepositoryPath:
 
 @dataclass(frozen=True, slots=True)
 class _CapturedOwner:
-    """Bind one view-relative policy owner to its admitted canonical directory label."""
+    """Bind one view-relative policy owner to its canonical directory identity."""
 
     components: tuple[str, ...]
     canonical_path: PurePosixPath
+    identity: tuple[int, int] = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,19 +216,28 @@ class _PolicySource:
 
 
 @dataclass(frozen=True, slots=True)
+class _PolicyRules:
+    """Keep file-kind and direct-directory views of one parsed policy source."""
+
+    file: GitIgnoreSpec
+    directory: GitIgnoreSpec
+
+
+@dataclass(frozen=True, slots=True)
 class _ScopedPolicy:
     """Attach cached rules to the view-relative owner that supplies their match scope."""
 
     owner: tuple[str, ...]
-    rules: GitIgnoreSpec
+    rules: _PolicyRules
 
 
 @dataclass(slots=True)
 class _AdmissionState:
     """Own the cache and union budgets for exactly one public admission decision."""
 
-    cache: dict[PurePosixPath, GitIgnoreSpec] = field(default_factory=dict)
+    cache: dict[PurePosixPath, _PolicyRules] = field(default_factory=dict)
     loaded_bytes: int = 0
+    match_work: int = 0
 
 
 @dataclass(slots=True)
@@ -292,10 +303,16 @@ class RepositoryReadPolicy:
             raise RepositoryAccessError("repository_path_unavailable")
 
         lexical_rules = self._prepare_ignore_view(lexical_components, state)
-        ignored_as_file = self._is_ignored(lexical_rules, lexical_components, is_directory=False)
+        ignored_as_file = self._is_ignored(
+            lexical_rules,
+            lexical_components,
+            state,
+            is_directory=False,
+        )
         ignored_as_directory = self._is_ignored(
             lexical_rules,
             lexical_components,
+            state,
             is_directory=True,
         )
         if ignored_as_file and ignored_as_directory:
@@ -311,11 +328,13 @@ class RepositoryReadPolicy:
         canonical_ignored_as_file = self._is_ignored(
             canonical_rules,
             canonical_components,
+            state,
             is_directory=False,
         )
         canonical_ignored_as_directory = self._is_ignored(
             canonical_rules,
             canonical_components,
+            state,
             is_directory=True,
         )
         if canonical_ignored_as_file and canonical_ignored_as_directory:
@@ -355,15 +374,25 @@ class RepositoryReadPolicy:
 
         for depth in range(1, len(components)):
             owner_components = components[:depth]
-            if self._is_ignored(rules, owner_components, is_directory=True):
+            if self._is_ignored(rules, owner_components, state, is_directory=True):
                 raise RepositoryAccessError("repository_path_ignored")
             try:
                 owner = self._capture_owner(owner_components)
             except RepositoryAccessError as error:
                 if error.code != "repository_path_not_found":
                     raise
-                ignored_as_file = self._is_ignored(rules, components, is_directory=False)
-                ignored_as_directory = self._is_ignored(rules, components, is_directory=True)
+                ignored_as_file = self._is_ignored(
+                    rules,
+                    components,
+                    state,
+                    is_directory=False,
+                )
+                ignored_as_directory = self._is_ignored(
+                    rules,
+                    components,
+                    state,
+                    is_directory=True,
+                )
                 if ignored_as_file and ignored_as_directory:
                     raise RepositoryAccessError("repository_path_ignored") from None
                 raise
@@ -383,13 +412,17 @@ class RepositoryReadPolicy:
             raise RepositoryAccessError("repository_path_unavailable") from None
         if not stat.S_ISDIR(observed.st_mode):
             raise RepositoryAccessError("repository_path_unavailable")
-        return _CapturedOwner(components, resolved.relative_path)
+        return _CapturedOwner(
+            components,
+            resolved.relative_path,
+            (observed.st_dev, observed.st_ino),
+        )
 
     def _load_policy(
         self,
         owner: _CapturedOwner,
         state: _AdmissionState,
-    ) -> GitIgnoreSpec | None:
+    ) -> _PolicyRules | None:
         """Safely load or reattach one owner's exact `.gitignore` policy source."""
         owner_label = _label(owner.components)
         self._policy_checkpoint("before_policy_probe", owner_label)
@@ -427,7 +460,7 @@ class RepositoryReadPolicy:
         if "\x00" in text:
             raise RepositoryAccessError("repository_policy_invalid")
         try:
-            parsed = GitIgnoreSpec.from_lines(text.split("\n"), backend="simple")
+            parsed = _compile_policy_rules(text.split("\n"))
         except Exception:
             raise RepositoryAccessError("repository_policy_invalid") from None
 
@@ -449,7 +482,14 @@ class RepositoryReadPolicy:
             current_stat = current.absolute_path.stat()
         except OSError:
             raise RepositoryAccessError("repository_policy_invalid") from None
-        if not stat.S_ISDIR(current_stat.st_mode):
+        if (
+            not stat.S_ISDIR(current_stat.st_mode)
+            or (
+                current_stat.st_dev,
+                current_stat.st_ino,
+            )
+            != owner.identity
+        ):
             raise RepositoryAccessError("repository_policy_invalid")
 
     def _resolve_policy_source(self, candidate_label: str) -> _PolicySource:
@@ -481,10 +521,11 @@ class RepositoryReadPolicy:
         self,
         policies: list[_ScopedPolicy],
         target: tuple[str, ...],
+        state: _AdmissionState,
         *,
         is_directory: bool,
     ) -> bool:
-        """Fold tri-state GitIgnoreSpec decisions in root-to-nearest owner order."""
+        """Fold bounded kind-aware Git decisions in root-to-nearest owner order."""
         ignored: bool | None = None
         for policy in policies:
             if target[: len(policy.owner)] != policy.owner:
@@ -492,9 +533,13 @@ class RepositoryReadPolicy:
             relative = target[len(policy.owner) :]
             if not relative:
                 continue
-            match_label = "/".join(relative) + ("/" if is_directory else "")
+            rules = policy.rules.directory if is_directory else policy.rules.file
+            match_cost = len(rules.patterns)
+            if match_cost > MAX_POLICY_MATCH_WORK - state.match_work:
+                raise RepositoryAccessError("repository_policy_invalid")
+            state.match_work += match_cost
             try:
-                decision = policy.rules.check_file(match_label).include
+                decision = _check_policy(rules, "/".join(relative))
             except Exception:
                 raise RepositoryAccessError("repository_policy_invalid") from None
             if decision is not None:
@@ -598,3 +643,61 @@ def _label(components: tuple[str, ...]) -> str:
 def _child_label(owner: tuple[str, ...], basename: str) -> str:
     """Render one fixed child below an already normalized owner label."""
     return "/".join((*owner, basename))
+
+
+def _check_policy(rules: GitIgnoreSpec, label: str) -> bool | None:
+    """Match one direct entry without letting an ancestor negation impersonate it."""
+    decision: bool | None = None
+    for pattern in rules.patterns:
+        if pattern.include is None:
+            continue
+        match = pattern.match_file(label)
+        if match is None:
+            continue
+        if match.match.groupdict().get("ps_d"):
+            continue
+        decision = pattern.include
+    return decision
+
+
+def _directory_pattern(line: str) -> str:
+    """Convert one semantic directory terminator into a safe bare-label pattern."""
+    normalized = line if line.endswith("\\ ") else line.rstrip()
+    body = normalized[1:] if normalized.startswith("!") else normalized
+    if body == "/" or body.endswith("//") or not body.endswith("/"):
+        return line
+
+    pattern = normalized[:-1]
+    if pattern.endswith("\\ "):
+        return pattern
+    without_whitespace = pattern.rstrip()
+    trailing_whitespace = pattern[len(without_whitespace) :]
+    trailing_backslashes = len(without_whitespace) - len(without_whitespace.rstrip("\\"))
+    if trailing_whitespace and trailing_backslashes % 2:
+        without_whitespace = without_whitespace[:-1]
+    return without_whitespace + "".join(f"[{character}]" for character in trailing_whitespace)
+
+
+def _compile_policy_rules(lines: list[str]) -> _PolicyRules:
+    """Compile kind-specific views without activating an original no-op pattern."""
+    file_rules = GitIgnoreSpec.from_lines(lines, backend="simple")
+    retained_lines = [line for line in lines if line]
+    if len(retained_lines) != len(file_rules.patterns):
+        raise ValueError("GitIgnoreSpec retained an unexpected pattern count")
+    directory_lines: list[str] = []
+    for line, pattern in zip(retained_lines, file_rules.patterns, strict=True):
+        if type(pattern.pattern) is not str or pattern.pattern != line:
+            raise ValueError("GitIgnoreSpec changed a retained policy pattern")
+        directory_lines.append(line if pattern.include is None else _directory_pattern(line))
+    directory_rules = GitIgnoreSpec.from_lines(directory_lines, backend="simple")
+    if len(directory_rules.patterns) != len(file_rules.patterns):
+        raise ValueError("directory rules changed the retained pattern count")
+    for line, original, derived in zip(
+        directory_lines,
+        file_rules.patterns,
+        directory_rules.patterns,
+        strict=True,
+    ):
+        if derived.pattern != line or derived.include != original.include:
+            raise ValueError("directory rules changed a retained pattern identity")
+    return _PolicyRules(file=file_rules, directory=directory_rules)

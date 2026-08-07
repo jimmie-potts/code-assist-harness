@@ -219,11 +219,30 @@ bounded read. Missing candidates are normal; escaping, hard-denied, dangling, no
 unreadable candidates fail with the fixed ignore-policy error without reading or charging content.
 An admitted internal symlink keeps the candidate owner as rule scope while its canonical source owns
 cache identity and byte accounting.
-Capture each lexical/canonical view owner's canonical directory when that directory is admitted.
-Re-admit the owner immediately before the non-following `.gitignore` probe and again before a
-cache-miss read; a persistent allowed-to-allowed retarget at either seam fails before replacement
-leaf work. Cache hits still require current owner/leaf/source admission before attaching cached rules.
-These pathname snapshots narrow but do not eliminate mutation races after the final check.
+Capture each lexical/canonical view owner's canonical workspace-relative label and followed
+directory device/inode when that directory is admitted. Re-admit the owner immediately before the
+non-following `.gitignore` probe and again before a cache-miss read. At both seams require the same
+captured label and identity; a persistent retarget or replacement
+fails before replacement leaf work. Cache hits still require current owner/leaf/source admission
+before attaching cached rules. Device/inode reuse and mutation after the final check remain possible;
+these pathname snapshots narrow races rather than eliminating them.
+Compile every admitted policy source into two kind-specific `GitIgnoreSpec` views from the same
+bounded text. The file view retains the original lines. The direct-directory view safely removes one
+semantic trailing slash before compilation while preserving escaped/trailing whitespace and leaving
+degenerate slash forms unchanged. Transform only a retained pattern whose original `include` is not
+`None`; require retained count plus pattern/include identity after the derived compile so an invalid
+range or other original no-op cannot activate. Both views match the bare relative label and discard `ps_d`
+ancestor-only matches. This lets `*/`, `**/`, and `a/**/` match the current directory entry instead
+of PathSpec's first ancestor slash. `private` then `!private/` admits the parent and descendants;
+`private/*` then `!private/` admits the parent but denies an immediate child directly matched by the
+wildcard, because `!private/` cannot impersonate that direct child match.
+Reserve file/directory two-form matching for the final leaf until its contained type is known. Bound
+all ignore matching with one cumulative 65,536 candidate-pattern-slot budget per admission traversal.
+For each logical evaluation, charge the selected kind-specific view's complete stored pattern-slot
+count, including no-op slots, across ancestors, lexical and canonical views, both final-leaf forms,
+shared cached policies, and recursive descendant admissions. Cache hits avoid content I/O, not match
+work. Exactly 65,536 is inclusive; fail with the fixed `repository_policy_invalid` result before an
+evaluation that would exceed it.
 
 Represent subprocesses as argument arrays and never use `shell=True`. Built-in policy supplies the
 initial candidates, user configuration may broaden or narrow them, and workspace configuration may

@@ -511,13 +511,24 @@ evidence. CAH-024 owns the sole pure path grammar and inclusive 4,095-byte,
 errors, and adds the pure hard-deny helper reused by CAH-025 even though instruction
 candidates are exempt from `.gitignore`; ordinary-read limits and errors are not. A present ignore
 policy source must itself resolve inside the workspace, avoid canonical hard denial, and survive an
-immediate pre-read recheck while its candidate owner still controls rule scope. For ordinary reads,
-CAH-026 evaluates lexical ancestors and both leaf forms, denying pre-resolution only when the result
-is type-independent. It then resolves, applies canonical hard denial, and computes both canonical
-leaf forms, so type-independent canonical denial also precedes kind inspection. Only then does it
-admit a regular file or directory and select that kind's decision in both views; special targets are
-unavailable and all kind-selected policy work still precedes requested-content I/O. CAH-025 preserves each
-resolved source separately from the canonical candidate owner to which it applies. CAH-030 initially
+immediate pre-read recheck while its candidate owner still controls rule scope. Both owner seams
+preserve the captured canonical workspace-relative label plus followed directory device/inode;
+same-label replacement and allowed retargets already present at a seam fail, while post-check mutation
+and inode reuse remain residual risks. For ordinary reads, each policy source compiles paired
+original-file and safely transformed direct-directory specs. Both match bare labels and skip
+ancestor-only `ps_d` results; retained count/include checks keep original no-op patterns inert. The
+directory view preserves direct `*/`, `**/`, and `a/**/` decisions. The harness does not let an
+ancestor-only match decide a descendant:
+`private/*` then `!private/` admits `private` but still denies its directly matched child. The policy
+denies pre-resolution only when the result is type-independent. It then resolves, applies canonical
+hard denial, and repeats those semantics for the canonical view, so type-independent canonical denial
+also precedes kind inspection. One inclusive 65,536 candidate-pattern-slot budget spans both views,
+cached rules, and recursive descendants; each evaluation charges only the selected kind view, and
+over-bound logical evaluations fail before matcher execution. Only then does the policy admit a
+regular file or directory and select that kind's decision in both views; special
+targets are unavailable and all kind-selected policy work still precedes requested-content I/O.
+CAH-025 preserves each resolved source separately from the canonical candidate owner to which it
+applies. CAH-030 initially
 unions required instruction bindings for the supplied scope, all explicit focus paths, and every
 first-occurrence search-match owner before admitting their content. Searches remain rooted only at
 the exact supplied scope. Later enrichment admits every required owner bundle atomically without

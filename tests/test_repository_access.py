@@ -6,7 +6,9 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
+from pathspec import GitIgnoreSpec
 
+import code_assist_harness.repository_access as repository_access
 from code_assist_harness.repository_access import (
     DEFAULT_LIST_ITEMS,
     DEFAULT_RECURSIVE_DEPTH,
@@ -15,6 +17,7 @@ from code_assist_harness.repository_access import (
     MAX_CONTEXT_ITEMS,
     MAX_LIST_ITEMS,
     MAX_POLICY_BYTES,
+    MAX_POLICY_MATCH_WORK,
     MAX_POLICY_SOURCE_BYTES,
     MAX_POLICY_SOURCES,
     MAX_RECURSIVE_DEPTH,
@@ -96,6 +99,7 @@ def test_shared_operation_limits_are_the_reviewed_values() -> None:
         16,
         262_144,
     )
+    assert MAX_POLICY_MATCH_WORK == 65_536
 
 
 @pytest.mark.parametrize(("code", "message"), ERROR_MESSAGES.items())
@@ -521,6 +525,59 @@ def test_directory_only_rule_distinguishes_a_direct_directory_from_a_regular_fil
 
 
 @pytest.mark.parametrize(
+    ("rule", "directory_name"),
+    [
+        ("space-name /\n", "space-name "),
+        ("tab-name\t/\n", "tab-name\t"),
+        ("escaped\\ /\n", "escaped "),
+        ("foo\\  /\n", "foo  "),
+        ("foo\\ \t/\n", "foo \t"),
+    ],
+)
+def test_directory_terminator_preserves_significant_whitespace_in_the_name(
+    tmp_path: Path,
+    rule: str,
+    directory_name: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    target = workspace / directory_name
+    target.mkdir(parents=True)
+    (workspace / ".gitignore").write_text(rule, encoding="utf-8")
+
+    _admit_error(_policy(workspace), directory_name, "repository_path_ignored")
+
+
+def test_invalid_positive_directory_range_remains_a_no_op_in_derived_rules(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    directory_name = "foo[ "
+    target = workspace / directory_name
+    target.mkdir(parents=True)
+    (target / "file.txt").write_text("text", encoding="utf-8")
+    (workspace / ".gitignore").write_text("foo[ /\n", encoding="utf-8")
+    policy = _policy(workspace)
+
+    assert policy.admit_existing(directory_name).kind == "directory"
+    assert policy.admit_existing(f"{directory_name}/file.txt").kind == "file"
+
+
+def test_invalid_negated_directory_range_cannot_reinclude_an_ignored_target(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    directory_name = "foo[ "
+    target = workspace / directory_name
+    target.mkdir(parents=True)
+    (target / "file.txt").write_text("text", encoding="utf-8")
+    (workspace / ".gitignore").write_text("*/\n!foo[ /\n", encoding="utf-8")
+    policy = _policy(workspace)
+
+    _admit_error(policy, directory_name, "repository_path_ignored")
+    _admit_error(policy, f"{directory_name}/file.txt", "repository_path_ignored")
+
+
+@pytest.mark.parametrize(
     ("rules", "kind", "admitted"),
     [
         ("cache\n!cache/\n", "file", False),
@@ -586,6 +643,132 @@ def test_ignored_ancestor_cannot_be_rescued_but_traversable_parent_can(
         assert policy.admit_existing("private/keep.py").path == "private/keep.py"
     else:
         _admit_error(policy, "private/keep.py", "repository_path_ignored")
+
+
+@pytest.mark.parametrize(
+    ("rules", "parent_name"),
+    [
+        ("private/*\n!private/\n", "private"),
+        ("foo/**\n", "foo"),
+    ],
+)
+def test_git_descendant_patterns_keep_parent_traversable_and_skip_nested_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rules: str,
+    parent_name: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    blocked_directory = workspace / parent_name / "dir"
+    blocked_directory.mkdir(parents=True)
+    (workspace / ".gitignore").write_text(rules, encoding="utf-8")
+    nested_policy = blocked_directory / ".gitignore"
+    nested_policy.write_bytes(b"\xff")
+    (blocked_directory / "secret.txt").write_text("secret", encoding="utf-8")
+    original_read = RepositoryReadPolicy._read_policy_bytes
+    nested_reads = 0
+
+    def track_read(source: Path) -> bytes:
+        nonlocal nested_reads
+        if source == nested_policy:
+            nested_reads += 1
+        return original_read(source)
+
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_read_policy_bytes",
+        staticmethod(track_read),
+    )
+    policy = _policy(workspace)
+
+    assert policy.admit_existing(parent_name).kind == "directory"
+    _admit_error(policy, f"{parent_name}/dir", "repository_path_ignored")
+    _admit_error(policy, f"{parent_name}/dir/secret.txt", "repository_path_ignored")
+    assert nested_reads == 0
+
+
+@pytest.mark.parametrize("rules", ["!/\n", "foo//\n", "foo/**//\n"])
+def test_degenerate_git_directory_lines_remain_no_ops_in_paired_views(
+    tmp_path: Path,
+    rules: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "foo" / "dir"
+    nested.mkdir(parents=True)
+    (nested / "file.txt").write_text("text", encoding="utf-8")
+    (workspace / ".gitignore").write_text(rules, encoding="utf-8")
+    policy = _policy(workspace)
+
+    assert policy.admit_existing("foo").kind == "directory"
+    assert policy.admit_existing("foo/dir").kind == "directory"
+    assert policy.admit_existing("foo/dir/file.txt").kind == "file"
+
+
+@pytest.mark.parametrize(
+    ("rules", "directory_path"),
+    [
+        ("cache\n!cache/\n", "cache"),
+        ("private/*\n!private/dir/\n", "private/dir"),
+    ],
+)
+def test_direct_parent_reinclusion_applies_to_its_descendants(
+    tmp_path: Path,
+    rules: str,
+    directory_path: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    directory = workspace.joinpath(*directory_path.split("/"))
+    directory.mkdir(parents=True)
+    (directory / "key").write_text("value", encoding="utf-8")
+    (workspace / ".gitignore").write_text(rules, encoding="utf-8")
+    policy = _policy(workspace)
+
+    assert policy.admit_existing(directory_path).kind == "directory"
+    assert policy.admit_existing(f"{directory_path}/key").kind == "file"
+
+
+@pytest.mark.parametrize(
+    ("rules", "parent_path", "blocked_path"),
+    [
+        ("*/\n!foo/\n", "foo", "foo/bar"),
+        ("**/\n!foo/\n", "foo", "foo/bar"),
+        ("a/**/\n", "a", "a/foo"),
+    ],
+)
+def test_positive_directory_wildcards_still_ignore_reincluded_parent_descendants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rules: str,
+    parent_path: str,
+    blocked_path: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    blocked_directory = workspace.joinpath(*blocked_path.split("/"))
+    blocked_directory.mkdir(parents=True)
+    nested_policy = blocked_directory / ".gitignore"
+    nested_policy.write_bytes(b"\xff")
+    (blocked_directory / "file.txt").write_text("secret", encoding="utf-8")
+    (workspace / ".gitignore").write_text(rules, encoding="utf-8")
+    original_read = RepositoryReadPolicy._read_policy_bytes
+    nested_reads = 0
+
+    def track_read(source: Path) -> bytes:
+        nonlocal nested_reads
+        if source == nested_policy:
+            nested_reads += 1
+        return original_read(source)
+
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_read_policy_bytes",
+        staticmethod(track_read),
+    )
+    policy = _policy(workspace)
+
+    assert policy.admit_existing(parent_path).kind == "directory"
+    _admit_error(policy, blocked_path, "repository_path_ignored")
+    _admit_error(policy, f"{blocked_path}/file.txt", "repository_path_ignored")
+    assert nested_reads == 0
 
 
 @pytest.mark.parametrize("ignored_view", ["alias", "canonical"])
@@ -1020,6 +1203,67 @@ def test_internal_traversal_decision_shares_policy_source_union_budget(tmp_path:
     _admit_error(traversal, targets[1], "repository_policy_invalid")  # type: ignore[arg-type]
 
 
+def test_match_work_cap_is_cumulative_across_scopes_views_and_cache_hits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "nested"
+    nested.mkdir(parents=True)
+    root_pattern_slots = 8_192
+    nested_pattern_slots = 4_096
+    (workspace / ".gitignore").write_text(
+        "z\n#\n" * (root_pattern_slots // 2),
+        encoding="utf-8",
+    )
+    (nested / ".gitignore").write_text(
+        "y\n#\n" * (nested_pattern_slots // 2),
+        encoding="utf-8",
+    )
+    (nested / "target.txt").write_text("target", encoding="utf-8")
+    traversal = _policy(workspace)._new_admission()
+    original_read = RepositoryReadPolicy._read_policy_bytes
+    original_check = repository_access._check_policy
+    content_reads = 0
+    matcher_entries: list[int] = []
+
+    def track_read(source: Path) -> bytes:
+        nonlocal content_reads
+        content_reads += 1
+        return original_read(source)
+
+    def track_check(rules: GitIgnoreSpec, label: str) -> bool | None:
+        matcher_entries.append(traversal.state.match_work)
+        return original_check(rules, label)
+
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_read_policy_bytes",
+        staticmethod(track_read),
+    )
+    monkeypatch.setattr(repository_access, "_check_policy", track_check)
+
+    assert traversal.admit_existing("nested/target.txt").kind == "file"
+    assert traversal.state.match_work == MAX_POLICY_MATCH_WORK
+    assert len(matcher_entries) == 10
+    assert matcher_entries[-1] == MAX_POLICY_MATCH_WORK
+    assert content_reads == 2
+    cached_rules = dict(traversal.state.cache)
+    loaded_bytes = traversal.state.loaded_bytes
+    matcher_calls = len(matcher_entries)
+
+    _admit_error(
+        traversal,
+        "nested/target.txt",
+        "repository_policy_invalid",
+    )  # type: ignore[arg-type]
+    assert traversal.state.match_work == MAX_POLICY_MATCH_WORK
+    assert traversal.state.cache == cached_rules
+    assert traversal.state.loaded_bytes == loaded_bytes
+    assert content_reads == 2
+    assert len(matcher_entries) == matcher_calls
+
+
 @pytest.mark.parametrize("stage", ["before_policy_probe", "before_policy_read"])
 def test_lexical_policy_owner_retarget_fails_at_each_stability_seam(
     tmp_path: Path,
@@ -1099,6 +1343,7 @@ def test_lexical_policy_owner_retarget_fails_at_each_stability_seam(
     assert replacement_work == {"candidate": 0, "probe": 0, "resolve": 0, "read": 0}
     assert traversal.state.cache == {}
     assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0
 
 
 @pytest.mark.parametrize("stage", ["before_policy_probe", "before_policy_read"])
@@ -1177,3 +1422,163 @@ def test_canonical_policy_owner_retarget_fails_at_each_stability_seam(
     assert replacement_work == {"candidate": 0, "probe": 0, "resolve": 0, "read": 0}
     assert traversal.state.cache == {}
     assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0
+
+
+@pytest.mark.parametrize("stage", ["before_policy_probe", "before_policy_read"])
+def test_same_label_policy_owner_replacement_fails_by_directory_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    owner = workspace / "owner"
+    owner.mkdir(parents=True)
+    (owner / ".gitignore").write_text("file.txt\n", encoding="utf-8")
+    (owner / "file.txt").write_text("original", encoding="utf-8")
+    retained = workspace / "retained-owner"
+    traversal = _policy(workspace)._new_admission()
+    original_candidate = RepositoryReadPolicy._policy_candidate_path
+    original_probe = RepositoryReadPolicy._policy_leaf_is_present
+    original_resolve_source = RepositoryReadPolicy._resolve_policy_source
+    original_read = RepositoryReadPolicy._read_policy_bytes
+    mutated = False
+    replacement_work = {"candidate": 0, "probe": 0, "resolve": 0, "read": 0}
+
+    def replace_owner(
+        self: RepositoryReadPolicy,
+        observed_stage: str,
+        owner_label: str,
+    ) -> None:
+        nonlocal mutated
+        if not mutated and observed_stage == stage and owner_label == "owner":
+            owner.rename(retained)
+            owner.mkdir()
+            (owner / ".gitignore").write_text("unrelated\n", encoding="utf-8")
+            (owner / "file.txt").write_text("replacement", encoding="utf-8")
+            mutated = True
+
+    def track_candidate(self: RepositoryReadPolicy, components: tuple[str, ...]) -> Path:
+        if mutated:
+            replacement_work["candidate"] += 1
+        return original_candidate(self, components)
+
+    def track_probe(candidate: Path) -> bool:
+        if mutated:
+            replacement_work["probe"] += 1
+        return original_probe(candidate)
+
+    def track_source(self: RepositoryReadPolicy, label: str) -> object:
+        if mutated:
+            replacement_work["resolve"] += 1
+        return original_resolve_source(self, label)
+
+    def track_read(source: Path) -> bytes:
+        if mutated:
+            replacement_work["read"] += 1
+        return original_read(source)
+
+    monkeypatch.setattr(RepositoryReadPolicy, "_policy_checkpoint", replace_owner)
+    monkeypatch.setattr(RepositoryReadPolicy, "_policy_candidate_path", track_candidate)
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_policy_leaf_is_present",
+        staticmethod(track_probe),
+    )
+    monkeypatch.setattr(RepositoryReadPolicy, "_resolve_policy_source", track_source)
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_read_policy_bytes",
+        staticmethod(track_read),
+    )
+
+    _admit_error(traversal, "owner/file.txt", "repository_policy_invalid")  # type: ignore[arg-type]
+    assert mutated
+    assert replacement_work == {"candidate": 0, "probe": 0, "resolve": 0, "read": 0}
+    assert traversal.state.cache == {}
+    assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0
+
+
+@pytest.mark.parametrize("stage", ["before_policy_probe", "before_policy_read"])
+def test_canonical_same_label_owner_replacement_fails_by_directory_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    canonical = workspace / "canonical"
+    canonical.mkdir(parents=True)
+    (canonical / ".gitignore").write_text("file.txt\n", encoding="utf-8")
+    (canonical / "file.txt").write_text("original", encoding="utf-8")
+    alias = workspace / "file-alias"
+    alias.symlink_to(canonical / "file.txt")
+    retained = workspace / "retained-canonical"
+    original_stat = canonical.stat()
+    original_identity = (original_stat.st_dev, original_stat.st_ino)
+    replacement_identity: tuple[int, int] | None = None
+    traversal = _policy(workspace)._new_admission()
+    original_candidate = RepositoryReadPolicy._policy_candidate_path
+    original_probe = RepositoryReadPolicy._policy_leaf_is_present
+    original_resolve_source = RepositoryReadPolicy._resolve_policy_source
+    original_read = RepositoryReadPolicy._read_policy_bytes
+    mutated = False
+    replacement_work = {"candidate": 0, "probe": 0, "resolve": 0, "read": 0}
+
+    def replace_owner(
+        self: RepositoryReadPolicy,
+        observed_stage: str,
+        owner_label: str,
+    ) -> None:
+        nonlocal mutated, replacement_identity
+        if not mutated and observed_stage == stage and owner_label == "canonical":
+            canonical.rename(retained)
+            canonical.mkdir()
+            (canonical / ".gitignore").write_text("unrelated\n", encoding="utf-8")
+            (canonical / "file.txt").write_text("replacement", encoding="utf-8")
+            replacement_stat = canonical.stat()
+            replacement_identity = (replacement_stat.st_dev, replacement_stat.st_ino)
+            mutated = True
+
+    def track_candidate(self: RepositoryReadPolicy, components: tuple[str, ...]) -> Path:
+        if mutated:
+            replacement_work["candidate"] += 1
+        return original_candidate(self, components)
+
+    def track_probe(candidate: Path) -> bool:
+        if mutated:
+            replacement_work["probe"] += 1
+        return original_probe(candidate)
+
+    def track_source(self: RepositoryReadPolicy, label: str) -> object:
+        if mutated:
+            replacement_work["resolve"] += 1
+        return original_resolve_source(self, label)
+
+    def track_read(source: Path) -> bytes:
+        if mutated:
+            replacement_work["read"] += 1
+        return original_read(source)
+
+    monkeypatch.setattr(RepositoryReadPolicy, "_policy_checkpoint", replace_owner)
+    monkeypatch.setattr(RepositoryReadPolicy, "_policy_candidate_path", track_candidate)
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_policy_leaf_is_present",
+        staticmethod(track_probe),
+    )
+    monkeypatch.setattr(RepositoryReadPolicy, "_resolve_policy_source", track_source)
+    monkeypatch.setattr(
+        RepositoryReadPolicy,
+        "_read_policy_bytes",
+        staticmethod(track_read),
+    )
+
+    _admit_error(traversal, "file-alias", "repository_policy_invalid")  # type: ignore[arg-type]
+    assert mutated
+    assert replacement_identity is not None
+    assert replacement_identity != original_identity
+    assert replacement_work == {"candidate": 0, "probe": 0, "resolve": 0, "read": 0}
+    assert traversal.state.cache == {}
+    assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0

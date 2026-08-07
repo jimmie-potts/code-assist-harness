@@ -187,13 +187,15 @@ is likely to cross the ceiling.
   helpers used by ordinary reads and instruction discovery. Every present `.gitignore` keeps its
   candidate-owner directory for rule scope while its canonical source resolves through
   `WorkspaceBoundary` and passes canonical hard denial. The view captures its admitted owner's
-  canonical directory, re-admits that owner immediately before the non-following leaf probe and
-  again before a cache-miss read, and then re-resolves and rechecks the source. A persistent
-  owner retarget already present at either deterministic seam fails before replacement-leaf work;
-  cache hits still require current owner, leaf, and source admission. Pre-read-rejected sources fail as
-  `repository_policy_invalid`, cause no requested-content read, and are not opened, cached, or
-  charged. Invalid UTF-8 or NUL is read only into a bounded uncommitted candidate and is never
-  exposed, cached, or charged; safe internal symlinks remain owner-relative. CAH-025 exempts
+  canonical workspace-relative label plus followed directory device/inode, re-admits both identities
+  immediately before the non-following leaf probe and again before a cache-miss read, and then
+  re-resolves and rechecks the source. An owner retarget or same-label replacement already present at
+  either deterministic seam fails before replacement-leaf work; cache hits still require current
+  owner, leaf, and source admission. Device/inode reuse and mutation after the final check remain
+  residual pathname risks. Pre-read-rejected sources fail as `repository_policy_invalid`, cause no
+  requested-content read, and are not opened, cached, or charged. Invalid UTF-8 or NUL is read only
+  into a bounded uncommitted candidate and is never exposed, cached, or charged; safe internal
+  symlinks remain owner-relative. CAH-025 exempts
   instruction files from `.gitignore`, never from lexical or
   hard-deny admission, and does not inherit ordinary-read limits
   or errors. Each binding preserves the resolved canonical instruction
@@ -210,14 +212,23 @@ is likely to cross the ceiling.
   credential-bearing files. Ignore rules are evaluated independently against the normalized supplied
   path and its resolved canonical target. Each view walks directory prefixes root-to-leaf, loads a
   nested policy only after its directory admits, and denies when any ancestor or the target remains
-  ignored; a leaf negation cannot cross an ignored parent, and a negation in one view cannot re-include
-  a path ignored in the other. The bounded union of reachable policy files charges a canonically
-  identical policy input once, while both views still attach and evaluate its cached rules at their
-  own owner-relative scopes. M2 has no ignored-path override.
-- CAH-026 checks every proper lexical ancestor and both lexical leaf forms, denying pre-resolution
-  only when the effective result is type-independent. It otherwise resolves, applies canonical hard
-  denial, and computes both canonical leaf forms before kind inspection. It then selects the admitted
-  `file | directory` kind's result in both views and maps an existing
+  ignored. Each source compiles paired original-file and safely transformed direct-directory specs.
+  Both match bare labels and skip ancestor-only `ps_d` results; retained count/include checks keep
+  original no-op patterns inert. The directory view preserves direct `*/`, `**/`, and `a/**/`
+  decisions. The harness does not let an ancestor-only match decide a descendant:
+  `private` then `!private/` admits the parent and descendants, while `private/*` then `!private/`
+  admits the parent but denies a directly matched child. A leaf negation cannot cross an ignored
+  parent, and a negation in one view cannot re-include a path ignored in the other. The bounded union
+  of reachable policy files charges a canonically identical policy input once, while both views still
+  attach and evaluate its cached rules at their own owner-relative scopes. Matching uses one inclusive
+  65,536 candidate-pattern-slot budget across both views, cache hits, and recursive descendants; each
+  evaluation charges only the selected kind view, and an over-bound logical evaluation fails as
+  `repository_policy_invalid` before the matcher runs. M2 has no ignored-path override.
+- CAH-026 checks every proper lexical ancestor as a kind-aware direct entry and reserves both lexical
+  forms for the final leaf, denying pre-resolution only when the effective result is type-independent.
+  It otherwise resolves, applies canonical hard denial, repeats direct ancestors and both final-leaf
+  forms before kind inspection, then selects the admitted `file | directory` kind's result in both
+  views and maps an existing
   special target to unavailable. This contract story does not install unused
   runtime state. CAH-037's sole M2 composition factory creates one policy per session and passes its
   exact identity to the native services after they exist.
