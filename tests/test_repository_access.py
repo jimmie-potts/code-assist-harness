@@ -525,6 +525,296 @@ def test_directory_only_rule_distinguishes_a_direct_directory_from_a_regular_fil
 
 
 @pytest.mark.parametrize(
+    ("raw", "semantic"),
+    [
+        ("foo   ", "foo"),
+        ("foo\\ ", "foo\\ "),
+        ("foo\\  ", "foo\\ "),
+        ("foo\\\\ ", "foo\\\\"),
+        ("foo\\\\\\ ", "foo\\\\\\ "),
+        ("foo\t", "foo\t"),
+        ("foo\N{NO-BREAK SPACE}", "foo\N{NO-BREAK SPACE}"),
+        ("foo\N{EM SPACE}", "foo\N{EM SPACE}"),
+        ("foo/\t", "foo/\t"),
+        ("foo/   ", "foo/"),
+        ("foo  \\", "foo  \\"),
+        ("foo\r", "foo"),
+        ("foo\r\r", "foo\r"),
+        ("\t ", "\t"),
+        (" \t", " \t"),
+    ],
+)
+def test_policy_line_normalization_matches_git_trailing_whitespace(
+    raw: str,
+    semantic: str,
+) -> None:
+    assert repository_access._normalize_policy_line(raw) == semantic
+
+
+def test_non_space_trailing_whitespace_cannot_reinclude_an_ignored_directory(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    ignored = workspace / "foo"
+    ignored.mkdir(parents=True)
+    (ignored / "secret.txt").write_text("secret", encoding="utf-8")
+    (ignored / ".gitignore").write_bytes(b"\xff")
+    (workspace / ".gitignore").write_text("foo\n!foo/\t\n", encoding="utf-8")
+
+    policy = _policy(workspace)
+    _admit_error(policy, "foo", "repository_path_ignored")
+    _admit_error(policy, "foo/secret.txt", "repository_path_ignored")
+
+
+@pytest.mark.parametrize("trailing", ["\t", "\N{NO-BREAK SPACE}", "\N{EM SPACE}"])
+def test_file_patterns_preserve_non_space_trailing_whitespace(
+    tmp_path: Path,
+    trailing: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    exact = f"note{trailing}"
+    (workspace / exact).write_text("ignored", encoding="utf-8")
+    (workspace / "note").write_text("admitted", encoding="utf-8")
+    (workspace / ".gitignore").write_text(exact, encoding="utf-8")
+    policy = _policy(workspace)
+
+    _admit_error(policy, exact, "repository_path_ignored")
+    assert policy.admit_existing("note").kind == "file"
+
+
+def test_tab_after_a_slash_is_a_literal_child_not_a_directory_terminator(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    parent = workspace / "foo"
+    parent.mkdir(parents=True)
+    (parent / "\t").write_text("ignored", encoding="utf-8")
+    (workspace / ".gitignore").write_text("foo/\t\n", encoding="utf-8")
+    policy = _policy(workspace)
+
+    assert policy.admit_existing("foo").kind == "directory"
+    _admit_error(policy, "foo/\t", "repository_path_ignored")
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "[[:digit:]].txt",
+        "[![:digit:]].txt",
+        "![[:digit:]].txt",
+        "[a[:digit:]_].txt",
+        "[[:bogus:]].txt",
+        "[[:DIGIT:]].txt",
+        "[[:digit]].txt",
+        "[[:digit:].txt",
+        "[[:]].txt",
+        "*\n![[:digit:]]",
+        "*\n![[:bogus:]]",
+        "*\n![[:digit]]",
+        "*\n![:digit:]",
+        "*\n![!a]",
+        "*\n![a:]",
+        "*\n![\\a]",
+        "*\n!?",
+        "??",
+        "*\n![a\\]*",
+        r"[a\][:digit:]]",
+        "a/*\n!a[.-0]b",
+    ],
+)
+def test_unsupported_bracket_syntax_fails_before_pathspec_or_state_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pattern: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "target.txt").write_text("target", encoding="utf-8")
+    (workspace / ".gitignore").write_text(pattern, encoding="utf-8")
+    traversal = _policy(workspace)._new_admission()
+    original_compile = repository_access._compile_policy_pattern
+    compile_calls = 0
+
+    def track_compile(line: str) -> object:
+        nonlocal compile_calls
+        compile_calls += 1
+        return original_compile(line)
+
+    monkeypatch.setattr(repository_access, "_compile_policy_pattern", track_compile)
+
+    _admit_error(traversal, "target.txt", "repository_policy_invalid")  # type: ignore[arg-type]
+    assert compile_calls == 0
+    assert traversal.state.cache == {}
+    assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0
+
+
+@pytest.mark.parametrize(
+    ("rules", "target"),
+    [
+        ("*\n!?\n", "\N{LATIN SMALL LETTER E WITH ACUTE}"),
+        ("??\n", "\N{LATIN SMALL LETTER E WITH ACUTE}"),
+        ("*\n![!a]\n", ":"),
+        ("*\n![a:]\n", ":"),
+        ("*\n![\\a]\n", "\\"),
+        ("a/*\n!a[.-0]b\n", "a/b"),
+    ],
+)
+def test_backend_divergent_patterns_fail_closed_for_their_bypass_targets(
+    tmp_path: Path,
+    rules: str,
+    target: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    target_path = workspace.joinpath(*target.split("/"))
+    target_path.parent.mkdir(parents=True)
+    target_path.write_text("target", encoding="utf-8")
+    (workspace / ".gitignore").write_text(rules, encoding="utf-8")
+
+    _admit_error(_policy(workspace), target, "repository_policy_invalid")
+
+
+def test_safe_positive_ascii_range_can_reinclude_a_root_file(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "b").write_text("target", encoding="utf-8")
+    (workspace / ".gitignore").write_text("*\n![a-z]\n", encoding="utf-8")
+
+    assert _policy(workspace).admit_existing("b").kind == "file"
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "#[[:digit:]]",
+        "[a-z]",
+        "[0-9]*.log",
+        "*.py[cod]",
+        "[*].txt",
+        r"literal\?name",
+    ],
+)
+def test_comments_and_safe_positive_ranges_remain_supported(pattern: str) -> None:
+    repository_access._compile_policy_rules([pattern])
+
+
+@pytest.mark.parametrize(
+    "class_name",
+    [
+        "alnum",
+        "alpha",
+        "blank",
+        "cntrl",
+        "digit",
+        "graph",
+        "lower",
+        "print",
+        "punct",
+        "space",
+        "upper",
+        "xdigit",
+    ],
+)
+def test_every_git_posix_class_is_inside_the_fail_closed_subset(class_name: str) -> None:
+    with pytest.raises(ValueError, match="unsupported bracket syntax"):
+        repository_access._compile_policy_rules([f"[[:{class_name}:]]"])
+
+
+def test_posix_class_at_the_exact_policy_byte_limit_fails_before_compile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "target.txt").write_text("target", encoding="utf-8")
+    suffix = "\n[[:digit:]]"
+    content = "#" + ("x" * (MAX_POLICY_SOURCE_BYTES - len(suffix) - 1)) + suffix
+    payload = content.encode("utf-8")
+    assert len(payload) == MAX_POLICY_SOURCE_BYTES
+    (workspace / ".gitignore").write_bytes(payload)
+    traversal = _policy(workspace)._new_admission()
+    original_compile = repository_access._compile_policy_pattern
+    compile_calls = 0
+
+    def track_compile(line: str) -> object:
+        nonlocal compile_calls
+        compile_calls += 1
+        return original_compile(line)
+
+    monkeypatch.setattr(repository_access, "_compile_policy_pattern", track_compile)
+
+    _admit_error(traversal, "target.txt", "repository_policy_invalid")  # type: ignore[arg-type]
+    assert compile_calls == 0
+    assert traversal.state.cache == {}
+    assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "*.log",
+        "src/*/generated/*.ts",
+        "**/*.py",
+        "src/**/generated/*.ts",
+        "packages/*/dist/**/*.map",
+        "**/node_modules/**",
+        r"literal\*name",
+        "[*].txt",
+        "# *a*a*a*a*ab",
+    ],
+)
+def test_common_linear_ignore_patterns_remain_supported(pattern: str) -> None:
+    repository_access._compile_policy_rules([pattern])
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "*a*a*a*a*ab",
+        "*generated*",
+        "**/foo/**/bar",
+        "a/**//**//",
+        "/**//**//",
+        "*a*b/",
+        r"[a\]*a*a*a*a*ab",
+    ],
+)
+def test_ambiguous_ignore_repetition_fails_before_matcher_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pattern: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = "a" * 255
+    (workspace / target).write_text("target", encoding="utf-8")
+    (workspace / ".gitignore").write_text(pattern, encoding="utf-8")
+    traversal = _policy(workspace)._new_admission()
+    original_compile = repository_access._compile_policy_pattern
+    compile_calls = 0
+
+    def fail_check(*args: object, **kwargs: object) -> bool | None:
+        del args, kwargs
+        raise AssertionError("an unbounded pattern must not reach the matcher")
+
+    def track_compile(line: str) -> object:
+        nonlocal compile_calls
+        compile_calls += 1
+        return original_compile(line)
+
+    monkeypatch.setattr(repository_access, "_check_policy", fail_check)
+    monkeypatch.setattr(repository_access, "_compile_policy_pattern", track_compile)
+
+    _admit_error(traversal, target, "repository_policy_invalid")  # type: ignore[arg-type]
+    assert compile_calls == 0
+    assert traversal.state.cache == {}
+    assert traversal.state.loaded_bytes == 0
+    assert traversal.state.match_work == 0
+
+
+@pytest.mark.parametrize(
     ("rule", "directory_name"),
     [
         ("space-name /\n", "space-name "),

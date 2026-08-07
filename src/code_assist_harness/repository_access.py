@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, TypeGuard
 
 from pathspec import GitIgnoreSpec
+from pathspec.patterns.gitignore.spec import GitIgnoreSpecPattern
 
 from code_assist_harness.workspace import (
     ResolvedWorkspacePath,
@@ -47,6 +48,9 @@ MAX_POLICY_SOURCE_BYTES = 65_536
 MAX_POLICY_SOURCES = 16
 MAX_POLICY_BYTES = 262_144
 MAX_POLICY_MATCH_WORK = 65_536
+_MAX_POLICY_STARS_PER_SEGMENT = 1
+_MAX_POLICY_ACTIVE_GLOBSTARS = 1
+_SAFE_POLICY_RANGE_LITERALS = frozenset("_*?.")
 
 _PATH_SYNTAX_MESSAGE = "Repository path syntax is invalid."
 _ERROR_MESSAGES: dict[RepositoryAccessErrorCode, str] = {
@@ -93,6 +97,16 @@ class RepositoryPathSyntaxError(ValueError):
     def __init__(self) -> None:
         """Initialize the one fixed lexical-adapter message."""
         super().__init__(_PATH_SYNTAX_MESSAGE)
+
+
+class _SemanticPolicyLine(str):
+    """Prevent PathSpec from broadly trimming an already Git-normalized line."""
+
+    def rstrip(self, chars: str | None = None) -> str:
+        """Preserve semantic trailing characters when PathSpec calls bare ``rstrip``."""
+        if chars is None:
+            return self
+        return super().rstrip(chars)
 
 
 class RepositoryAccessError(ValueError):
@@ -660,28 +674,146 @@ def _check_policy(rules: GitIgnoreSpec, label: str) -> bool | None:
     return decision
 
 
+def _normalize_policy_line(line: str) -> str:
+    """Apply Git's CR and unescaped trailing-ASCII-space line normalization."""
+    if line.endswith("\r"):
+        line = line[:-1]
+
+    trailing_space: int | None = None
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character == "\\":
+            if index + 1 == len(line):
+                return line
+            trailing_space = None
+            index += 2
+            continue
+        if character == " ":
+            if trailing_space is None:
+                trailing_space = index
+        else:
+            trailing_space = None
+        index += 1
+    return line if trailing_space is None else line[:trailing_space]
+
+
+def _ascii_range_group(character: str) -> int | None:
+    """Classify one ASCII alphanumeric for a separator-safe range."""
+    if "0" <= character <= "9":
+        return 0
+    if "A" <= character <= "Z":
+        return 1
+    if "a" <= character <= "z":
+        return 2
+    return None
+
+
+def _validate_policy_range(content: str) -> None:
+    """Admit only positive ASCII ranges and fixed literals that cannot include ``/``."""
+    if not content or content[0] in ("!", "^", "]"):
+        raise ValueError("policy pattern uses unsupported bracket syntax")
+    index = 0
+    while index < len(content):
+        character = content[index]
+        group = _ascii_range_group(character)
+        if index + 1 < len(content) and content[index + 1] == "-":
+            if index + 2 == len(content):
+                raise ValueError("policy pattern uses unsupported bracket syntax")
+            endpoint = content[index + 2]
+            if group is None or _ascii_range_group(endpoint) != group or character > endpoint:
+                raise ValueError("policy pattern uses unsupported bracket syntax")
+            index += 3
+            continue
+        if group is None and character not in _SAFE_POLICY_RANGE_LITERALS:
+            raise ValueError("policy pattern uses unsupported bracket syntax")
+        index += 1
+
+
+def _validate_policy_segment(segment: str) -> None:
+    """Reject backend-divergent ranges and ambiguous local wildcard repetition."""
+    stars = 0
+    in_range = False
+    range_has_member = False
+    range_start = 0
+    index = 0
+    while index < len(segment):
+        character = segment[index]
+        if character == "\\" and not in_range:
+            index += 2
+            continue
+        if not in_range:
+            if character == "[":
+                in_range = True
+                range_has_member = False
+                range_start = index + 1
+            elif character == "*":
+                stars += 1
+                if stars > _MAX_POLICY_STARS_PER_SEGMENT:
+                    raise ValueError("policy pattern exceeds the bounded wildcard grammar")
+            elif character == "?":
+                raise ValueError("policy pattern uses an unsupported question-mark wildcard")
+            index += 1
+            continue
+        if character == "]" and range_has_member:
+            _validate_policy_range(segment[range_start:index])
+            in_range = False
+            index += 1
+            continue
+        range_has_member = True
+        index += 1
+
+
+def _validate_policy_line(line: str) -> None:
+    """Admit one semantic line only when every regex repetition remains bounded."""
+    if not line or line.startswith("#") or line == "/":
+        return
+    body = line[1:] if line.startswith("!") else line
+    segments = body.split("/")
+    last_nonempty = next(
+        (index for index in range(len(segments) - 1, -1, -1) if segments[index]),
+        -1,
+    )
+    active_globstars = 0
+    trailing_empty_activates_last_globstar = body.endswith("//")
+    for index, segment in enumerate(segments):
+        if segment == "**":
+            if index < last_nonempty or (
+                index == last_nonempty and trailing_empty_activates_last_globstar
+            ):
+                active_globstars += 1
+                if active_globstars > _MAX_POLICY_ACTIVE_GLOBSTARS:
+                    raise ValueError("policy pattern exceeds the bounded globstar grammar")
+            continue
+        _validate_policy_segment(segment)
+
+
+def _compile_policy_pattern(line: str) -> GitIgnoreSpecPattern:
+    """Compile one trusted semantic line while retaining exact built-in-string identity."""
+    pattern = GitIgnoreSpecPattern(_SemanticPolicyLine(line))
+    pattern.pattern = line
+    return pattern
+
+
 def _directory_pattern(line: str) -> str:
     """Convert one semantic directory terminator into a safe bare-label pattern."""
-    normalized = line if line.endswith("\\ ") else line.rstrip()
-    body = normalized[1:] if normalized.startswith("!") else normalized
+    body = line[1:] if line.startswith("!") else line
     if body == "/" or body.endswith("//") or not body.endswith("/"):
         return line
-
-    pattern = normalized[:-1]
-    if pattern.endswith("\\ "):
-        return pattern
-    without_whitespace = pattern.rstrip()
-    trailing_whitespace = pattern[len(without_whitespace) :]
-    trailing_backslashes = len(without_whitespace) - len(without_whitespace.rstrip("\\"))
-    if trailing_whitespace and trailing_backslashes % 2:
-        without_whitespace = without_whitespace[:-1]
-    return without_whitespace + "".join(f"[{character}]" for character in trailing_whitespace)
+    return line[:-1]
 
 
 def _compile_policy_rules(lines: list[str]) -> _PolicyRules:
     """Compile kind-specific views without activating an original no-op pattern."""
-    file_rules = GitIgnoreSpec.from_lines(lines, backend="simple")
-    retained_lines = [line for line in lines if line]
+    semantic_lines = [_normalize_policy_line(line) for line in lines]
+    for line in semantic_lines:
+        _validate_policy_line(line)
+    file_rules = GitIgnoreSpec.from_lines(
+        semantic_lines,
+        pattern_factory=_compile_policy_pattern,
+        backend="simple",
+    )
+    retained_lines = [line for line in semantic_lines if line]
     if len(retained_lines) != len(file_rules.patterns):
         raise ValueError("GitIgnoreSpec retained an unexpected pattern count")
     directory_lines: list[str] = []
@@ -689,7 +821,11 @@ def _compile_policy_rules(lines: list[str]) -> _PolicyRules:
         if type(pattern.pattern) is not str or pattern.pattern != line:
             raise ValueError("GitIgnoreSpec changed a retained policy pattern")
         directory_lines.append(line if pattern.include is None else _directory_pattern(line))
-    directory_rules = GitIgnoreSpec.from_lines(directory_lines, backend="simple")
+    directory_rules = GitIgnoreSpec.from_lines(
+        directory_lines,
+        pattern_factory=_compile_policy_pattern,
+        backend="simple",
+    )
     if len(directory_rules.patterns) != len(file_rules.patterns):
         raise ValueError("directory rules changed the retained pattern count")
     for line, original, derived in zip(

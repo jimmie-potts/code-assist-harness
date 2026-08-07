@@ -52,16 +52,22 @@ before owner-relative rule attachment, but performs no content read or new byte 
 remains cache/byte-budget identity. Device/inode reuse and mutation after the final check remain
 deferred descriptor-relative risks.
 
-Each policy source compiles paired original-file and safely transformed direct-directory specs. The
-directory compile removes one semantic trailing slash, preserves original no-op patterns, and
-validates retained count/include identity. Both views match bare labels and skip ancestor-only `ps_d`
+Each policy source first becomes one Git-semantic line set: one terminal CR and unescaped trailing
+ASCII spaces are removed, but tabs and Unicode whitespace remain literal through a harness-owned
+PathSpec adapter. A linear pre-compile scan fails closed on Unicode-sensitive `?`, bracket syntax
+outside the positive separator-safe ASCII subset, and ambiguous repeated `*`/compiler-effective
+active `**` forms before state or matcher effects. The source then compiles paired
+file and safely transformed direct-directory specs. The directory compile removes one semantic
+trailing slash, preserves original no-op patterns, and validates retained count/include identity.
+Both views match bare labels and skip ancestor-only `ps_d`
 results, so `*/`, `**/`, and `a/**/` can directly match the current directory without letting a
 parent negation impersonate its descendant. Only the final leaf evaluates both kind views. One
 inclusive 65,536 candidate-pattern-slot budget spans ancestors, lexical and canonical
 views, both final-leaf forms, cached policies, and recursive descendants in an admission traversal.
 Each logical matcher call reserves the selected view's complete stored pattern-slot count, including
-no-op slots, first. Work that would exceed the budget fails with `repository_policy_invalid` before the matcher
-runs; a cache hit saves content I/O, not matching work. Escaping, hard-denied, dangling, non-regular,
+no-op slots, first. Work that would exceed the budget fails with `repository_policy_invalid` before
+the matcher runs; the lexical grammar separately bounds repetition within each admitted slot. A cache
+hit saves content I/O, not matching work. Escaping, hard-denied, dangling, non-regular,
 retargeted, or unreadable policy input also fails closed and is neither cached nor charged.
 Repository content is untrusted data: text in a source file cannot authorize a command, broaden the
 command allowlist, or bypass an approval.

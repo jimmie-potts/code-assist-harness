@@ -38,7 +38,7 @@ After completing this unit, you should be able to:
   lone surrogates;
 - apply nested `.gitignore` precedence and ancestor-traversability rules independently to lexical and
   canonical path views;
-- explain why one bounded policy text compiles into original file and safely transformed
+- explain why one bounded policy text compiles into Git-semantic file and safely transformed
   direct-directory views;
 - explain why a policy candidate's owner controls rule scope while its canonical source controls
   containment, hard denial, caching, and budgets;
@@ -85,15 +85,28 @@ that directory is available. By contrast, `private/*` leaves the directory itsel
 later `!private/keep.py` may re-include the file. The harness must walk and admit every ancestor, not
 ask only for the leaf's final matcher result.
 
-The semantics used for that ancestor decision matter. From the same bounded text, CAH-026 compiles an
-original-line file `GitIgnoreSpec` and a direct-directory view that safely removes one semantic
-trailing slash. Both match bare labels and skip `ps_d` results that reached the candidate only through
+The semantics used for that ancestor decision matter. CAH-026 first removes one line-ending CR and
+only unescaped trailing ASCII spaces, exactly as Git does; terminal tabs and Unicode whitespace stay
+literal. It then compiles a file `GitIgnoreSpec` and a direct-directory view that safely removes one
+semantic trailing slash. A small harness-owned string adapter prevents PathSpec from broadly
+trimming the already normalized line. Both views match bare labels and skip `ps_d` results that
+reached the candidate only through
 an ancestor directory. With `private` then `!private/`, the parent and descendants are re-admitted.
 With `private/*` then `!private/`, the parent remains traversable but `private/*` directly matches
 `private/dir`; the negation is only an ancestor match, so the child remains ignored and traversal
 stops. The paired view also fixes a less obvious PathSpec edge: `*/`, `**/`, and `a/**/` otherwise
 stop at the first ancestor slash instead of directly matching the current directory. Safe terminator
 removal preserves those global-directory wildcard decisions without rewriting the bounded source.
+
+PathSpec's Python-regex backend also makes one stored pattern slot potentially expensive. Five
+repeated `*a` fragments can backtrack for seconds even though the traversal counter charged only one
+slot. CAH-026 therefore admits a conservative linear-scanned subset before compilation: at most one
+unescaped `*` per ordinary slash segment and one compiler-effective active nonterminal `**` per line.
+Unescaped `?` fails because Git counts UTF-8 bytes while Python regex counts Unicode code points.
+Brackets admit only positive separator-safe ASCII members and ranges; POSIX, negated, escaped,
+Unicode, or punctuation-spanning forms fail closed. Escaped wildcard literals, safe-range wildcard
+literals, and terminal globstars remain supported. A future linear-time matcher is the graduation path for
+supporting the rejected Git-valid forms without reopening this denial-of-service boundary.
 
 The `.gitignore` directory entry and the bytes it names are also different identities. If
 `pkg/.gitignore` links to `shared/ignore.rules`, the rules still apply below `pkg`; resolving the
@@ -148,11 +161,13 @@ does not normalize spelling, because normalization could change which repository
 - **Admission pipeline:** validate, lexical hard deny plus direct-entry ancestors and two-form leaf,
   resolve, repeat canonical hard deny plus direct-entry ancestors and two-form leaf, then admit
   `file | directory` and select both views' form before operation limits and final re-admission.
-- **GitIgnoreSpec:** maintained Git-compatible matching for root and nested `.gitignore` files.
+- **GitIgnoreSpec:** maintained matcher for the explicitly admitted Git-compatible subset in root and
+  nested `.gitignore` files.
 - **Ancestor traversability:** every proper directory prefix must admit before the policy may load its
   nested rules or let a leaf negation take effect.
-- **Paired kind views:** the file spec compiles original lines; the direct-directory spec safely
-  removes one semantic trailing slash. Both match bare labels and skip ancestor-only `ps_d` results.
+- **Paired kind views:** the file spec compiles Git-normalized semantic lines; the direct-directory
+  spec safely removes one semantic trailing slash. Both match bare labels and skip ancestor-only
+  `ps_d` results.
   Proper ancestors select the directory view; the final leaf evaluates both views before kind is known.
 - **Shared policy cache:** read and charge a canonically identical policy file once, but attach and
   evaluate its rules independently at each view's owner-relative scope.
@@ -247,8 +262,8 @@ rather than reconstructing a workspace root or authorization decision.
    identities immediately before the non-following `.gitignore` probe. For every present candidate,
    resolve its source through CAH-024 and apply canonical hard denial.
 6. On a cache hit, attach rules only after the owner check and current leaf/source resolution; do not
-   reread or recharge content. On a miss, compile original file lines and a safely transformed
-   direct-directory line stream from the same bounded text, then cache the pair. Matching reserves and
+   reread or recharge content. On a miss, normalize and validate one semantic line stream, compile its
+   file and safely transformed direct-directory views, then cache the pair. Matching reserves and
    charges only the selected view's full pattern-slot count.
    Re-admit and compare the owner label plus followed identity before resolving the
    leaf again, then recheck the source immediately before the bounded read. Cache and charge one
@@ -407,14 +422,33 @@ The owner check compares the captured canonical label plus followed directory de
 non-following leaf probe and again before a cache-miss read. A cache hit still follows current owner,
 leaf, and source admission and consumes candidate-pattern work. A miss checks capacity before the
 bounded read, validates strict UTF-8/no-NUL text, and only then commits the canonical source to cache
-and byte accounting. The one text snapshot supplies both the original file view and safely transformed
-direct-directory view. `_compile_policy_rules` transforms only a retained pattern whose original
+and byte accounting. The one text snapshot supplies both the Git-semantic file view and safely
+transformed direct-directory view. `_compile_policy_rules` transforms only a retained pattern whose original
 `include` is not `None`, then requires equal retained counts plus exact pattern/include identity after
 the derived compile. An invalid-range no-op such as `foo[ /` therefore remains the original no-op and
 cannot activate as either a positive directory rule or a negation. Pre-read-rejected sources are not
 opened, cached, or charged. Every unsafe
 present candidate maps to the same fixed policy failure, and mapped failures suppress their original
 cause so a traceback cannot recover a path, pattern, operating-system message, or repository content.
+
+The compile boundary is deliberately ordered:
+
+```python
+semantic_lines = [_normalize_policy_line(line) for line in lines]
+for line in semantic_lines:
+    _validate_policy_line(line)
+file_rules = GitIgnoreSpec.from_lines(
+    semantic_lines,
+    pattern_factory=_compile_policy_pattern,
+    backend="simple",
+)
+```
+
+The first line derives the Git-semantic spelling without increasing source size. The loop rejects
+unsupported class syntax and ambiguous repetitions before PathSpec receives any line. Only normal
+return from both steps authorizes regex compilation through the adapter that preserves the semantic
+spelling. `_load_policy` commits the resulting pair to cache and byte accounting only after this
+whole compile transaction succeeds.
 
 ### Failure path: leaf type changes the effective Git decision
 
@@ -487,7 +521,7 @@ the safely admitted kind selects the exact result rather than letting either for
 ### Validation evidence
 
 `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_repository_access.py` passes all
-155 focused tests. `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` also passed end to end:
+238 focused tests. `TMPDIR=/tmp UV_CACHE_DIR=/tmp/uv-cache ./scripts/check` also passed end to end:
 lock/environment checks, Ruff lint/docstrings and format, the complete offline Python suite with one
 live-provider smoke deselected, both protocol implementations and shared fixtures, repository-policy
 checks, TUI typecheck/lint and tests, and the real Node-to-Python process-boundary tests.
@@ -539,6 +573,18 @@ checks, TUI typecheck/lint and tests, and the real Node-to-Python process-bounda
 - **Match-work amplification:** work has reached 65,536 and the next whole logical evaluation has a
   nonzero stored pattern-slot count. The harness returns `repository_policy_invalid` before its
   matcher runs; cached rules, no-op slots, and a new descendant do not reset the counter.
+- **Regex backtracking pattern:** one segment contains repeated unescaped `*`, or a line contains two
+  active globstars. The semantic-line scanner returns `repository_policy_invalid` before PathSpec,
+  cache, byte, match-work, or matcher effects; no elapsed-time timeout is needed.
+- **Unicode question wildcard:** Git sees `é` as two UTF-8 bytes while Python regex sees one code
+  point, so `?` and `??` make opposite decisions. Unescaped `?` fails before compilation; `\?` and
+  `[?]` remain literal controls.
+- **Backend-divergent range:** POSIX, negated, escaped, Unicode, mixed-category, or punctuation range
+  syntax can disagree with Git. In particular, Python `[.-0]` includes `/` and could cross a path
+  separator. The scanner admits only the reviewed positive ASCII subset before a negation can change
+  admission.
+- **Trailing tab negation:** `foo` then `!foo/\t` must leave `foo` ignored. Git treats the tab as a
+  literal child name, and the semantic-line adapter prevents PathSpec from erasing it into `!foo/`.
 - **Symlink alias:** a safe-looking name resolves to `.ssh`; canonical denial blocks it.
 - **Lone surrogate:** a parsed request contains `"\ud800"`; the field's fixed input error occurs with
   zero policy or filesystem calls.
@@ -610,7 +656,7 @@ provenance; preserve local fail-closed enforcement if the central service is una
 - The Python harness owns final repository-read admission.
 - Pure lexical and hard-deny helpers give ordinary reads and CAH-025 identical pre-I/O decisions
   without sharing ignore-policy behavior, ordinary-read limits, or errors.
-- Lexical and canonical ignore views each require paired original-file and safely transformed
+- Lexical and canonical ignore views each require paired semantic-file and safely transformed
   direct-directory specs; both match bare labels, skip ancestor-only results, and preserve global
   directory wildcards.
 - Every policy source is contained and canonically hard-denied before a bounded read; safe internal
@@ -620,6 +666,8 @@ provenance; preserve local fail-closed enforcement if the central service is una
   claiming to eliminate later mutation or inode reuse.
 - One inclusive 65,536 candidate-pattern-slot budget spans the entire traversal; each evaluation
   charges only its selected kind view, and cache reuse never makes matching free.
+- Git-exact line normalization preserves non-space trailing whitespace, while the pre-compile grammar
+  bounds work inside each regex and rejects PathSpec-divergent bracket syntax.
 - Hard denial precedes and dominates Git-style ignore policy.
 - Central policy improves governance but introduces availability and operational cost.
 

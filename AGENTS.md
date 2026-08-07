@@ -226,12 +226,24 @@ captured label and identity; a persistent retarget or replacement
 fails before replacement leaf work. Cache hits still require current owner/leaf/source admission
 before attaching cached rules. Device/inode reuse and mutation after the final check remain possible;
 these pathname snapshots narrow races rather than eliminating them.
-Compile every admitted policy source into two kind-specific `GitIgnoreSpec` views from the same
-bounded text. The file view retains the original lines. The direct-directory view safely removes one
-semantic trailing slash before compilation while preserving escaped/trailing whitespace and leaving
-degenerate slash forms unchanged. Transform only a retained pattern whose original `include` is not
-`None`; require retained count plus pattern/include identity after the derived compile so an invalid
-range or other original no-op cannot activate. Both views match the bare relative label and discard `ps_d`
+Normalize every admitted policy line once using Git's line grammar: remove one terminal carriage
+return, trim only a final run of unescaped ASCII spaces, and preserve tabs and Unicode whitespace.
+Compile two kind-specific `GitIgnoreSpec` views through the harness-owned semantic-line adapter so
+PathSpec cannot apply its broader whitespace trim. The direct-directory view safely removes one
+semantic trailing slash while leaving degenerate slash forms unchanged. Transform only a retained
+pattern whose original `include` is not `None`; require retained count plus pattern/include identity
+after the derived compile so an invalid range or other original no-op cannot activate.
+Before either compile, scan the normalized line once and fail closed on an unescaped `?`, more than
+one unescaped `*` in an ordinary slash segment, more than one compiler-effective nonterminal `**`
+segment with later content, or a bracket expression outside the positive ASCII safe subset. That
+subset admits ASCII alphanumeric members, same-class ascending digit/uppercase/lowercase ranges, and
+fixed `_`, `*`, `?`, or `.` members; it rejects negation, backslashes, colons, nested/leading brackets,
+Unicode, literal hyphens, and mixed/descending ranges so Python regex cannot cross `/` or diverge from
+Git's bytewise wildcard semantics. The globstar check accounts for trailing and doubled separators
+before either kind compile. Escaped stars/question marks and safe-range stars/question marks are
+fixed literals; a terminal `**` is not an active cross-directory repeat. This deliberately
+rejects valid Git patterns outside the bounded PathSpec subset as `repository_policy_invalid` before
+cache, byte, match-work, or matcher effects. Both views match the bare relative label and discard `ps_d`
 ancestor-only matches. This lets `*/`, `**/`, and `a/**/` match the current directory entry instead
 of PathSpec's first ancestor slash. `private` then `!private/` admits the parent and descendants;
 `private/*` then `!private/` admits the parent but denies an immediate child directly matched by the

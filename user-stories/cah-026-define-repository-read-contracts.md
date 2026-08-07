@@ -47,10 +47,15 @@ or dispatch model-callable tools.
   to leaf. Load only `.gitignore` files whose owning directory is still traversable, interpret rules
   relative to that directory, and evaluate each view independently; an ignored ancestor or target in
   either view denies the target.
-- Compile each admitted policy source into file and direct-directory `GitIgnoreSpec` views from the
-  same bounded text. The file view keeps the original lines; the directory view safely removes one
-  semantic trailing slash only from an active retained pattern. Retained count/include identity is
-  verified so an original invalid-range no-op cannot activate. Both match bare labels and skip ancestor-only `ps_d`
+- Normalize each admitted policy line with Git's exact line rules: remove one terminal carriage
+  return, trim only unescaped trailing ASCII spaces, and preserve tabs and Unicode whitespace. Scan
+  that semantic line before PathSpec compilation and fail closed on an unescaped `?`, more than one
+  unescaped `*` per ordinary segment, more than one compiler-effective active nonterminal `**` after
+  trailing-separator handling, or a bracket expression outside the positive ASCII safe subset.
+  Compile file and direct-directory `GitIgnoreSpec` views through the harness adapter that
+  prevents PathSpec's broader trim; the directory view safely removes one semantic trailing slash
+  only from an active retained pattern. Retained count/include identity is verified so an original
+  invalid-range no-op cannot activate. Both match bare labels and skip ancestor-only `ps_d`
   results, so only a direct match may decide the current entry. This preserves global directory
   wildcards such as `*/`, `**/`, and `a/**/` without allowing a parent negation to impersonate a
   descendant match. Reserve file/directory two-form matching for the final leaf.
@@ -116,9 +121,10 @@ or dispatch model-callable tools.
   win; across files, the nearest applicable file is evaluated later. Git-style `!` negation may
   re-include a normally ignored path when its parent traversal is available.
 - Each admitted source supplies a cached pair of kind-specific `GitIgnoreSpec` views, while the policy
-  owns direct-entry and traversal semantics. The file view compiles the original bounded lines. The
-  direct-directory view removes exactly one semantic trailing slash safely, without corrupting
-  escaped/trailing whitespace, converting degenerate slash forms, or transforming an original no-op.
+  owns direct-entry and traversal semantics. Both views compile the same Git-normalized lines, which
+  preserve non-space trailing whitespace; the direct-directory view removes exactly one semantic
+  trailing slash safely, without corrupting escaped/trailing whitespace, converting degenerate slash
+  forms, or transforming an original no-op.
   The derived compile must preserve retained pattern count and include identity. Each view walks proper
   directory ancestors from root to leaf, evaluates each direct entry label with the policy files
   available before entering it, and loads that directory's `.gitignore` only after the directory is
@@ -195,6 +201,16 @@ or dispatch model-callable tools.
   still costs probes. The budget never resets for a subtree or view. Exactly 65,536 probes are
   inclusive; a logical evaluation that would cross the limit fails as `repository_policy_invalid`
   before the harness-owned matcher runs.
+- One pre-compile linear grammar gate also bounds work inside each admitted PathSpec regex. An
+  ordinary slash segment may contain at most one unescaped `*` outside a safe bracket range, and a
+  line may contain at most one compiler-effective nonterminal `**` segment with later content.
+  Unescaped `?` fails because Git counts UTF-8 bytes while Python regex counts Unicode code points.
+  Brackets admit only ASCII alphanumeric members, same-class ascending alphanumeric ranges, and fixed
+  `_`, `*`, `?`, or `.` members; this excludes every observed Git/PathSpec range divergence and any
+  range that could consume `/`. Escaped wildcards, safe-range wildcards, and terminal globstars remain
+  supported. Unsupported syntax
+  fails as `repository_policy_invalid` before either kind compile, cache/byte commit, match-work
+  charge, or matcher call; this is a deliberate safe subset, not a claim to accept every Git pattern.
 - The final ignored decision is non-overridable. No public input, provider argument, configuration,
   or future approval may request `include_ignored`. A hard-denied path can never be re-included by a
   negation rule.
@@ -289,7 +305,7 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 | `repository_source_too_large` | `Repository file exceeds the byte limit.` | an eligible source exceeds 256 KiB |
 | `repository_input_limit` | `Repository request exceeds the input limit.` | a request exceeds an operation's fixed input bound |
 | `repository_result_limit` | `Repository result exceeds the item or byte limit.` | safe bounded completion is not possible |
-| `repository_policy_invalid` | `Repository ignore policy could not be loaded safely.` | an applicable policy source escapes, is hard-denied, dangling, inaccessible, retargeted, non-regular, invalid, oversized, or unreadable |
+| `repository_policy_invalid` | `Repository ignore policy could not be loaded safely.` | an applicable policy source escapes, is hard-denied, dangling, inaccessible, retargeted, non-regular, invalid, outside the bounded matcher grammar, oversized, or unreadable |
 | `repository_read_failed` | `Repository content could not be read.` | another bounded local access fails |
 
 - Direct access to ignored or unavailable targets fails with the table above. Recursive listing and
@@ -302,13 +318,15 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 ## Reviewability budget
 
 - **Estimated production-code churn:** 300-450 changed lines.
-- **Delivered production-code churn:** 703 additions and 0 deletions.
+- **Delivered production-code churn:** 839 additions and 0 deletions.
 - **Counted paths:** `src/code_assist_harness/` additions plus deletions.
 - **Excluded from count:** tests, docs, fixtures, lockfiles, and generated artifacts.
-- **Variance:** direct-entry Git semantics, cumulative match-work admission, and owner/source snapshot
-  hardening raised the unit modestly above the roughly-600 reviewability target. The delivered 703
-  additions still implement one read-admission responsibility; splitting any invariant from the gate
-  that enforces it would weaken reviewability rather than create a separately shippable outcome.
+- **Variance:** direct-entry Git semantics, cumulative and per-pattern match-work admission,
+  Git-exact line normalization, and owner/source snapshot hardening raised the unit above the
+  roughly-600 reviewability target. The delivered 839 additions still implement one read-admission
+  responsibility; the review-driven grammar fixes must precede the same PathSpec side effect, so
+  splitting them from that gate would weaken reviewability rather than create a separately shippable
+  outcome.
 - **Planning PR scope:** One contract neighborhood: CAH-024 canonical paths plus model-facing
   strings -> shared lexical/hard-deny/ignore-policy decision -> CAH-025's pure-primitive use and
   CAH-027 through CAH-030 ordinary-read consumers.
@@ -330,7 +348,7 @@ denylist rule, ignore pattern, raw OS text, or repository content.
    calls from the same normalized components.
 3. Every proper ancestor remains traversable in both views before a leaf negation can take effect.
    Each ancestor is one direct directory entry evaluated against the cached direct-directory
-   `GitIgnoreSpec`; file decisions use the paired original-line view. Both receive bare labels and
+   `GitIgnoreSpec`; file decisions use the paired semantic-line view. Both receive bare labels and
    skip ancestor-only `ps_d` matches. Normal Git ignore
    negation works within each view only under that rule, either view's ignored ancestor or target wins,
    and no cross-view negation, caller override, or pattern can re-include an ignored-in-the-other-view
@@ -360,7 +378,10 @@ denylist rule, ignore pattern, raw OS text, or repository content.
    budget spans every ancestor, lexical/canonical view, final-leaf form, cache hit, and recursive
    descendant in an admission traversal. Each logical evaluation reserves the selected kind-specific
    view's full stored pattern-slot count before invocation; work that would exceed the budget fails
-   before matcher execution under the existing fixed `repository_policy_invalid` result.
+   before matcher execution under the existing fixed `repository_policy_invalid` result. Before
+   PathSpec sees a semantic line, the harness preserves Git-significant trailing whitespace and
+   rejects Unicode-sensitive `?`, backend-divergent bracket syntax, or ambiguous repeated wildcards
+   under the same fixed failure, with no cache, byte, match-work, or matcher effect.
 7. Every model-facing path/query string passes strict Unicode-scalar/UTF-8 round-trip admission
    without Unicode normalization; lone surrogates fail before policy evaluation or any filesystem
    call.
@@ -375,6 +396,8 @@ denylist rule, ignore pattern, raw OS text, or repository content.
 | Direct-entry kind semantics | Evaluate `private` then `!private/` and `private/*` then `!private/` against the direct directory, an immediate child, and a deeper descendant; inspect the paired cached views | Unit | The first pair re-admits the parent and descendants; the second re-admits the parent but denies a child directly matched by `private/*`, so traversal stops. Both views use bare labels and skip ancestor-only `ps_d` matches |
 | Global directory wildcards | Exercise `*/` plus `!foo/`, `**/` plus `!foo/`, and `a/**/` against the re-admitted parent, its directly matched child, and an invalid nested policy below that child | Unit | Safe terminator removal lets each wildcard match the current directory entry rather than PathSpec's first ancestor slash; the child is ignored, traversal stops, and nested policy is not read |
 | Derived-view identity | Compile positive and negated invalid-range no-ops, significant trailing whitespace, escaped spaces, and degenerate slash forms through both kind views | Unit | Original no-ops remain no-ops, retained count/include identity is unchanged, and safe directory transformation neither activates malformed syntax nor changes the intended filename |
+| Git line semantics | Exercise CR/CRLF, unescaped and escaped trailing ASCII spaces, terminal backslash parity, and literal terminal tabs, NBSP, and em space in file and directory patterns | Unit/policy integration | Only Git-ignorable ASCII spaces and one line-ending CR are removed; non-space whitespace stays literal in both kind views and cannot become a false negation |
+| Bounded pattern grammar | Use the reported five-`*` attack, doubled-separator active globstars, Unicode `?` mismatches, slash-spanning/negated/escaped/POSIX bracket bypasses, terminal-globstar controls, escaped wildcards, safe ASCII ranges, and common linear patterns | Unit/policy integration | Unsupported repetition or backend-divergent wildcard/bracket syntax returns exact `repository_policy_invalid` before PathSpec compile or matcher execution and before cache/byte/match-work commit; supported controls retain Git behavior |
 | Relative pattern scope | Repeat a filename inside and outside a nested policy directory | Unit | Nested rule affects only its subtree |
 | Lexical/canonical alias policy | Point a supplied alias at a differently named canonical target; independently ignore only an ancestor or leaf of the alias, only an ancestor or leaf of the target, both, and neither, including an opposing leaf negation | Policy/boundary integration | Either view's ignored ancestor or leaf denies; lexical type-independent denial performs no requested-target resolution, canonical hard/two-form denial precedes kind inspection, the resolved kind selects both views' ambiguous leaf results before requested-content I/O, and neither label nor rule leaks |
 | Result-kind closure | Admit a regular file, directory, direct symlink to each, and an existing special target | Policy/boundary integration | Results contain canonical `file | directory` only, preserve direct-leaf symlink provenance, and map the special target to generic unavailable |
@@ -408,15 +431,22 @@ denylist rule, ignore pattern, raw OS text, or repository content.
   `!private/`. Prove the first pair re-admits the parent and descendants without reapplying the
   already-decided parent match. Prove the second pair admits `private` but denies an immediate child
   directly matched by `private/*`; the negation's ancestor-only match cannot impersonate a direct
-  child match, and traversal prevents deeper policy or content work. Prove the original-line file
+  child match, and traversal prevents deeper policy or content work. Prove the semantic-line file
   view and safely transformed directory view both match bare labels and final-leaf controls select the
   intended kind-specific result.
 - Add global-directory-wildcard regressions for `*/`, `**/`, and `a/**/`. Prove they directly match
   the current directory after safe terminator removal, deny the child below a re-admitted parent, and
   prevent nested policy or requested-content work below that child.
 - Prove positive and negated invalid-range patterns remain no-ops in the derived view, retained
-  pattern count/include identity is unchanged, and whitespace/escaped-space/degenerate-slash controls
-  retain their original meaning.
+  pattern count/include identity is unchanged, and CR, ASCII-space escaping, non-space trailing
+  whitespace, and degenerate-slash controls retain Git's meaning.
+- Reproduce the repeated-`*` backtracking attack without a timing assertion and prove the pattern is
+  rejected before matcher execution. Exercise one versus two local stars, one versus two active
+  globstars, terminal globstars, escaped/range stars, and representative common linear patterns.
+  Reject Unicode-sensitive `?`, recognized/unknown/malformed POSIX classes, negated or escaped ranges,
+  and ranges that can span `/` before PathSpec compilation. Exercise doubled trailing separators that
+  change effective globstar position while positive same-class ASCII ranges, fixed safe range members,
+  comments, and escaped wildcard literals remain supported.
 - Cover root and nested policy candidates that symlink outside the workspace or to `.git/config` and
   `secrets/dev.env`, plus an actually absent entry, an allowed internal-policy-source control, a
   present dangling link, and deterministic disappearance, retarget, directory/special-file, and
@@ -492,7 +522,7 @@ Do not add or revise a presentation.
 | End-to-end contract | CAH-024 boundary plus pure syntax/hard-deny primitives -> pre-resolution lexical ancestor/two-form leaf evaluation -> target resolution -> canonical hard deny -> canonical ancestor/two-form leaf evaluation -> closed kind admission -> select both views -> owner/leaf/source rechecks -> bounded `GitIgnoreSpec` decision -> CAH-027/028/029/030 consumers. CAH-037 owns runtime composition and evaluation wiring. |
 | Failure and atomicity | Lexical type-independent denial performs zero requested-target resolution; canonical hard/two-form denial precedes target kind inspection; kind-selected denial performs zero requested-content I/O; an unsafe policy candidate never attaches rules, enters cache, or consumes budget. Special targets are unavailable. Owner/source mismatch and every policy failure return one fixed error; cancellation/deadline/rollback are N/A inside this synchronous bounded policy decision. |
 | Reachable boundaries | Real dual lexical/canonical walks exercise 65,535/65,536/65,537-byte policy sources, below-limit and exact-65,536 candidate-pattern work followed by a whole-evaluation overflow, 16/17 distinct canonical sources, and the 256-KiB aggregate edge, including shared sources, cache hits, descendants, direct-entry ancestors, and deterministic pre-probe/pre-read retarget and same-label replacement seams. Unicode admission also runs through the pure helper and full policy consumer. |
-| Closed grammar and cardinality | The exact hard-deny table is non-overridable; each admitted policy source compiles one original-line file view and one safely transformed direct-directory view. Both match bare labels and skip ancestor-only `ps_d` results; only the selected view's complete slots are charged per logical evaluation. At most 16 distinct strict-UTF-8/no-NUL sources totaling 256 KiB and 65,536 cumulative candidate-pattern slots are admitted, with exact fixed direct-versus-traversal outcomes and no override field. |
+| Closed grammar and cardinality | The exact hard-deny table is non-overridable; each admitted policy source becomes one Git-normalized semantic line set, passes the bounded wildcard/bracket scanner, and compiles one file view plus one safely transformed direct-directory view. Both match bare labels and skip ancestor-only `ps_d` results; only the selected view's complete slots are charged per logical evaluation. At most 16 distinct strict-UTF-8/no-NUL sources totaling 256 KiB and 65,536 cumulative candidate-pattern slots are admitted, with exact fixed direct-versus-traversal outcomes and no override field. |
 | Artifact parity | Story, lesson, diagram, safety/tool/context docs, and tests use the same order: syntax -> lexical hard deny/direct-entry ancestors/two-form leaf -> boundary resolution -> canonical hard deny/direct-entry ancestors/two-form leaf -> `file | directory` kind -> select both views -> operation checks -> final re-admission, and agree on owner label plus followed identity, source identity, fixed errors, byte/cache/match accounting, and residual races. |
 | Independent lenses | Security/identity review covers aliases, owner/source retargets, same-label owner replacement, symlinks, deny precedence, and cache identity; handoff/composition review covers the CAH-025 primitive consumer and CAH-027-030 full-policy consumers; limits/scheduler review covers exact byte/source/match-work budgets and records provider/protocol/scheduler changes as N/A. |
 
@@ -539,8 +569,9 @@ Do not add or revise a presentation.
   its public failure boundary removes hidden exception context as well as suppressing rendered chains.
 - [`test_repository_access.py`](../tests/test_repository_access.py) exercises pure-helper parity,
   every denylist class, exact direct-entry/two-form Git precedence, lexical/canonical alias
-  disagreement, owner/source mutation seams, policy-source safety, cache identity, shared traversal accounting,
-  non-leaking tracebacks, and below/at/above limits in 155 focused cases. CAH-025 owns the later
+  disagreement, owner/source mutation seams, Git-exact line semantics, bounded pattern grammar,
+  policy-source safety, cache identity, shared traversal accounting, non-leaking tracebacks, and
+  below/at/above limits in the focused suite. CAH-025 owns the later
   control-plane consumer evidence.
 - `pyproject.toml` admits maintained `pathspec>=1.1,<2`, and `uv.lock` resolves PathSpec 1.1.1 without
   adding runtime network behavior.

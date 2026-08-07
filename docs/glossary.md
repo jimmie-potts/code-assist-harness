@@ -331,7 +331,10 @@ filesystem, or subprocess effects.
 The CAH-026 harness-owned decision that combines CAH-024 lexical and containment checks, a
 non-overridable credential/VCS hard denylist, and bounded root-to-nearest Git ignore policy. It
 evaluates proper lexical ancestors through each source's safely transformed direct-directory spec
-and reserves the paired original-file view for file decisions. Both match bare labels and skip
+and reserves the paired Git-semantic file view for file decisions. Git-exact line normalization
+preserves non-space trailing whitespace, and a pre-compile grammar gate rejects Unicode-sensitive
+`?`, brackets outside a positive separator-safe ASCII subset, or ambiguous compiler-effective
+repeated wildcards before state effects. Both views match bare labels and skip
 ancestor-only `ps_d` results; retained count/include checks keep original no-op patterns inert. It
 otherwise resolves, applies canonical hard denial, and repeats those semantics for the canonical
 view. After any type-independent canonical denial, it admits exactly `file` or `directory` and
@@ -339,9 +342,10 @@ selects that kind's decision in both views before requested-content I/O; a speci
 unavailable. The policy's candidate-owner label controls rule scope while the
 contained canonical source controls cache and byte identity. Each owner checkpoint preserves the
 captured canonical label plus followed directory device/inode; this narrows, but cannot eliminate,
-pathname races or inode reuse. One inclusive 65,536 candidate-pattern-slot budget spans both views,
-cache hits, and recursive descendants; each evaluation charges only its selected kind view. Admission
-is a checked snapshot, not durable authorization for later content access.
+pathname races or inode reuse. The grammar bounds repetition within one admitted regex; one inclusive
+65,536 candidate-pattern-slot budget separately spans both views, cache hits, and recursive
+descendants, and each evaluation charges only its selected kind view. Admission is a checked snapshot,
+not durable authorization for later content access.
 
 ## Runtime
 

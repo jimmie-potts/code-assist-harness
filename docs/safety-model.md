@@ -88,10 +88,18 @@ directory device/inode when it admits that directory, then requires both identit
 same-label directory replacements already present at either seam. It does not eliminate mutation
 after the final check, and a filesystem may reuse a device/inode pair.
 
-The read gate compiles each bounded policy source into original-line file rules and a
-direct-directory view with one semantic trailing slash removed safely. It verifies retained pattern
-count and include identity, preserves original no-op patterns so an invalid range cannot activate,
-then matches bare labels while skipping ancestor-only `ps_d` results. Thus `private` then
+The read gate first applies Git's line semantics: one terminal CR and only unescaped trailing ASCII
+spaces are removed, while tabs and Unicode whitespace remain literal. A harness-owned semantic-line
+adapter prevents PathSpec's broader trim. Before either kind compile, one linear scan rejects an
+unescaped `?`, more than one unescaped `*` in an ordinary segment, more than one compiler-effective
+active nonterminal `**` after trailing-separator handling, or a bracket expression outside the
+positive separator-safe ASCII subset. These forms either diverge from Git's bytewise matching in
+PathSpec or can trigger pathological regex backtracking. Rejection precedes cache, byte, match-work,
+and matcher effects.
+The gate then compiles file rules and a direct-directory view with one semantic trailing slash
+removed safely. It verifies retained pattern count and include identity, preserves original no-op
+patterns so an invalid range cannot activate, then matches bare labels while skipping ancestor-only
+`ps_d` results. Thus `private` then
 `!private/` admits that directory and descendants, while `private/*` then `!private/` admits the
 parent but denies an immediate child directly matched by the wildcard. The directory view also lets
 `*/`, `**/`, and `a/**/` directly match the current entry rather than PathSpec's first ancestor
@@ -101,7 +109,9 @@ applies canonical hard denial, repeats direct-entry ancestors and the two-form c
 admits only a regular file or directory and selects that kind's effective result in both views;
 special targets are unavailable. All kind-selected policy work still precedes requested-content I/O.
 
-One cumulative candidate-pattern-slot budget bounds ignore matching across ancestors, lexical and
+The pre-compile subset bounds repetition inside one pattern; valid Git patterns outside that subset
+fail closed until a linear-time matcher can replace the regex backend. One cumulative
+candidate-pattern-slot budget separately bounds ignore matching across ancestors, lexical and
 canonical views, both final-leaf forms, cache hits, and recursive descendants in one admission
 traversal. The harness reserves the selected kind view's complete stored pattern-slot count,
 including no-op slots, before calling its matcher; it does not charge the paired view. Exactly 65,536 is

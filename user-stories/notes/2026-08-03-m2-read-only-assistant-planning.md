@@ -212,7 +212,11 @@ is likely to cross the ceiling.
   credential-bearing files. Ignore rules are evaluated independently against the normalized supplied
   path and its resolved canonical target. Each view walks directory prefixes root-to-leaf, loads a
   nested policy only after its directory admits, and denies when any ancestor or the target remains
-  ignored. Each source compiles paired original-file and safely transformed direct-directory specs.
+  ignored. Each source first receives Git-exact CR/trailing-ASCII-space normalization, preserving
+  literal tabs and Unicode whitespace through a harness-owned PathSpec adapter. A linear grammar
+  gate rejects Unicode-sensitive `?`, brackets outside a positive separator-safe ASCII subset, and
+  ambiguous compiler-effective repeated wildcards before compilation or state commit. Each source
+  then compiles paired file and safely transformed direct-directory specs.
   Both match bare labels and skip ancestor-only `ps_d` results; retained count/include checks keep
   original no-op patterns inert. The directory view preserves direct `*/`, `**/`, and `a/**/`
   decisions. The harness does not let an ancestor-only match decide a descendant:
@@ -221,9 +225,10 @@ is likely to cross the ceiling.
   parent, and a negation in one view cannot re-include a path ignored in the other. The bounded union
   of reachable policy files charges a canonically identical policy input once, while both views still
   attach and evaluate its cached rules at their own owner-relative scopes. Matching uses one inclusive
-  65,536 candidate-pattern-slot budget across both views, cache hits, and recursive descendants; each
-  evaluation charges only the selected kind view, and an over-bound logical evaluation fails as
-  `repository_policy_invalid` before the matcher runs. M2 has no ignored-path override.
+  65,536 candidate-pattern-slot budget across both views, cache hits, and recursive descendants; the
+  grammar separately bounds repetition inside each admitted regex. Each evaluation charges only the
+  selected kind view, and an over-bound logical evaluation fails as `repository_policy_invalid`
+  before the matcher runs. M2 has no ignored-path override.
 - CAH-026 checks every proper lexical ancestor as a kind-aware direct entry and reserves both lexical
   forms for the final leaf, denying pre-resolution only when the effective result is type-independent.
   It otherwise resolves, applies canonical hard denial, repeats direct ancestors and both final-leaf

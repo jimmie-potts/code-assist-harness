@@ -514,17 +514,22 @@ policy source must itself resolve inside the workspace, avoid canonical hard den
 immediate pre-read recheck while its candidate owner still controls rule scope. Both owner seams
 preserve the captured canonical workspace-relative label plus followed directory device/inode;
 same-label replacement and allowed retargets already present at a seam fail, while post-check mutation
-and inode reuse remain residual risks. For ordinary reads, each policy source compiles paired
-original-file and safely transformed direct-directory specs. Both match bare labels and skip
-ancestor-only `ps_d` results; retained count/include checks keep original no-op patterns inert. The
-directory view preserves direct `*/`, `**/`, and `a/**/` decisions. The harness does not let an
+and inode reuse remain residual risks. For ordinary reads, Git-exact CR/trailing-ASCII-space
+normalization feeds a harness-owned PathSpec adapter that preserves literal tabs and Unicode
+whitespace. A linear grammar gate rejects Unicode-sensitive `?`, brackets outside a positive
+separator-safe ASCII subset, and ambiguous repeated wildcards after compiler-effective separator
+handling, before compilation or state commit. Each policy source then compiles paired file and safely
+transformed direct-directory specs. Both match bare labels and skip ancestor-only `ps_d` results;
+retained count/include checks keep original no-op patterns inert. The directory view preserves direct
+`*/`, `**/`, and `a/**/` decisions. The harness does not let an
 ancestor-only match decide a descendant:
 `private/*` then `!private/` admits `private` but still denies its directly matched child. The policy
 denies pre-resolution only when the result is type-independent. It then resolves, applies canonical
 hard denial, and repeats those semantics for the canonical view, so type-independent canonical denial
-also precedes kind inspection. One inclusive 65,536 candidate-pattern-slot budget spans both views,
-cached rules, and recursive descendants; each evaluation charges only the selected kind view, and
-over-bound logical evaluations fail before matcher execution. Only then does the policy admit a
+also precedes kind inspection. The grammar bounds repetition inside an admitted regex; one inclusive
+65,536 candidate-pattern-slot budget separately spans both views, cached rules, and recursive
+descendants. Each evaluation charges only the selected kind view, and over-bound logical evaluations
+fail before matcher execution. Only then does the policy admit a
 regular file or directory and select that kind's decision in both views; special
 targets are unavailable and all kind-selected policy work still precedes requested-content I/O.
 CAH-025 preserves each resolved source separately from the canonical candidate owner to which it
