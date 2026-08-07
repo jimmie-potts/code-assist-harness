@@ -296,10 +296,10 @@ diagram carries the architecture position.
 
 ## Deferred work
 
-- CAH-026 is the next E3 unit and adds shared read contracts plus lexical/hard-deny policy by
-  delegating CAH-024's path grammar. CAH-025 then discovers root and nested repository instructions
-  through those two boundaries.
-- Later native read-tool units add type/ignore/output policy and must call `resolve_existing` again
-  immediately before access.
+- CAH-026 now adds shared read contracts plus lexical/hard-deny policy by delegating CAH-024's path
+  grammar. CAH-025 is next and discovers root and nested repository instructions through those two
+  boundaries.
+- Later native read-tool units add operation-specific file-versus-directory requirements and output
+  bounds, and must re-admit through CAH-026 immediately before access.
 - A later executor-hardening unit may replace snapshot-only containment with descriptor-relative or
   sandbox-enforced access when the threat model justifies its platform and operational cost.

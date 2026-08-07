@@ -52,11 +52,12 @@ calls, or decide which files belong in model context.
 - Non-recursive listing examines direct children only, regardless of the stored `max_depth` default.
   Recursive depth counts direct children as level 1 and never descends below the requested level.
 - `ListFilesResult` contains the content-suppressed `canonical_request_scope`, an immutable tuple of
-  entries, `truncated`, `visited_items`, and aggregate counts for descendants omitted as ignored,
-  unavailable, or unsupported. The scope is the canonical workspace-relative directory used by the
-  final access-time admission for this listing, including an empty listing; it is not recomputed from
-  the supplied alias after return. The result never lists omitted labels or the policy rule that
-  caused omission.
+  entries, `truncated`, `visited_items`, `ignored_items`, and `unavailable_items`. The scope is the
+  canonical workspace-relative directory used by the final access-time admission for this listing,
+  including an empty listing; it is not recomputed from the supplied alias after return. The result
+  never lists omitted labels or the policy rule that caused omission. Special filesystem objects use
+  the unavailable aggregate because CAH-026 deliberately exposes one generic unavailable decision
+  for unsupported type, containment, hard denial, and staleness rather than a reason oracle.
 - Each entry contains the canonical workspace-relative POSIX `path`, `kind` (`file` or `directory`),
   and `is_symlink`. A regular file also carries non-negative `size_bytes`; a directory carries
   `None`. Modification times, owners, permission bits, inode/device values, and absolute paths are
@@ -83,7 +84,8 @@ calls, or decide which files belong in model context.
   adding or descending into each candidate. There is no `include_ignored`, hidden-file override, or
   provider-controlled policy argument.
 - Hidden names are otherwise ordinary repository entries. Special filesystem objects such as FIFO,
-  socket, block, and character devices are omitted as unsupported and are never opened.
+  socket, block, and character devices are omitted as unavailable and are never opened. Traversal
+  does not re-inspect a generic CAH-026 failure to infer or expose its underlying reason.
 - Internal file and directory symlinks may be reported after canonical containment and policy
   checks. Recursive listing never descends through a directory symlink, preventing cycles and
   alias-driven expansion; a direct request whose path is an internal directory symlink may list its
@@ -165,7 +167,7 @@ calls, or decide which files belong in model context.
 | Depth behavior | Build a tree beyond levels 1, 4, and 8 | Unit | Exact direct and recursive membership at each boundary |
 | Item behavior | Request 199/200/201 and 499/500/501 available items | Unit | Exact count and explicit `truncated`; above-hard input rejected |
 | Ignore and denial | Combine nested ignores, an ignored parent with a negated child, the traversable-parent control, VCS/credential paths, and direct requests | Policy integration | The ignored parent is pruned before descent despite the leaf negation; otherwise omitted aggregate counts or fixed direct errors reveal no label |
-| Symlink and special files | Add internal/escaping/cyclic links plus FIFO where supported | Boundary integration | Internal entries safe, no directory-link recursion, unsafe objects omitted |
+| Symlink and special files | Add internal/escaping/cyclic links plus FIFO where supported | Boundary integration | Internal entries safe, no directory-link recursion, unsafe and special objects counted only as unavailable |
 | Traversal hard stop | Generate 10,000 and 10,001 visited children | Unit | Completion at limit and fixed `repository_result_limit` above |
 
 ## Validation

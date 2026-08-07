@@ -60,15 +60,20 @@ Responses adapter and explicit launch selection without changing protocol v1. CA
 immutable Python workspace boundary and makes runtime startup retain that validated boundary. It
 strictly bounds model-facing relative path spellings, resolves existing targets to canonical
 workspace-relative labels, rejects symlink escapes, and detects observable root replacement. It reads
-only path metadata needed for that snapshot; repository-content discovery and reads, tool execution,
-policy, and broader multi-turn agent behavior remain unimplemented.
+only path metadata needed for that snapshot. CAH-026 now layers one harness-owned repository-read
+gate on it: non-overridable credential/VCS denial, bounded root-to-nearest Git ignore policy, dual
+lexical/canonical evaluation, safe fixed failures, and canonical `file | directory` results. The gate
+reads only applicable bounded policy files; repository-content discovery and user-requested reads,
+tool execution, and broader multi-turn agent behavior remain unimplemented. CAH-037 will compose the
+policy per session after the actual read services exist.
 
 The original LangChain-based direction has been superseded. The project will own its agent loop
 directly. LangChain may be considered later as an adapter, but it is not the MVP orchestrator and
 core domain types must not depend on it.
 
 The superseded LangChain packages have been removed from Python project metadata and `uv.lock`.
-Pydantic v2 is the Python runtime's first boundary-validation dependency. The TUI's Ink, React,
+Pydantic v2 owns runtime boundary models, and PathSpec supplies maintained Git-compatible ignore
+matching under the harness-owned traversal, hard-deny, and source-safety rules. The TUI's Ink, React,
 Zod, and development dependencies are kept separately in `tui/package.json` and its committed npm
 lockfile.
 

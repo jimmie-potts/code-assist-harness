@@ -219,11 +219,42 @@ bounded read. Missing candidates are normal; escaping, hard-denied, dangling, no
 unreadable candidates fail with the fixed ignore-policy error without reading or charging content.
 An admitted internal symlink keeps the candidate owner as rule scope while its canonical source owns
 cache identity and byte accounting.
-Capture each lexical/canonical view owner's canonical directory when that directory is admitted.
-Re-admit the owner immediately before the non-following `.gitignore` probe and again before a
-cache-miss read; a persistent allowed-to-allowed retarget at either seam fails before replacement
-leaf work. Cache hits still require current owner/leaf/source admission before attaching cached rules.
-These pathname snapshots narrow but do not eliminate mutation races after the final check.
+Capture each lexical/canonical view owner's canonical workspace-relative label and followed
+directory device/inode when that directory is admitted. Re-admit the owner immediately before the
+non-following `.gitignore` probe and again before a cache-miss read. At both seams require the same
+captured label and identity; a persistent retarget or replacement
+fails before replacement leaf work. Cache hits still require current owner/leaf/source admission
+before attaching cached rules. Device/inode reuse and mutation after the final check remain possible;
+these pathname snapshots narrow races rather than eliminating them.
+Normalize every admitted policy line once using Git's line grammar: remove one terminal carriage
+return, trim only a final run of unescaped ASCII spaces, and preserve tabs and Unicode whitespace.
+Compile two kind-specific `GitIgnoreSpec` views through the harness-owned semantic-line adapter so
+PathSpec cannot apply its broader whitespace trim. The direct-directory view safely removes one
+semantic trailing slash while leaving degenerate slash forms unchanged. Transform only a retained
+pattern whose original `include` is not `None`; require retained count plus pattern/include identity
+after the derived compile so an invalid range or other original no-op cannot activate.
+Before either compile, scan the normalized line once and fail closed on an unescaped `?`, more than
+one unescaped `*` in an ordinary slash segment, more than one compiler-effective nonterminal `**`
+segment with later content, or a bracket expression outside the positive ASCII safe subset. That
+subset admits ASCII alphanumeric members, same-class ascending digit/uppercase/lowercase ranges, and
+fixed `_`, `*`, `?`, or `.` members; it rejects negation, backslashes, colons, nested/leading brackets,
+Unicode, literal hyphens, and mixed/descending ranges so Python regex cannot cross `/` or diverge from
+Git's bytewise wildcard semantics. The globstar check accounts for trailing and doubled separators
+before either kind compile. Escaped stars/question marks and safe-range stars/question marks are
+fixed literals; a terminal `**` is not an active cross-directory repeat. This deliberately
+rejects valid Git patterns outside the bounded PathSpec subset as `repository_policy_invalid` before
+cache, byte, match-work, or matcher effects. Both views match the bare relative label and discard `ps_d`
+ancestor-only matches. This lets `*/`, `**/`, and `a/**/` match the current directory entry instead
+of PathSpec's first ancestor slash. `private` then `!private/` admits the parent and descendants;
+`private/*` then `!private/` admits the parent but denies an immediate child directly matched by the
+wildcard, because `!private/` cannot impersonate that direct child match.
+Reserve file/directory two-form matching for the final leaf until its contained type is known. Bound
+all ignore matching with one cumulative 65,536 candidate-pattern-slot budget per admission traversal.
+For each logical evaluation, charge the selected kind-specific view's complete stored pattern-slot
+count, including no-op slots, across ancestors, lexical and canonical views, both final-leaf forms,
+shared cached policies, and recursive descendant admissions. Cache hits avoid content I/O, not match
+work. Exactly 65,536 is inclusive; fail with the fixed `repository_policy_invalid` result before an
+evaluation that would exceed it.
 
 Represent subprocesses as argument arrays and never use `shell=True`. Built-in policy supplies the
 initial candidates, user configuration may broaden or narrow them, and workspace configuration may

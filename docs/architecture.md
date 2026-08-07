@@ -42,11 +42,12 @@ an exact-model foreground OpenAI Responses adapter, explicit TUI/Python composit
 SDK-fake coverage, and an opt-in live smoke. The launch still defaults to the deterministic mock and
 protocol v1 is unchanged. CAH-024 adds the first M2 component: one immutable workspace boundary,
 shared bounded path grammar, contained canonical snapshots, and runtime delegation without a protocol
-change. The remaining 15 dependency-ordered M2 stories are implementation-ready and planned. They
-proceed from CAH-026 repository policy and CAH-025 instruction boundaries through native
+change. CAH-026 now adds bounded dual-view ignore policy, hard denial, safe failures, and closed
+file/directory admission. The remaining 14 dependency-ordered M2 stories are implementation-ready
+and planned. They proceed from CAH-025 instruction discovery through native
 reads, attributable context, a typed read registry, provider-neutral function calling, atomic
 tool-aware response admission, a bounded iterative loop, strict OpenAI mapping, and deterministic
-evaluation. CAH-026 is the next dependency checkpoint. Approval, writes, subprocesses, remote MCP,
+evaluation. CAH-025 is the next dependency checkpoint. Approval, writes, subprocesses, remote MCP,
 and richer tool UI remain target
 architecture for later milestones.
 
@@ -231,7 +232,8 @@ dependency-resolution changes commit `uv.lock`.
 | Session lifecycle and terminal outcome | Python runtime | A session emits exactly one terminal event. |
 | Agent turns, stopping, and limits | Python agent loop | The project owns the loop rather than delegating it to a framework. |
 | Workspace path containment | Python workspace boundary | Implemented in CAH-024: one pure 4,095-byte/256-component/255-byte-name lexical gate feeds an immutable canonical root that resolves contained, workspace-relative snapshots; later tools delegate the gate and recheck at access time. |
-| Context selection | Python context subsystem | Planned in CAH-026, CAH-025, then CAH-027 through CAH-030: context items retain source separately from candidate-owner applicability, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
+| Repository read admission | Python policy subsystem | Implemented in CAH-026: one non-overridable hard-deny and dual-view GitIgnoreSpec gate admits only canonical regular-file/directory labels and keeps policy-owner scope separate from source/cache identity. |
+| Context selection | Python context subsystem | Planned in CAH-025, then CAH-027 through CAH-030: context items retain source separately from candidate-owner applicability, inclusion reason, and deterministic budget cost; later instruction enrichment is atomic. |
 | Tool validation and execution policy | Python tool and safety subsystems | CAH-031 plans the read-only registry kernel and typed instruction-scope metadata for the native execution-time canonical request scope and returned-path owners; the model, provider, MCP adapter, and TUI cannot authorize a tool. |
 | Provider translation | Provider adapter | Provider SDK objects do not cross this boundary. |
 | Durable audit record | Python persistence subsystem | Redacted trusted lifecycle inputs and explicitly typed non-lifecycle evidence are persisted after admission. |
@@ -248,6 +250,7 @@ The implemented Python boundary is separated from later domain subsystems:
 src/code_assist_harness/
 ├── runtime.py          Command loop, active-session routing, cancellation, and shutdown
 ├── workspace.py        Immutable root, bounded path grammar, and contained canonical snapshots
+├── repository_access.py Pure helpers, read limits, and the dual-view ignore-policy gate
 ├── mock_session.py     Fixed response, cooperative checkpoints, reducer integration, and terminals
 ├── loop_limits.py      Immutable hard limits, per-session counters, and bounded observations
 ├── model_evidence.py   Bounded transcript-only provider usage evidence
@@ -273,7 +276,9 @@ through harness-owned values. `runtime.py` retains the exact CAH-024 `WorkspaceB
 startup while keeping the mock default; an explicit validated OpenAI selection lazily imports the
 concrete adapter and supplies the CAH-022 safety budget to `ProviderSessionRunner`. Future `core/`,
 `context/`, `tools/`, and `safety/` paths remain conceptual and will be introduced only by their
-owning stories.
+owning stories. `repository_access.py` is a reusable contract rather than dead runtime state;
+CAH-037's sole M2 composition factory will create its per-session policy after the read services
+exist and pass that exact identity to them.
 
 The implemented TypeScript parent keeps protocol validation separate from React components:
 
@@ -506,8 +511,29 @@ evidence. CAH-024 owns the sole pure path grammar and inclusive 4,095-byte,
 errors, and adds the pure hard-deny helper reused by CAH-025 even though instruction
 candidates are exempt from `.gitignore`; ordinary-read limits and errors are not. A present ignore
 policy source must itself resolve inside the workspace, avoid canonical hard denial, and survive an
-immediate pre-read recheck while its candidate owner still controls rule scope. CAH-025 preserves each
-resolved source separately from the canonical candidate owner to which it applies. CAH-030 initially
+immediate pre-read recheck while its candidate owner still controls rule scope. Both owner seams
+preserve the captured canonical workspace-relative label plus followed directory device/inode;
+same-label replacement and allowed retargets already present at a seam fail, while post-check mutation
+and inode reuse remain residual risks. For ordinary reads, Git-exact CR/trailing-ASCII-space
+normalization feeds a harness-owned PathSpec adapter that preserves literal tabs and Unicode
+whitespace. A linear grammar gate rejects Unicode-sensitive `?`, brackets outside a positive
+separator-safe ASCII subset, and ambiguous repeated wildcards after compiler-effective separator
+handling, before compilation or state commit. Each policy source then compiles paired file and safely
+transformed direct-directory specs. Both match bare labels and skip ancestor-only `ps_d` results;
+retained count/include checks keep original no-op patterns inert. The directory view preserves direct
+`*/`, `**/`, and `a/**/` decisions. The harness does not let an
+ancestor-only match decide a descendant:
+`private/*` then `!private/` admits `private` but still denies its directly matched child. The policy
+denies pre-resolution only when the result is type-independent. It then resolves, applies canonical
+hard denial, and repeats those semantics for the canonical view, so type-independent canonical denial
+also precedes kind inspection. The grammar bounds repetition inside an admitted regex; one inclusive
+65,536 candidate-pattern-slot budget separately spans both views, cached rules, and recursive
+descendants. Each evaluation charges only the selected kind view, and over-bound logical evaluations
+fail before matcher execution. Only then does the policy admit a
+regular file or directory and select that kind's decision in both views; special
+targets are unavailable and all kind-selected policy work still precedes requested-content I/O.
+CAH-025 preserves each resolved source separately from the canonical candidate owner to which it
+applies. CAH-030 initially
 unions required instruction bindings for the supplied scope, all explicit focus paths, and every
 first-occurrence search-match owner before admitting their content. Searches remain rooted only at
 the exact supplied scope. Later enrichment admits every required owner bundle atomically without

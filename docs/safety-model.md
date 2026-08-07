@@ -2,8 +2,9 @@
 
 > Status: proposed overall MVP design with implemented incremental controls. CAH-022 hard-bounds the
 > provider-session path, CAH-023 makes that path available only through explicit, validated OpenAI
-> selection, and CAH-024 implements the first M2 workspace boundary. The remaining 15 M2 stories are
-> planned. The launch still defaults to `MockSession`; this is not a sandbox or a claim that untrusted
+> selection, CAH-024 implements the first M2 workspace boundary, and CAH-026 implements shared read
+> admission. The remaining 14 M2 stories are planned. The launch still defaults to `MockSession`;
+> this is not a sandbox or a claim that untrusted
 > code can be executed safely.
 
 Code Assist Harness places a model between a user and a local repository. Model output and
@@ -75,16 +76,47 @@ are harness budgets rather than claims about `PATH_MAX`, `NAME_MAX`, or DrvFS be
 That implemented snapshot check is necessary but not execution-time authorization. Path checks must be
 repeated when a later tool accesses a target because files and symlinks can change after validation
 or a proposal. Edit operations also use content-hash or exact-content preconditions. A stale
-proposal returns a conflict and never overwrites newer content. CAH-026 plans the non-overridable
+proposal returns a conflict and never overwrites newer content. CAH-026 implements the non-overridable
 deny/ignore policy, and CAH-027 through CAH-029 require access-time re-admission for listing, reads,
 and search. Their tests cover missing descendants under symlinks and observable replacement races in
 addition to the CAH-024 containment matrix.
 
 CAH-026 applies the same pathname-snapshot discipline inside ignore evaluation. Each lexical and
-canonical view captures a candidate owner's canonical directory when it admits that directory, then
-requires the owner label to resolve identically before probing `.gitignore` and before a cache-miss
-read. This blocks deterministic persistent allowed-to-allowed owner retargets at those seams, but it
-does not eliminate mutation after the final check.
+canonical view captures a candidate owner's canonical workspace-relative label plus followed
+directory device/inode when it admits that directory, then requires both identities before probing
+`.gitignore` and before a cache-miss read. This blocks deterministic allowed-to-allowed retargets and
+same-label directory replacements already present at either seam. It does not eliminate mutation
+after the final check, and a filesystem may reuse a device/inode pair.
+
+The read gate first applies Git's line semantics: one terminal CR and only unescaped trailing ASCII
+spaces are removed, while tabs and Unicode whitespace remain literal. A harness-owned semantic-line
+adapter prevents PathSpec's broader trim. Before either kind compile, one linear scan rejects an
+unescaped `?`, more than one unescaped `*` in an ordinary segment, more than one compiler-effective
+active nonterminal `**` after trailing-separator handling, or a bracket expression outside the
+positive separator-safe ASCII subset. These forms either diverge from Git's bytewise matching in
+PathSpec or can trigger pathological regex backtracking. Rejection precedes cache, byte, match-work,
+and matcher effects.
+The gate then compiles file rules and a direct-directory view with one semantic trailing slash
+removed safely. It verifies retained pattern count and include identity, preserves original no-op
+patterns so an invalid range cannot activate, then matches bare labels while skipping ancestor-only
+`ps_d` results. Thus `private` then
+`!private/` admits that directory and descendants, while `private/*` then `!private/` admits the
+parent but denies an immediate child directly matched by the wildcard. The directory view also lets
+`*/`, `**/`, and `a/**/` directly match the current entry rather than PathSpec's first ancestor
+slash. Only the final lexical leaf uses both kind views. An ignored ancestor or
+type-independent leaf denial wins before requested-target resolution. Otherwise the gate resolves,
+applies canonical hard denial, repeats direct-entry ancestors and the two-form canonical leaf, then
+admits only a regular file or directory and selects that kind's effective result in both views;
+special targets are unavailable. All kind-selected policy work still precedes requested-content I/O.
+
+The pre-compile subset bounds repetition inside one pattern; valid Git patterns outside that subset
+fail closed until a linear-time matcher can replace the regex backend. One cumulative
+candidate-pattern-slot budget separately bounds ignore matching across ancestors, lexical and
+canonical views, both final-leaf forms, cache hits, and recursive descendants in one admission
+traversal. The harness reserves the selected kind view's complete stored pattern-slot count,
+including no-op slots, before calling its matcher; it does not charge the paired view. Exactly 65,536 is
+inclusive; an evaluation that would exceed it fails first with `repository_policy_invalid`. Cache
+reuse avoids policy content I/O, not matching work.
 
 The host filesystem still has race conditions that path checks alone cannot eliminate. The design
 should prefer descriptor-relative or atomic operations where practical and document residual risk.
@@ -145,8 +177,9 @@ barrier task is cancelled and reaped, and the required provider force-reap hook 
 every provider-owned local cleanup or SDK task without shielding. `provider_cleanup_failed` is emitted
 at most once without replacing the selected terminal outcome. No local provider task remains after
 force-reap, but resource release stays unconfirmed: this requires cancellation-responsive provider
-code and does not prove remote cleanup succeeded. File-size, search-result, provider-request, and
-multi-turn bounds are refined in CAH-026 through CAH-036 but remain unimplemented; command-duration
+code and does not prove remote cleanup succeeded. CAH-026 now enforces ignore-policy source count,
+byte, type, and text bounds and publishes the later read/context constants. User-source file size,
+search-result, provider-request, and multi-turn bounds remain work for CAH-027 through CAH-036; command-duration
 and side-effecting tool limits remain later controls.
 
 CAH-023 adds a narrower provider-network boundary, not a network tool. TypeScript and Python both
@@ -265,7 +298,7 @@ CAH-024 introduces the immutable Python boundary and deterministic containment t
 bounded resolution and filesystem metadata checks, but it does not read repository content,
 authorize a later access, or eliminate time-of-check-to-time-of-use races.
 
-### Planned CAH-026 through CAH-029 — Recheck workspace targets at read execution
+### Implemented CAH-026 and planned CAH-027 through CAH-029 — Recheck workspace targets at read execution
 
 > As a user, I want containment, symlinks, deny/ignore policy, type, and bounds rechecked at read time
 > so that a prior path snapshot cannot silently authorize changed content.
@@ -275,18 +308,24 @@ policy and exposes pure lexical-path admission plus its exact hard-deny table. E
 `.gitignore` candidate preserves its view-relative owner label for rule scope, but its source resolves
 through `WorkspaceBoundary`, passes canonical hard denial, and is re-resolved and rechecked
 immediately before a bounded cache-miss read. When either ignore view admits an owner directory, it
-captures the canonical owner. It re-admits the owner label immediately before the non-following leaf
-probe and again before any cache-miss read; a persistent `owner A -> allowed B` mutation fails as
-`repository_policy_invalid` before B's leaf is resolved or read and cannot attach B rules at A scope.
+captures its canonical workspace-relative label plus followed directory device/inode. It re-admits
+both identities immediately before the non-following leaf probe and again before any cache-miss read;
+an `owner A -> allowed B` retarget or same-label replacement already present at either seam fails as
+`repository_policy_invalid` before replacement-leaf work and cannot attach replacement rules at the
+captured scope.
 On a cache hit, owner re-admission plus current leaf/source resolution still precedes owner-relative
 attachment, while content is neither read nor newly charged. Escaping, hard-denied, dangling,
 inaccessible, retargeted, or non-regular sources fail under the same fixed error without reading
 requested content and are not opened, cached, or charged. An admitted internal leaf symlink remains
 owner-relative and a shared canonical source is read and charged once. These checks leave the stated
-pathname race after the final seam. CAH-025 reuses the same pre-I/O decisions for supplied and
-canonical scope plus each resolved instruction source, while its control-plane `AGENTS.md` candidates
-remain exempt only from `.gitignore`. It preserves the canonical
-candidate owner as `applies_to` even when a leaf symlink resolves to another source directory. The
+pathname race after the final seam and cannot prevent device/inode reuse. Proper ancestors use the
+paired rules' direct-directory view in both path-name views; both kind views match bare labels and
+skip ancestor-only results, and only the final leaf evaluates both. One inclusive 65,536
+candidate-pattern-slot budget spans views, cache hits, and recursive descendants; an over-bound
+logical evaluation fails before the matcher runs. CAH-025 reuses the same pre-I/O decisions for
+supplied and canonical scope plus each resolved instruction source, while its control-plane
+`AGENTS.md` candidates remain exempt only from `.gitignore`. It preserves the canonical candidate
+owner as `applies_to` even when a leaf symlink resolves to another source directory. The
 owner label itself is re-admitted immediately before the non-following leaf probe and again before
 content read; a persistent disappearance or `owner A -> allowed B` retarget already present at either
 checked seam fails before that seam's replacement-leaf work. A leaf-only recheck is not evidence that
@@ -299,6 +338,10 @@ so a symlink alias cannot bypass policy on either name. [CAH-027](../user-storie
 [CAH-029](../user-stories/cah-029-search-repository-text.md) reuse it immediately before access and
 return only fixed safe failures or bounded workspace-relative results. Edit-target preconditions
 remain M3 work.
+
+CAH-026 adds the reusable policy contract but no dead runtime wiring. CAH-037's sole M2 composition
+factory creates the per-session policy and passes that exact identity to the read services once they
+exist.
 
 ### Planned CAH-031 through CAH-039 — Keep tool authority in the harness
 
